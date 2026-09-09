@@ -558,7 +558,17 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("cl
   b.setAttribute("aria-selected", "true");
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
   $("p-" + b.dataset.p).classList.add("on"); hideTT(); window.scrollTo(0, 0);
+  paintNowPill();          /* appear or disappear straight away, not a second later */
 }));
+
+/* the pill's own controls just drive the real timer buttons */
+$("np-go").addEventListener("click", goToTimer);
+$("np-pause").addEventListener("click", () => {
+  if (!localTimer) return;
+  (localTimer.running ? $("tm-pause") : $("tm-start")).click();
+  paintNowPill();
+});
+$("np-stop").addEventListener("click", () => { goToTimer(); $("tm-stop").click(); });
 $("rangechips").querySelectorAll("[data-r]").forEach(b => b.addEventListener("click", () => {
   $("rangechips").querySelectorAll("[data-r]").forEach(x => x.setAttribute("aria-pressed", "false"));
   b.setAttribute("aria-pressed", "true"); RANGE = +b.dataset.r; renderCrew();
@@ -626,6 +636,14 @@ function hms(ms) {
   const s = Math.floor(ms / 1000);
   return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map(pad).join(":");
 }
+/* Short form for the tab title and the pill: seconds always visible, hours only
+   once there are some. Ticks every second either way. */
+function shortTime(ms) {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600), m = Math.floor(total / 60) % 60, sec = total % 60;
+  return h ? h + ":" + pad(m) + ":" + pad(sec) : pad(m) + ":" + pad(sec);
+}
+
 function paintTimer() {
   const t = localTimer, d = $("tdisp");
   d.textContent = hms(elapsedMs());
@@ -636,8 +654,35 @@ function paintTimer() {
   $("tm-stop").disabled   = !t;
   $("tm-cancel").disabled = !t;
   $("tsub").textContent = t ? (t.label + (t.running ? "" : " · paused")) : "Nothing running";
-  document.title = (t && t.running ? "▶ " + hms(elapsedMs()).slice(0, 5) + " — " : "") + "Study Track";
+  document.title = t ? (t.running ? "▶ " : "❚❚ ") + shortTime(elapsedMs()) + " · Study Track"
+                     : "Study Track";
+  paintNowPill();
   paintLive();
+}
+
+/* ---------------------------------------------------------------------------
+   The pill that follows you around the app while a session runs. It stays out
+   of the way on Today, where the real timer is already on screen.
+   --------------------------------------------------------------------------- */
+function paintNowPill() {
+  const el = $("nowpill");
+  if (!el) return;
+  const t = localTimer;
+  const onHome = $("p-home") && $("p-home").classList.contains("on");
+  const show = !!t && !onHome;
+  if (el.hidden === show) el.hidden = !show;   /* only touch it when it changes */
+  if (!show) return;
+  $("np-time").textContent = shortTime(elapsedMs());
+  $("np-label").textContent = t.label || "studying";
+  $("np-pause").textContent = t.running ? "Pause" : "Resume";
+  el.classList.toggle("paused", !t.running);
+}
+
+function goToTimer() {
+  const tab = document.querySelector('nav.tabs button[data-p="home"]');
+  if (tab) tab.click();
+  const card = $("tm-start") && $("tm-start").closest(".card");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 /* One clock for the whole app, started once and never stopped. It runs whether
    or not you have a timer going, because other people's clocks have to tick too.

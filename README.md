@@ -128,6 +128,15 @@ described what anyone actually did, so **write it in the note instead** — "Sec
 time, 33/40, marketing was the weak one" is worth more than any dropdown, and the whole crew
 can read it.
 
+### While a session is running
+The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
+tells you where you are up to without switching to it. It shows `❚❚` while paused.
+
+Move to any other tab in the app and a pill appears in the bottom corner with the running
+clock, what you are working on, and **Resume/Pause** and **Finish** next to it. Click the
+clock itself to jump back to the timer. It stays out of your way on Today, where the real
+timer is already on screen.
+
 ### The timer
 Pick what you are working on and press start. It records real elapsed time, survives closing
 the tab, and appears on everyone else's **Studying right now** strip the moment it starts.
