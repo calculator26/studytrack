@@ -280,21 +280,21 @@
     <div class="grid g2 mb16">
       <div class="card">
         <header><h2>The race</h2><div class="sub">Cumulative hours over the selected range</div></header>
-        <div class="body"><svg id="race" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
+        <div class="body scrollx"><svg id="race" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
       </div>
       <div class="card">
         <header><h2>Daily output</h2><div class="sub">Every day in the range, stacked by member</div></header>
-        <div class="body"><svg id="stack" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
+        <div class="body scrollx"><svg id="stack" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
       </div>
     </div>
 
     <div class="card mb16">
       <header>
         <div><h2>Head to head</h2><div class="sub">Pick any two people and put their numbers side by side</div></div>
-        <div class="controls">
-          <select id="h2h-a" style="width:auto;min-width:150px"></select>
-          <span style="color:var(--ink-soft);font-size:12.5px">vs</span>
-          <select id="h2h-b" style="width:auto;min-width:150px"></select>
+        <div class="controls h2hpick">
+          <select id="h2h-a"></select>
+          <span class="vs">vs</span>
+          <select id="h2h-b"></select>
         </div>
       </header>
       <div class="body"><div id="h2h"></div></div>
@@ -318,7 +318,7 @@
     <div class="card mb16">
       <header><div><h2>Your chain</h2><div class="sub">Colour is how much of that day's goal you hit. Click a day to log it.</div></div></header>
       <div class="body">
-        <div style="display:grid;grid-template-columns:660px 1fr;gap:28px;align-items:start" id="chainwrap">
+        <div class="chainwrap" id="chainwrap">
           <div>
             <div class="cal" id="calhead"></div>
             <div class="cal" id="heat" style="margin-top:5px"></div>

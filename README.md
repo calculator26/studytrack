@@ -75,6 +75,15 @@ Finally, back in Supabase under **Authentication → URL Configuration**, add th
 
 ## How it works
 
+### On a phone
+The whole thing is built to work on a phone, not just survive one. The masthead collapses to
+a single row — mark, live count, your avatar — with the tabs beneath it. Forms stack to one
+column, every field is 16px so iOS does not zoom the page when you tap into it, and buttons
+are a proper thumb size. The leaderboard drops to the columns that decide something and
+scrolls sideways for the rest; the two wide charts scroll rather than shrinking their labels
+into nothing. Modals become bottom sheets. **Sign out moves into your own profile** — tap
+your avatar top right.
+
 ### The header
 The mark, the group name, and a live count of **who is on the track right now** — anyone
 running a timer shows up as a bubble, you included, with a pulsing dot and their elapsed time

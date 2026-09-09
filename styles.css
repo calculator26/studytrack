@@ -142,6 +142,11 @@ main{padding:26px 0 80px}
 .card>header .sub{font-size:12.5px;color:var(--ink-soft);font-weight:400;max-width:74ch;margin-top:2px}
 .card .body{padding:20px}
 .grid{display:grid;gap:16px}
+/* Grid and flex children default to min-width:auto, so anything with a wide
+   child (a scrolling chart, a wide table) refuses to shrink and pushes the
+   whole page sideways. This is the fix for that entire class of bug. */
+.grid>*{min-width:0}
+.tblwrap,.scrollx{min-width:0}
 .g4{grid-template-columns:repeat(4,1fr)}
 .g3{grid-template-columns:repeat(3,1fr)}
 .g2{grid-template-columns:repeat(2,1fr)}
@@ -457,7 +462,6 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
   .wrap{padding:0 18px}
 }
 @media (max-width:760px){
-  .nowbar{display:none !important}
   .mast{gap:12px}
   .brandtext p{display:none}
 }
@@ -526,4 +530,188 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
   .nowpill{right:12px;left:12px;bottom:14px;max-width:none}
   .np-label{display:none}
   .toast{bottom:78px}
+}
+
+/* =========================================================================
+   THE CHAIN / HEATMAP LAYOUT
+   Was an inline 660px column, which forced the whole page to scroll sideways
+   on anything narrower than a laptop.
+   ========================================================================= */
+.chainwrap{display:grid;grid-template-columns:minmax(0,660px) 1fr;gap:28px;align-items:start}
+.h2hpick select{width:auto;min-width:150px}
+.h2hpick .vs{color:var(--ink-soft);font-size:12.5px}
+.scrollx{overflow-x:auto}
+
+/* =========================================================================
+   TOUCH DEVICES
+   Hover effects that move things are unpleasant when they latch on tap.
+   ========================================================================= */
+@media (hover:none){
+  .card:hover,.kpi:hover,.livecard:hover{box-shadow:var(--sh-1);transform:none}
+  .kpi:hover::before{opacity:0}
+  .hmcell:hover{transform:none;box-shadow:none}
+  .pod.person:hover,.nowav:hover{transform:none}
+  .who.person:hover{background:transparent}
+  .who.person:active{background:rgba(232,64,42,.10)}
+  .btn:hover{box-shadow:none}
+}
+
+/* =========================================================================
+   PHONES AND SMALL TABLETS
+   ========================================================================= */
+@media (max-width:860px){
+  /* iOS zooms the page when you focus anything under 16px. Everything the
+     thumb lands in gets bumped; the labels above them stay small. */
+  /* !important because several of these carry an inline font-size from the
+     markup that generates them, and anything under 16px makes iOS zoom the
+     whole page the moment you tap into it. */
+  select,input[type=text],input[type=email],input[type=password],
+  input[type=number],input[type=date],textarea{font-size:16px !important;padding:11px 13px}
+  select{padding-right:36px}
+  button.btn{padding:11px 18px;min-height:44px}
+  button.btn.sm{padding:9px 13px;min-height:38px}
+  .chip{padding:9px 15px;min-height:38px}
+  .x{padding:8px 10px;font-size:18px}
+}
+
+@media (max-width:760px){
+  .chainwrap{grid-template-columns:1fr;gap:22px}
+  .cal{max-width:none}
+  /* the live count comes back, just without the word */
+  .nowbar{display:none}
+  .nowbar.on{display:flex;padding:4px 10px 4px 9px;gap:7px}
+  .nowword{display:none}
+  .nowlabel b{font-size:12px;font-weight:700;color:#fff}
+}
+
+@media (max-width:640px){
+  .wrap{padding:0 14px}
+  main{padding:18px 0 96px}          /* room for the session pill */
+  .card .body{padding:16px}
+  .card>header{padding:14px 16px 12px}
+  .grid{gap:12px}
+  .mb16{margin-bottom:12px}
+
+  /* ---- header: one row for the brand and the controls, one for the tabs ---- */
+  header.top{padding:10px 0 0}
+  .mast{flex-wrap:nowrap;gap:10px}
+  .brand{gap:9px;flex:1 1 auto;min-width:0}
+  .logo{width:30px;height:30px;border-radius:9px}
+  /* never let the wordmark wrap when the live bubble grows; truncate instead */
+  .brandtext{overflow:hidden}
+  .brandtext h1{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .brandtext p,.crewchip{display:none}
+  #signout{padding:9px 12px;font-size:12.5px}
+  .mastright{gap:8px;flex:0 0 auto;flex-wrap:nowrap}
+  .meblock{padding:3px;margin:0;gap:0}
+  .av.lg{width:34px;height:34px;font-size:12.5px}
+  nav.tabs{margin-top:10px;gap:0}
+  nav.tabs button{padding:9px 12px 11px;font-size:13px;flex:1 0 auto}
+  nav.tabs button::after{left:10px;right:10px}
+
+  /* ---- any inline multi-column form grid collapses to one column ---- */
+  .card .body .grid[style*="grid-template-columns"],
+  .modal .body .grid[style*="grid-template-columns"],
+  .obwrap .grid[style*="grid-template-columns"]{grid-template-columns:1fr !important}
+  /* except the weekday goals, which stay a grid — just a squarer one */
+  #ob-wk,#s-wk{grid-template-columns:repeat(4,1fr) !important}
+  #ob-wk input,#s-wk input{font-size:15px;padding:9px 4px}
+
+  /* ---- progress lanes: label above, bar and figure below ---- */
+  .rowbar{display:flex !important;flex-wrap:wrap;align-items:center;gap:5px 10px}
+  .rowbar>*:first-child{flex:1 1 100%;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap}
+  .rowbar .track{flex:1 1 auto;min-width:80px}
+  .rowbar .val{flex:0 0 auto;margin-left:auto}
+
+  /* ---- leaderboard: keep the columns that decide anything ---- */
+  #lbtbl th:nth-child(4),#lbtbl td:nth-child(4),
+  #lbtbl th:nth-child(5),#lbtbl td:nth-child(5),
+  #lbtbl th:nth-child(6),#lbtbl td:nth-child(6){display:none}
+  th,td{padding:10px 8px}
+  .tblwrap{max-height:none}
+
+  /* ---- podium stays three across, just smaller ---- */
+  .podium{grid-template-columns:repeat(3,1fr);gap:8px}
+  .pod{padding:12px 6px}
+  .pod.p1{padding:16px 6px}
+  .pod .av.xl{width:44px;height:44px;font-size:16px;border-width:2px}
+  .pod .av.lg{width:38px;height:38px;font-size:13px}
+  .pod .hrs{font-size:19px;margin-top:7px}
+  .pod .nm2{font-size:11.5px}
+  .pod .sub2{display:none}
+  .pod .rank{top:6px;left:7px;font-size:10px}
+
+  /* ---- the wide charts scroll rather than shrink to nothing ---- */
+  .scrollx svg{min-width:520px}
+
+  /* ---- head to head ---- */
+  .h2hpick{width:100%}
+  .h2hpick select{flex:1 1 40%;min-width:0;width:auto}
+
+  /* ---- live strip: full width cards ---- */
+  .livecard{min-width:0;width:100%}
+  .livecard .s{max-width:none}
+
+  /* ---- areas modal rows: name on its own line, numbers under it ---- */
+  #ma-list .itemrow{display:flex !important;flex-wrap:wrap;align-items:center;gap:8px}
+  #ma-list .itemrow>.swatch{order:1}
+  #ma-list .itemrow>[data-aname]{order:2;flex:1 1 auto;min-width:0}
+  #ma-list .itemrow>[data-atgt],#ma-list .itemrow>[data-apct]{order:4;flex:1 1 0;min-width:0}
+  #ma-list .itemrow>.x{order:3;margin-left:auto}
+
+  /* ---- other generated rows ---- */
+  .itemrow[style*="grid-template-columns"]{grid-template-columns:auto 1fr auto !important;
+    gap:9px !important}
+  .entry .top{grid-template-columns:1fr 62px 28px}
+
+  /* ---- modals use the full sheet ---- */
+  .ov{padding:0;align-items:flex-end}
+  .modal{max-width:none;border-radius:16px 16px 0 0;max-height:92dvh}
+  .modal>header{border-radius:16px 16px 0 0;padding:16px 16px 14px}
+  .modal .body{padding:16px 16px 22px}
+  .profilemodal{max-width:none}
+  .pflog{max-height:none}
+  #pk-list{max-height:none}
+
+  /* ---- timer ---- */
+  .tdisp{font-size:52px}
+  .tbtns{gap:8px}
+  .tbtns .btn{flex:1 1 44%}
+  .btn.go,.btn.stop{font-size:15px;padding:13px 18px}
+
+  /* ---- heatmap cells stay tappable ---- */
+  .hmcell{aspect-ratio:1;padding:4px 5px}
+  .hmcell .hv{font-size:11.5px;left:5px;bottom:4px}
+  .hmcell .dn{font-size:10px}
+
+  /* ---- onboarding ---- */
+  .obwrap{padding:22px 14px 60px}
+
+  /* ---- the session pill, clear of the home indicator ---- */
+  .nowpill{right:10px;left:10px;bottom:calc(10px + env(safe-area-inset-bottom))}
+  .toast{bottom:calc(76px + env(safe-area-inset-bottom))}
+}
+
+/* very narrow phones */
+@media (max-width:380px){
+  .brandtext h1{font-size:15px}
+  nav.tabs button{padding:9px 9px 11px;font-size:12.5px}
+  .tdisp{font-size:44px}
+  .pod .nm2{font-size:11px}
+}
+
+/* mobile browser chrome makes 100vh taller than the visible page */
+@supports (height:100dvh){
+  .authwrap{min-height:100dvh}
+  .modal{max-height:88dvh}
+}
+
+/* the profile modal's own actions */
+.pfacts{display:flex;align-items:center;gap:8px;flex:none}
+
+@media (max-width:640px){
+  /* Sign out lives in your profile on phones — tap your avatar. That buys the
+     wordmark back the space the live bubble needs. */
+  #signout{display:none}
 }

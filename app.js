@@ -896,7 +896,7 @@ function paintNowBar(all, msOf, rebuild) {
 
   box.classList.add("on");
   box.innerHTML =
-    `<span class="nowlabel"><i class="nowdot"></i>${live.length} studying</span>` +
+    `<span class="nowlabel"><i class="nowdot"></i><b>${live.length}</b><span class="nowword">studying</span></span>` +
     `<span class="nowavs">` + shown.map(t =>
       `<span class="nowav${t.user_id === UID ? " self" : ""}" data-profile="${esc(t.user_id)}"
         title="${esc(label(t))}">${avatarHTML(profileOf(t.user_id), "sm")}</span>`).join("") +
@@ -1484,7 +1484,13 @@ function openProfile(id) {
           rank >= 0 ? `#${rank + 1} of ${wk.length} this week · ${f1(wkHours)} h` : "no hours this week"}</div>
       </div>
     </div>
-    <button class="x" data-closeprofile style="font-size:20px">&times;</button>`;
+    <div class="pfacts">
+      ${mine ? `<button class="btn ghost sm" id="pf-signout">Sign out</button>` : ""}
+      <button class="x" data-closeprofile style="font-size:20px">&times;</button>
+    </div>`;
+
+  const so = $("pf-signout");
+  if (so) so.addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
 
   const subs = mySubjects(id), areas = myAreas(id);
   const hSub = {}, hArea = {};
