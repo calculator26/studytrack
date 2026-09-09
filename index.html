@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study Crew</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ BOOT ============ -->
+<div id="boot"><div class="spin"></div></div>
+
+<!-- ============ AUTH ============ -->
+<div id="auth" class="authwrap hide">
+  <div class="authbox">
+    <h1 id="au-title">Study Crew</h1>
+    <p class="lede" id="au-lede">Sign in to see how the crew is going.</p>
+    <div id="au-msg"></div>
+    <div class="field" id="au-namefield" style="display:none">
+      <label class="fl" for="au-name">Your name</label>
+      <input type="text" id="au-name" autocomplete="name" placeholder="How you want to appear on the leaderboard">
+    </div>
+    <div class="field">
+      <label class="fl" for="au-email">Email</label>
+      <input type="email" id="au-email" autocomplete="email">
+    </div>
+    <div class="field">
+      <label class="fl" for="au-pass">Password</label>
+      <input type="password" id="au-pass" autocomplete="current-password">
+    </div>
+    <button class="btn" id="au-go" style="width:100%;margin-top:6px">Sign in</button>
+    <div class="switch">
+      <span id="au-swtext">No account yet?</span>
+      <button id="au-switch">Create one</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ONBOARDING ============ -->
+<div id="onb" class="hide" style="background:var(--ground);min-height:100vh">
+  <div class="obwrap">
+    <div class="steps"><i id="st1"></i><i id="st2"></i><i id="st3"></i></div>
+
+    <!-- step 1 : profile -->
+    <div class="card" id="ob1">
+      <header><div><h2>Set up your profile</h2>
+        <div class="sub">This is how you appear to everyone else in the crew.</div></div></header>
+      <div class="body">
+        <div style="display:flex;gap:18px;align-items:center;margin-bottom:18px">
+          <div id="ob-avpreview" class="av xl">?</div>
+          <div>
+            <label class="fl">Profile picture</label>
+            <input type="file" id="ob-avfile" accept="image/*" style="font-size:12.5px">
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Optional. Square images look best.</div>
+          </div>
+        </div>
+        <div class="grid g2">
+          <div><label class="fl" for="ob-name">Display name</label><input type="text" id="ob-name"></div>
+          <div><label class="fl" for="ob-school">School or group (optional)</label><input type="text" id="ob-school"></div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:14px;align-items:end;flex-wrap:wrap">
+          <div><label class="fl" for="ob-colour">Your colour</label><input type="color" id="ob-colour" value="#2FCFA6"></div>
+          <div style="font-size:12.5px;color:var(--ink-soft);padding-bottom:9px">Used for your line on the crew charts.</div>
+        </div>
+        <div class="controls" style="margin-top:20px;justify-content:flex-end">
+          <button class="btn" id="ob-next1">Next — your subjects</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- step 2 : subjects + areas -->
+    <div class="card hide" id="ob2">
+      <header><div><h2>Add your subjects</h2>
+        <div class="sub">Then break each one into the areas you actually revise — modules, topics, whatever you call them. You can change all of this later.</div></div></header>
+      <div class="body">
+        <div id="ob-quick" style="margin-bottom:14px"></div>
+        <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end">
+          <div><label class="fl" for="ob-subname">Subject name</label><input type="text" id="ob-subname" placeholder="e.g. Business Studies"></div>
+          <div><label class="fl" for="ob-subexam">Exam date</label><input type="date" id="ob-subexam"></div>
+          <div><label class="fl">&nbsp;</label><input type="color" id="ob-subcolour" value="#3E7CA6"></div>
+          <div><button class="btn" id="ob-addsub">Add</button></div>
+        </div>
+        <div id="ob-sublist" style="margin-top:18px"></div>
+        <div class="controls" style="margin-top:20px;justify-content:space-between">
+          <button class="btn ghost" id="ob-back2">Back</button>
+          <button class="btn" id="ob-next2">Next — your goals</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- step 3 : goals -->
+    <div class="card hide" id="ob3">
+      <header><div><h2>Set your goals</h2>
+        <div class="sub">Hours per day. Weekdays and weekends are usually different, so set them separately — you can override any individual day later.</div></div></header>
+      <div class="body">
+        <div class="grid" style="grid-template-columns:repeat(7,1fr);gap:8px" id="ob-wk"></div>
+        <div style="margin-top:16px;max-width:240px">
+          <label class="fl" for="ob-default">Fallback goal for any day not covered</label>
+          <input type="number" id="ob-default" min="0" max="16" step="0.5" value="3">
+        </div>
+        <div class="note" style="margin-top:16px">A goal of <strong>0</strong> marks a rest day. Rest days never break your streak.</div>
+        <div class="controls" style="margin-top:20px;justify-content:space-between">
+          <button class="btn ghost" id="ob-back3">Back</button>
+          <button class="btn" id="ob-finish">Finish and start tracking</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hide">
+<header class="top">
+  <div class="wrap">
+    <div class="mast">
+      <div>
+        <h1 id="crewname">Study Crew</h1>
+        <p id="crewsub">—</p>
+      </div>
+      <div class="meblock">
+        <div id="me-av" class="av lg">?</div>
+        <div>
+          <div class="nm" id="me-name">—</div>
+          <div class="sm" id="me-rank">—</div>
+        </div>
+        <button class="btn ghost sm" id="signout" style="margin-left:6px">Sign out</button>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" aria-selected="true"  data-p="home">Today</button>
+      <button role="tab" aria-selected="false" data-p="crew">Crew</button>
+      <button role="tab" aria-selected="false" data-p="me">My stats</button>
+      <button role="tab" aria-selected="false" data-p="setup">Setup</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ---------- HOME ---------- -->
+  <section class="panel on" id="p-home">
+    <div class="card mb16" id="live-card">
+      <header><div><h2>Studying right now</h2><div class="sub">Live across the crew. Timers update as they run.</div></div></header>
+      <div class="body"><div class="livestrip" id="livestrip"></div></div>
+    </div>
+
+    <div class="grid gHome mb16">
+      <div class="card">
+        <header><h2 id="h-title">Today</h2></header>
+        <div class="body" style="text-align:center">
+          <svg id="ring" viewBox="0 0 200 200" style="width:100%;max-width:200px;height:auto"></svg>
+          <div style="margin-top:12px;text-align:left">
+            <label class="fl" for="h-goal">Goal for this day (hours)</label>
+            <div style="display:flex;gap:8px">
+              <input type="number" id="h-goal" min="0" max="16" step="0.25">
+              <button class="btn ghost" id="h-goalreset" title="Back to your standing goal">Reset</button>
+            </div>
+          </div>
+          <div style="margin-top:13px;text-align:left">
+            <label class="fl" for="h-date">Logging for</label>
+            <input type="date" id="h-date">
+          </div>
+          <div id="h-verdict" style="margin-top:13px;font-size:13px;color:var(--ink-mid);text-align:left"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card mb16">
+          <header><div><h2>Session timer</h2>
+            <div class="sub">The crew sees this the moment you start.</div></div></header>
+          <div class="body">
+            <div class="grid" style="grid-template-columns:1.5fr 1fr;gap:10px;margin-bottom:4px">
+              <div><label class="fl" for="tm-area">What are you working on</label><select id="tm-area"></select></div>
+              <div><label class="fl" for="tm-mode">Mode</label><select id="tm-mode"></select></div>
+            </div>
+            <div class="timer">
+              <div class="tdisp" id="tdisp">00:00:00</div>
+              <div class="tsub" id="tsub">Nothing running</div>
+              <div class="tbtns">
+                <button class="btn go" id="tm-start">Start</button>
+                <button class="btn ghost" id="tm-pause" disabled>Pause</button>
+                <button class="btn stop" id="tm-stop" disabled>Finish and log</button>
+                <button class="btn ghost" id="tm-cancel" disabled>Discard</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <header><h2>Log a block by hand</h2><div class="sub">For anything you did not time</div></header>
+          <div class="body">
+            <div class="grid" style="grid-template-columns:1.6fr 1fr .6fr auto;gap:10px;align-items:end">
+              <div><label class="fl" for="f-area">What</label><select id="f-area"></select></div>
+              <div><label class="fl" for="f-mode">Mode</label><select id="f-mode"></select></div>
+              <div><label class="fl" for="f-min">Minutes</label><input type="number" id="f-min" min="1" max="1440" step="5" value="60"></div>
+              <div><button class="btn" id="f-add">Add</button></div>
+            </div>
+            <div style="margin-top:10px"><label class="fl" for="f-note">What did you do? (optional — the crew can read this)</label>
+              <textarea id="f-note" placeholder="e.g. Two body paragraphs under time. Second one ran long."></textarea></div>
+            <div class="controls" style="margin-top:9px">
+              <span style="font-size:11.5px;color:var(--ink-soft)">Quick</span>
+              <button class="chip" data-min="25">25</button><button class="chip" data-min="45">45</button>
+              <button class="chip" data-min="60">60</button><button class="chip" data-min="90">90</button>
+              <button class="chip" data-min="120">120</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g4 mb16">
+      <div class="kpi"><div class="v" id="k-today">0.0</div><div class="k">Your hours today</div><div class="d" id="k-today-d">—</div></div>
+      <div class="kpi"><div class="v" id="k-rank">—</div><div class="k">Your place today</div><div class="d" id="k-rank-d">—</div></div>
+      <div class="kpi"><div class="v" id="k-streak">0</div><div class="k">Day streak</div><div class="d" id="k-streak-d">—</div></div>
+      <div class="kpi"><div class="v" id="k-week">0.0</div><div class="k">Your last 7 days</div><div class="d" id="k-week-d">—</div></div>
+    </div>
+
+    <div class="card mb16">
+      <header><h2>Logged this day</h2><div class="sub" id="h-count">—</div></header>
+      <div class="body"><div id="h-entries"></div></div>
+    </div>
+
+    <div class="card">
+      <header><h2>Today across the crew</h2><div class="sub">Hours logged today, against each person's own goal</div></header>
+      <div class="body"><div class="rail" id="todayrail"></div></div>
+    </div>
+  </section>
+
+  <!-- ---------- CREW ---------- -->
+  <section class="panel" id="p-crew">
+    <div class="card mb16">
+      <header>
+        <div><h2>Leaderboard</h2><div class="sub" id="lb-sub">—</div></div>
+        <div class="controls" id="rangechips">
+          <button class="chip" data-r="1">Today</button>
+          <button class="chip" aria-pressed="true" data-r="7">7 days</button>
+          <button class="chip" data-r="30">30 days</button>
+          <button class="chip" data-r="0">All time</button>
+        </div>
+      </header>
+      <div class="body">
+        <div class="podium mb16" id="podium"></div>
+        <div class="tblwrap" style="border:1px solid var(--rule-soft);border-radius:3px">
+          <table id="lbtbl"><thead><tr>
+            <th class="l">#</th><th class="l">Member</th><th>Hours</th><th>Sessions</th>
+            <th>Avg / day</th><th>Longest day</th><th>Goal hit</th><th>Streak</th><th class="l">Last 7 days</th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2 mb16">
+      <div class="card">
+        <header><h2>The race</h2><div class="sub">Cumulative hours over the selected range</div></header>
+        <div class="body"><svg id="race" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
+      </div>
+      <div class="card">
+        <header><h2>Daily output</h2><div class="sub">Every day in the range, stacked by member</div></header>
+        <div class="body"><svg id="stack" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
+      </div>
+    </div>
+
+    <div class="card mb16">
+      <header>
+        <div><h2>Head to head</h2><div class="sub">Pick any two people and put their numbers side by side</div></div>
+        <div class="controls">
+          <select id="h2h-a" style="width:auto;min-width:150px"></select>
+          <span style="color:var(--ink-soft);font-size:12.5px">vs</span>
+          <select id="h2h-b" style="width:auto;min-width:150px"></select>
+        </div>
+      </header>
+      <div class="body"><div id="h2h"></div></div>
+    </div>
+
+    <div class="card">
+      <header><h2>Activity</h2><div class="sub">The last 40 sessions logged by anyone</div></header>
+      <div class="tblwrap"><div id="feed"></div></div>
+    </div>
+  </section>
+
+  <!-- ---------- ME ---------- -->
+  <section class="panel" id="p-me">
+    <div class="grid g4 mb16">
+      <div class="kpi"><div class="v" id="m-total">0.0</div><div class="k">Total hours logged</div><div class="d" id="m-total-d">—</div></div>
+      <div class="kpi"><div class="v" id="m-days">0</div><div class="k">Days with something logged</div><div class="d" id="m-days-d">—</div></div>
+      <div class="kpi"><div class="v" id="m-long">0</div><div class="k">Longest streak</div><div class="d">Rest days carry it through</div></div>
+      <div class="kpi"><div class="v" id="m-avg">0.0</div><div class="k">Average per active day</div><div class="d" id="m-avg-d">—</div></div>
+    </div>
+
+    <div class="card mb16">
+      <header><div><h2>Your chain</h2><div class="sub">Colour is how much of that day's goal you hit. Click a day to log it.</div></div></header>
+      <div class="body">
+        <div style="display:grid;grid-template-columns:660px 1fr;gap:28px;align-items:start" id="chainwrap">
+          <div>
+            <div class="cal" id="calhead"></div>
+            <div class="cal" id="heat" style="margin-top:5px"></div>
+            <div class="legend" id="hmleg"></div>
+          </div>
+          <div>
+            <h3 class="sec">This week</h3><div class="rail" id="weekrail"></div>
+            <h3 class="sec" style="margin-top:20px">Countdown</h3><div class="rail" id="cdrail"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2 mb16">
+      <div class="card">
+        <header><h2>Hours by subject</h2><div class="sub">Against any target hours you set</div></header>
+        <div class="body"><div class="rail" id="subrail"></div></div>
+      </div>
+      <div class="card">
+        <header><h2>Hours by area</h2><div class="sub">Every area you have defined</div></header>
+        <div class="body" style="max-height:420px;overflow:auto"><div class="rail" id="arearail"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <header>
+        <div><h2>Your session log</h2><div class="sub" id="m-logcount">—</div></div>
+        <div class="controls"><input type="text" id="m-search" placeholder="Search notes and areas" style="width:220px"></div>
+      </header>
+      <div class="tblwrap"><div id="m-log"></div></div>
+    </div>
+  </section>
+
+  <!-- ---------- SETUP ---------- -->
+  <section class="panel" id="p-setup">
+    <div class="grid g2 mb16">
+      <div class="card">
+        <header><h2>Profile</h2></header>
+        <div class="body">
+          <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
+            <div id="s-avpreview" class="av xl">?</div>
+            <div><label class="fl">Change picture</label>
+              <input type="file" id="s-avfile" accept="image/*" style="font-size:12.5px"></div>
+          </div>
+          <div class="grid g2">
+            <div><label class="fl" for="s-name">Display name</label><input type="text" id="s-name"></div>
+            <div><label class="fl" for="s-school">School or group</label><input type="text" id="s-school"></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:14px;align-items:end">
+            <div><label class="fl" for="s-colour">Your colour</label><input type="color" id="s-colour"></div>
+            <button class="btn" id="s-saveprofile">Save profile</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <header><h2>Standing goals</h2><div class="sub">Hours per day by weekday. Individual days can still be overridden on the Today tab.</div></header>
+        <div class="body">
+          <div class="grid" style="grid-template-columns:repeat(7,1fr);gap:8px" id="s-wk"></div>
+          <div style="margin-top:14px;display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+            <div style="max-width:190px"><label class="fl" for="s-default">Fallback goal</label>
+              <input type="number" id="s-default" min="0" max="16" step="0.5"></div>
+            <button class="btn" id="s-savegoals">Save goals</button>
+          </div>
+          <div class="note" style="margin-top:14px">A goal of 0 marks a rest day, which never breaks a streak.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb16">
+      <header><div><h2>Subjects and areas</h2>
+        <div class="sub">Subjects are your courses. Areas are what you actually sit down and revise inside them. Target hours and current mark are optional but make your stats far more useful.</div></div></header>
+      <div class="body">
+        <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end;margin-bottom:6px">
+          <div><label class="fl" for="s-subname">New subject</label><input type="text" id="s-subname" placeholder="Subject name"></div>
+          <div><label class="fl" for="s-subexam">Exam date</label><input type="date" id="s-subexam"></div>
+          <div><label class="fl">&nbsp;</label><input type="color" id="s-subcolour" value="#3E7CA6"></div>
+          <div><button class="btn" id="s-addsub">Add subject</button></div>
+        </div>
+        <div id="s-sublist" style="margin-top:16px"></div>
+      </div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <header><h2>Import and export</h2><div class="sub">Bring in a backup from the solo tracker, or a CSV</div></header>
+        <div class="body">
+          <p style="font-size:13px;color:var(--ink-mid);margin:0 0 14px">
+            Accepts the JSON backup exported by the solo study tracker, or a CSV with the columns
+            <strong>date, subject, area, minutes, mode, note</strong>. Missing subjects and areas are created for you.
+          </p>
+          <div class="controls">
+            <button class="btn ghost" id="imp-btn">Choose a file</button>
+            <input type="file" id="imp-file" accept=".json,.csv,application/json,text/csv" style="display:none">
+            <button class="btn ghost" id="exp-btn">Export my data</button>
+          </div>
+          <div id="imp-report" style="margin-top:14px"></div>
+        </div>
+      </div>
+      <div class="card">
+        <header><h2>About and privacy</h2></header>
+        <div class="body" style="font-size:13px;color:var(--ink-mid);line-height:1.65">
+          <p style="margin:0 0 11px">Everyone signed in can see everyone else's sessions, hours and notes. That is the whole point of the app — but it does mean <strong style="color:var(--ink)">write your notes as if your mates are reading them, because they are.</strong></p>
+          <p style="margin:0 0 11px">Your subjects, areas and goals are yours. Nobody can edit or delete anything of yours.</p>
+          <p style="margin:0 0 11px">Your streak counts consecutive days where you met your goal. A day with a goal of zero is a rest day and passes through without breaking it.</p>
+          <div class="note bad" style="margin-top:14px">
+            <strong>Danger zone.</strong> This deletes every session you have logged. Subjects and goals stay.
+            <div style="margin-top:9px"><button class="btn ghost sm" id="wipe" style="color:var(--loss);border-color:#E7BEBA">Delete all my sessions</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot"><p id="footnote"></p></div>
+</main>
+</div>
+
+<!-- ============ MODALS ============ -->
+<div class="ov" id="ov-save">
+  <div class="modal">
+    <header><div><h2>Session finished</h2><div style="font-size:12.5px;color:var(--ink-soft)" id="ms-sub">—</div></div></header>
+    <div class="body">
+      <div class="grid" style="grid-template-columns:1.5fr 1fr .7fr;gap:10px">
+        <div><label class="fl" for="ms-area">What</label><select id="ms-area"></select></div>
+        <div><label class="fl" for="ms-mode">Mode</label><select id="ms-mode"></select></div>
+        <div><label class="fl" for="ms-min">Minutes</label><input type="number" id="ms-min" min="1" max="1440" step="1"></div>
+      </div>
+      <div style="margin-top:12px"><label class="fl" for="ms-note">What did you get done? (the crew can read this)</label>
+        <textarea id="ms-note" style="min-height:84px"></textarea></div>
+      <div class="controls" style="margin-top:14px;justify-content:flex-end">
+        <button class="btn ghost" id="ms-discard">Discard</button>
+        <button class="btn" id="ms-save">Save session</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-areas">
+  <div class="modal">
+    <header><div><h2 id="ma-title">Areas</h2><div style="font-size:12.5px;color:var(--ink-soft)" id="ma-sub">—</div></div>
+      <button class="x" data-closeareas style="font-size:20px">×</button></header>
+    <div class="body">
+      <div id="ma-list" style="margin-bottom:16px"></div>
+      <div class="grid" style="grid-template-columns:1fr 84px 74px auto;gap:9px;align-items:end">
+        <div><label class="fl" for="ma-name">New area</label><input type="text" id="ma-name" placeholder="e.g. Module B — Eliot"></div>
+        <div><label class="fl" for="ma-target">Target h</label><input type="number" id="ma-target" min="0" step="0.5"></div>
+        <div><label class="fl" for="ma-pct">Mark %</label><input type="number" id="ma-pct" min="0" max="100" step="1"></div>
+        <div><button class="btn" id="ma-add">Add</button></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px">Target hours and mark are optional.</div>
+    </div>
+  </div>
+</div>
+
+<div class="tt" id="tt"></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
