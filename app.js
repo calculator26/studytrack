@@ -579,7 +579,7 @@ $("rangechips").querySelectorAll("[data-r]").forEach(b => b.addEventListener("cl
    ========================================================================= */
 /* Two selects rather than one long list: the subject, then the part of it.
    The area list follows whatever subject is chosen. */
-const SEL_PAIRS = [["tm-subj","tm-area"], ["f-subj","f-area"], ["ms-subj","ms-area"]];
+const SEL_PAIRS = [["tm-subj","tm-area"], ["f-subj","f-area"], ["ms-subj","ms-area"], ["e-subj","e-area"]];
 
 function subjectOptionsHTML() {
   const subs = mySubjects(UID);
@@ -930,7 +930,7 @@ function renderHome() {
   const es = DB.sessions.filter(s => s.user_id === UID && s.day === CUR);
   $("h-count").textContent = es.length ? `${es.length} session${es.length === 1 ? "" : "s"} · ${f1(h)} hours` : "Nothing yet";
   $("h-entries").innerHTML = es.length ? es.map(entryHTML).join("") : `<div class="empty">Nothing logged for this day.</div>`;
-  wireDeletes($("h-entries"));
+  wireEntryActions($("h-entries"));
 
   $("k-today").textContent = f1(h);
   $("k-today").style.color = col === "var(--none)" ? "var(--ink)" : col;
@@ -977,14 +977,97 @@ function entryHTML(s, withWho) {
       <strong style="color:${colourOf(s)}">${esc(labelOf(s))}</strong>
       ${withWho ? `<span style="color:var(--ink-soft);font-size:11.5px"> · ${fmtD(s.day)}</span>` : ""}</div>
     <div style="text-align:right;font-weight:600">${f1(s.minutes / 60)} h</div>
-    ${s.user_id === UID ? `<button class="x" data-del="${s.id}" title="Remove">×</button>` : "<span></span>"}
+    ${s.user_id === UID ? `<span class="acts">
+      <button class="x pencil" data-edit="${s.id}" title="Edit this session" aria-label="Edit this session">✎</button>
+      <button class="x" data-del="${s.id}" title="Remove" aria-label="Remove this session">×</button></span>` : "<span></span>"}
   </div>${s.note ? `<div class="enote">${esc(s.note)}</div>` : ""}</div>`;
 }
-function wireDeletes(scope) {
+/* Every list of entries — today, my log, the feed, a profile — gets the same
+   two buttons on your own rows, so a session can be fixed wherever you find it. */
+function wireEntryActions(scope) {
   scope.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-    await sb.from("sessions").delete().eq("id", b.dataset.del); await refresh();
+    await sb.from("sessions").delete().eq("id", b.dataset.del); await refreshEntries();
   }));
+  scope.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => openEdit(b.dataset.edit)));
 }
+
+/* =========================================================================
+   EDIT A LOGGED SESSION
+   -------------------------------------------------------------------------
+   Everything about a session is changeable after the fact — what it was
+   against, which day it lands on, how long it ran and what you wrote about
+   it. The database only ever lets you touch your own rows, so the pencil is
+   only drawn on yours in the first place.
+   ========================================================================= */
+let editingId = null;
+let openProfileId = null;   /* which profile modal is on screen, so an edit can redraw it */
+
+function openEdit(id) {
+  const s = DB.sessions.find(x => x.id === id);
+  if (!s) { toast("That session is gone"); return; }
+  if (s.user_id !== UID) { toast("You can only edit your own sessions"); return; }
+
+  editingId = id;
+  $("e-subj").innerHTML = subjectOptionsHTML();
+  /* An imported session, or one whose subject has since been deleted, has no
+     subject at all — start it on the first one rather than on whatever the
+     select happened to be showing. */
+  $("e-subj").selectedIndex = 0;
+  setPair("e-subj", "e-area", s.subject_id, s.area_id);
+  $("e-day").value  = s.day;
+  $("e-min").value  = s.minutes;
+  $("e-note").value = s.note || "";
+  $("me-sub").textContent = "Logged " + fmtLong(s.day) + " · " + f1(s.minutes / 60) + " h at the time";
+  $("ov-edit").classList.add("on");
+  setTimeout(() => $("e-min").focus(), 60);
+}
+function closeEdit() { editingId = null; $("ov-edit").classList.remove("on"); }
+
+/* A profile modal is built once and left alone, so an edit made from inside
+   one has to redraw it or you are looking at the row you just changed. */
+async function refreshEntries() {
+  await refresh();
+  if (openProfileId && $("ov-profile").classList.contains("on")) openProfile(openProfileId);
+}
+
+$("e-cancel").addEventListener("click", closeEdit);
+document.querySelectorAll("[data-closeedit]").forEach(b => b.addEventListener("click", closeEdit));
+$("ov-edit").addEventListener("click", e => { if (e.target.id === "ov-edit") closeEdit(); });
+/* Registered before the profile modal's own Escape handler, and it stops the
+   event there, so closing the edit sheet does not also close what is behind it. */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && editingId) { e.stopImmediatePropagation(); closeEdit(); }
+});
+
+$("e-del").addEventListener("click", async () => {
+  if (!editingId) return;
+  if (!confirm("Delete this session? It cannot be undone.")) return;
+  const id = editingId;
+  closeEdit();
+  const { error } = await sb.from("sessions").delete().eq("id", id);
+  if (error) { toast("Could not delete: " + error.message); return; }
+  toast("Session deleted");
+  await refreshEntries();
+});
+
+$("e-save").addEventListener("click", async () => {
+  if (!editingId) return;
+  const t = readPair("e-subj", "e-area");
+  if (!t.subject_id) { toast("Add a subject in Setup first"); return; }
+  const day = $("e-day").value;
+  if (!day) { toast("Pick a date"); return; }
+  const minutes = Math.round(+$("e-min").value);
+  if (!minutes || minutes < 1 || minutes > 1440) { toast("Minutes has to be between 1 and 1440"); return; }
+
+  const id = editingId;
+  const { error } = await sb.from("sessions").update({
+    subject_id: t.subject_id, area_id: t.area_id,
+    day, minutes, note: $("e-note").value.trim() || null }).eq("id", id);
+  if (error) { toast("Could not save: " + error.message); return; }
+  closeEdit();
+  toast("Session updated");
+  await refreshEntries();
+});
 
 /* =========================================================================
    RENDER — crew
@@ -1071,7 +1154,7 @@ function renderCrew() {
   $("feed").innerHTML = feed.length
     ? feed.map(s => `<div style="padding:0 16px">${entryHTML(s, true)}</div>`).join("")
     : `<div class="empty" style="margin:18px">Nothing logged yet by anyone.</div>`;
-  wireDeletes($("feed"));
+  wireEntryActions($("feed"));
 }
 
 function drawRace(board, days) {
@@ -1311,7 +1394,7 @@ function renderMyLog() {
     `<div class="daygroup">${fmtLong(d)} · ${f1(byDay[d].reduce((a, s) => a + s.minutes / 60, 0))} h of ${f1(goalFor(UID, d))}</div>
      <div style="padding:0 16px">${byDay[d].map(s => entryHTML(s)).join("")}</div>`).join("")
     : `<div class="empty" style="margin:18px">Nothing matches.</div>`;
-  wireDeletes($("m-log"));
+  wireEntryActions($("m-log"));
 }
 
 /* =========================================================================
@@ -1453,6 +1536,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") { $("ov-area
 function openProfile(id) {
   const p = profileOf(id);
   const mine = id === UID;
+  openProfileId = id;
 
   const all = DB.sessions.filter(x => x.user_id === id);
   const byDay = {};
@@ -1545,7 +1629,7 @@ function openProfile(id) {
         .map(x => entryHTML(x, false)).join("")}</div>`).join("")
       : `<div class="empty">Nothing logged yet.</div>`}</div>`;
 
-  wireDeletes($("pf-body"));
+  wireEntryActions($("pf-body"));
   $("ov-profile").classList.add("on");
 }
 
@@ -1554,14 +1638,15 @@ document.addEventListener("click", e => {
   const t = e.target.closest && e.target.closest("[data-profile]");
   if (t && t.dataset.profile) openProfile(t.dataset.profile);
 });
-document.querySelectorAll("[data-closeprofile]").forEach(b =>
-  b.addEventListener("click", () => $("ov-profile").classList.remove("on")));
+function closeProfile() { openProfileId = null; $("ov-profile").classList.remove("on"); }
+document.querySelectorAll("[data-closeprofile]").forEach(b => b.addEventListener("click", closeProfile));
 $("ov-profile").addEventListener("click", e => {
-  if (e.target.id === "ov-profile") e.currentTarget.classList.remove("on");
-  if (e.target.closest && e.target.closest("[data-closeprofile]")) e.currentTarget.classList.remove("on");
+  if (e.target.id === "ov-profile") closeProfile();
+  if (e.target.closest && e.target.closest("[data-closeprofile]")) closeProfile();
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") $("ov-profile").classList.remove("on");
+  /* the edit sheet opens on top of a profile — Escape belongs to it first */
+  if (e.key === "Escape" && !editingId) closeProfile();
 });
 $("s-viewme").addEventListener("click", () => openProfile(UID));
 

@@ -137,6 +137,21 @@ described what anyone actually did, so **write it in the note instead** — "Sec
 time, 33/40, marketing was the weak one" is worth more than any dropdown, and the whole crew
 can read it.
 
+### Fixing a session you already logged
+Every session of yours carries a **pencil** next to the ×, wherever it turns up — on Today, in
+your session log under My stats, in the crew activity feed, and inside your own profile. It
+opens the session with everything about it editable: the subject, the area, **the date it
+lands on**, the minutes, and the note. Move a Tuesday session to Monday because you logged it
+after midnight, correct 90 minutes that were really 45, rewrite a note once you know what the
+mark was — it all recalculates immediately, including your goals, streaks and the crew
+leaderboard.
+
+There is a **Delete session** button in there too, which asks first. The bare × in the list
+still deletes on the spot.
+
+The pencil only appears on your own rows. It is not the interface being polite about it —
+the database will not let you write to anyone else's session no matter what the browser asks.
+
 ### While a session is running
 The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
 tells you where you are up to without switching to it. It shows `❚❚` while paused.
@@ -182,8 +197,12 @@ automatically. There is an export button too.
 of the app, but it means session notes are not a private diary — write them as if your mates
 are reading them, because they are.
 
-Nobody can edit or delete anything of yours. That is enforced by the database, not the
-interface.
+**Nobody else** can edit or delete anything of yours, and you cannot touch theirs. That is
+enforced by the database, not the interface. Your own sessions you can edit and delete freely
+— see *Fixing a session you already logged* above.
+
+Editing is silent: a session that has been changed does not say so, and the crew sees the new
+version. Nothing keeps the old one.
 
 ---
 

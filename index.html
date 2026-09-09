@@ -514,6 +514,32 @@
   </div>
 </div>
 
+<!-- editing a session you already logged -->
+<div class="ov" id="ov-edit">
+  <div class="modal">
+    <header><div><h2>Edit session</h2>
+      <div style="font-size:12.5px;color:var(--ink-soft)" id="me-sub">&mdash;</div></div>
+      <button class="x" data-closeedit style="font-size:20px">&times;</button></header>
+    <div class="body">
+      <div class="grid" style="grid-template-columns:1fr 1fr .85fr .7fr;gap:10px">
+        <div><label class="fl" for="e-subj">Subject</label><select id="e-subj"></select></div>
+        <div><label class="fl" for="e-area">Area</label><select id="e-area"></select></div>
+        <div><label class="fl" for="e-day">Date</label><input type="date" id="e-day"></div>
+        <div><label class="fl" for="e-min">Minutes</label><input type="number" id="e-min" min="1" max="1440" step="1"></div>
+      </div>
+      <div style="margin-top:12px"><label class="fl" for="e-note">What did you get done? (the crew can read this)</label>
+        <textarea id="e-note" style="min-height:84px"></textarea></div>
+      <div class="controls" style="margin-top:14px;justify-content:space-between">
+        <button class="btn ghost sm" id="e-del" style="color:var(--loss);border-color:#E7BEBA">Delete session</button>
+        <span class="controls" style="gap:9px">
+          <button class="btn ghost" id="e-cancel">Cancel</button>
+          <button class="btn" id="e-save">Save changes</button>
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="tt" id="tt"></div>
 
 <!-- follows you around the app while a session is running -->
