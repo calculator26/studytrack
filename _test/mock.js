@@ -57,6 +57,11 @@
     updated_at: new Date().toISOString() });
 
   function builder(table) {
+    /* pretend the other members' tabs are still open and still beating */
+    if (table === "live_timers") {
+      const stamp = new Date().toISOString();
+      T.live_timers.forEach(r => { if (r.user_id !== ME) r.updated_at = stamp; });
+    }
     let rows = T[table] ? T[table].slice() : [];
     const filters = [];
     const api = {

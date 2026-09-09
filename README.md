@@ -211,5 +211,15 @@ Processes and Technology) are hidden behind the *Show discontinued courses* chec
 **An exam date looks wrong** — `catalogue.js` is built from the NESA timetable version
 `01-05-26`. If NESA reissues it, the dates live in the `exams` array on each subject.
 
-**Nothing updates until I refresh** — realtime may not be enabled. The app also polls every
-90 seconds, so it will catch up regardless.
+**Nothing updates until I refresh** — it should not. Every clock on the page ticks once a
+second off its own start time, whether or not you have a timer running, and the app asks who
+is studying every 15 seconds on top of Supabase realtime. If realtime is off entirely, the
+poll still catches everything within about 15 seconds.
+
+A background tab is throttled by the browser to roughly one tick a minute and stops polling
+altogether — that is deliberate, and it catches up the moment you come back to it. Because
+every time is worked out from `started_at` rather than counted up, nothing drifts while you
+are away.
+
+**Someone shows as studying who is not** — a running timer heartbeats every 60 seconds. If
+their tab closes, they drop off the live strip about five minutes later.

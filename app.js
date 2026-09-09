@@ -72,7 +72,7 @@ let UID = null, ME = null;
 const DB = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], timers: [] };
 let CUR = todayISO();
 let RANGE = 7;
-let localTimer = null, tickHandle = null;
+let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
 
 const profileOf = id => DB.profiles.find(p => p.id === id) || {id, display_name:"Unknown", colour:"#7B8D98"};
 const mySubjects = uid => DB.subjects.filter(s => s.user_id === uid);
@@ -351,15 +351,37 @@ async function refresh(rerender) {
   try { await loadAll(); ME = DB.profiles.find(p => p.id === UID) || ME; if (rerender !== false) renderAll(); }
   finally { refreshing = false; }
 }
+/* live_timers is a handful of rows, so it is cheap to ask for it often. This is
+   deliberately NOT a full refresh: it swaps in the timers and repaints the two
+   live areas, leaving the rest of the page — and anything you are typing — alone. */
+async function pollTimers() {
+  if (!sb || !UID || document.hidden) return;
+  try {
+    const { data, error } = await sb.from("live_timers").select("*");
+    if (error) return;
+    DB.timers = data || [];
+    paintLive();          /* the signature decides whether the DOM actually changes */
+  } catch (e) { /* a dropped poll is not worth bothering anyone about */ }
+}
+
 function subscribeRealtime() {
   try {
     sb.channel("crew")
       .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, () => refresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, () => refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, () => pollTimers())
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    }, () => refresh())
       .subscribe();
   } catch (e) { /* realtime is a bonus, not a requirement */ }
-  setInterval(() => refresh(), 90000);
+
+  if (pollHandle) return;                       /* only ever wire these up once */
+  pollHandle = setInterval(pollTimers, 15000);  /* who is studying, every 15s */
+  setInterval(() => refresh(), 90000);          /* everything else */
+
+  /* a hidden tab gets throttled to roughly once a minute, so catch up on return */
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { paintTimer(); pollTimers(); }
+  });
+  window.addEventListener("online", pollTimers);
 }
 
 /* =========================================================================
@@ -617,11 +639,24 @@ function paintTimer() {
   document.title = (t && t.running ? "▶ " + hms(elapsedMs()).slice(0, 5) + " — " : "") + "Study Track";
   paintLive();
 }
-function startTick() { if (tickHandle) clearInterval(tickHandle); tickHandle = setInterval(paintTimer, 1000); }
+/* One clock for the whole app, started once and never stopped. It runs whether
+   or not you have a timer going, because other people's clocks have to tick too.
+   Every displayed time is derived from started_at, so a throttled background tab
+   catches up the instant it is foregrounded rather than drifting. */
+function startClock() {
+  if (tickHandle) return;
+  tickHandle = setInterval(() => {
+    paintTimer();
+    /* while your own timer runs, touch updated_at now and then so everyone else
+       can tell the difference between "still going" and "closed the laptop" */
+    if (localTimer && Date.now() - lastBeat > 60000) { lastBeat = Date.now(); pushTimer(); }
+  }, 1000);
+}
 function restoreTimer() {
   const row = DB.timers.find(t => t.user_id === UID);
-  if (row) { localTimer = row; if (row.running) startTick(); }
+  if (row) localTimer = row;
   paintTimer();
+  startClock();
 }
 async function pushTimer() {
   if (!localTimer) { await sb.from("live_timers").delete().eq("user_id", UID); }
@@ -643,7 +678,7 @@ $("tm-start").addEventListener("click", async () => {
       subject_id: t.subject_id, area_id: t.area_id, acc_ms: 0,
       started_at: new Date().toISOString(), running: true, day: CUR };
   }
-  paintTimer(); startTick(); pushTimer();
+  lastBeat = Date.now(); paintTimer(); startClock(); pushTimer();
 });
 $("tm-pause").addEventListener("click", () => {
   if (!localTimer || !localTimer.running) return;
@@ -737,50 +772,91 @@ function renderShell() {
 /* =========================================================================
    RENDER — home
    ========================================================================= */
-/* The header strip: who is on the track right now. */
-function paintNowBar(all, now) {
-  const box = $("nowbar");
-  if (!box) return;
-  const live = all.filter(t => t.running);
-  if (!live.length) { box.innerHTML = ""; box.classList.remove("on"); return; }
-  box.classList.add("on");
-  const shown = live.slice(0, 5);
-  box.innerHTML =
-    `<span class="nowlabel"><i class="nowdot"></i>${live.length} studying</span>` +
-    `<span class="nowavs">` + shown.map(t => {
-      const p = profileOf(t.user_id);
-      const ms = t.acc_ms + (now - new Date(t.started_at).getTime());
-      const mine = t.user_id === UID;
-      return `<span class="nowav${mine ? " self" : ""}" data-profile="${esc(t.user_id)}"
-        title="${esc(p.display_name)}${mine ? " (you)" : ""} · ${esc(t.label || "studying")} · ${hms(ms)}">
-        ${avatarHTML(p, "sm")}</span>`;
-    }).join("") +
-    (live.length > shown.length ? `<span class="nowmore">+${live.length - shown.length}</span>` : "") +
-    `</span>`;
-}
+/* Somebody whose updated_at has gone quiet has closed the tab, not kept studying.
+   Their own heartbeat is every 60s, so five minutes is forgiving of a flaky line. */
+const LIVE_FRESH_MS = 5 * 60e3;
 
-function paintLive() {
+/* Rebuilding this markup every second would kill hover states and flicker the
+   avatars, so the DOM is only rebuilt when the set of people actually changes.
+   In between, the clock text is updated in place. */
+let liveSig = "";
+
+function paintLive(force) {
   const now = Date.now();
   const rows = DB.timers.filter(t => t.user_id !== UID)
-    .filter(t => now - new Date(t.updated_at).getTime() < 8 * 3600e3);
-  const mine = localTimer ? [{ ...localTimer, user_id: UID }] : [];
+    .filter(t => now - new Date(t.updated_at || 0).getTime() < LIVE_FRESH_MS);
+  const mine = localTimer ? [Object.assign({}, localTimer, { user_id: UID })] : [];
   const all = mine.concat(rows);
-  paintNowBar(all, now);
+  const msOf = t => t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0);
+
+  const sig = all.map(t => t.user_id + "/" + (t.running ? 1 : 0) + "/" + (t.label || "")).join("|");
+  const rebuild = force === true || sig !== liveSig;
+  liveSig = sig;
+
+  paintNowBar(all, msOf, rebuild);
+
   const box = $("livestrip");
   if (!box) return;
-  if (!all.length) { box.innerHTML = `<div class="empty" style="width:100%">Nobody is running a timer right now. Be the one who starts.</div>`; return; }
+
+  if (!all.length) {
+    if (rebuild) box.innerHTML = `<div class="empty" style="width:100%">Nobody is running a timer right now. Be the one who starts.</div>`;
+    return;
+  }
+
+  if (!rebuild) {
+    all.forEach(t => {
+      const el = box.querySelector('[data-clock="' + t.user_id + '"]');
+      if (el) el.textContent = hms(msOf(t));
+    });
+    return;
+  }
+
   box.innerHTML = all.map(t => {
     const p = profileOf(t.user_id);
-    const ms = t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0);
     return `<div class="livecard ${t.user_id === UID ? "self" : ""}">
       ${avatarHTML(p, "")}
       <div style="min-width:0">
-        <div class="t">${hms(ms)}${t.running ? "" : ' <span style="font-size:11px;color:var(--ink-soft);font-weight:500">paused</span>'}</div>
+        <div class="t"><span data-clock="${esc(t.user_id)}">${hms(msOf(t))}</span>${
+          t.running ? "" : ' <span style="font-size:11px;color:var(--ink-soft);font-weight:500">paused</span>'}</div>
         <div class="s">${esc(p.display_name)} · ${esc(t.label || "studying")}</div>
       </div>
       ${t.running ? '<div class="dot" style="margin-left:auto"></div>' : ""}
     </div>`;
   }).join("");
+}
+
+/* The header strip: who is on the track right now. */
+function paintNowBar(all, msOf, rebuild) {
+  const box = $("nowbar");
+  if (!box) return;
+  const live = all.filter(t => t.running);
+  if (!live.length) {
+    if (rebuild) { box.innerHTML = ""; box.classList.remove("on"); }
+    return;
+  }
+  const shown = live.slice(0, 5);
+  const label = t => {
+    const p = profileOf(t.user_id);
+    return p.display_name + (t.user_id === UID ? " (you)" : "") +
+      " · " + (t.label || "studying") + " · " + hms(msOf(t));
+  };
+
+  if (!rebuild) {
+    shown.forEach(t => {
+      const el = box.querySelector('.nowav[data-profile="' + t.user_id + '"]');
+      if (el) el.title = label(t);
+    });
+    return;
+  }
+
+  box.classList.add("on");
+  box.innerHTML =
+    `<span class="nowlabel"><i class="nowdot"></i>${live.length} studying</span>` +
+    `<span class="nowavs">` + shown.map(t =>
+      `<span class="nowav${t.user_id === UID ? " self" : ""}" data-profile="${esc(t.user_id)}"
+        title="${esc(label(t))}">${avatarHTML(profileOf(t.user_id), "sm")}</span>`).join("") +
+    (live.length > shown.length ? `<span class="nowmore">+${live.length - shown.length}</span>` : "") +
+    `</span>`;
 }
 
 function renderHome() {
