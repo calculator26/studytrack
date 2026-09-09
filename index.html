@@ -75,7 +75,7 @@
     <!-- step 2 : subjects + areas -->
     <div class="card hide" id="ob2">
       <header><div><h2>Add your subjects</h2>
-        <div class="sub">Then break each one into the areas you actually revise — modules, topics, whatever you call them. You can change all of this later.</div></div></header>
+        <div class="sub">Pick them from the Knox list and the exam dates and course sections fill themselves in. Add your own, rename anything, delete what you do not need.</div></div></header>
       <div class="body">
         <div id="ob-quick" style="margin-bottom:14px"></div>
         <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end">
@@ -308,6 +308,12 @@
       </div>
     </div>
 
+    <div class="card mb16">
+      <header><div><h2>Your HSC timetable</h2>
+        <div class="sub" id="tt-sub">Every written paper you sit, from the NESA 2026 timetable</div></div></header>
+      <div class="body"><div id="tt-list"></div></div>
+    </div>
+
     <div class="grid g2 mb16">
       <div class="card">
         <header><h2>Hours by subject</h2><div class="sub">Against any target hours you set</div></header>
@@ -366,7 +372,8 @@
 
     <div class="card mb16">
       <header><div><h2>Subjects and areas</h2>
-        <div class="sub">Subjects are your courses. Areas are what you actually sit down and revise inside them. Target hours and current mark are optional but make your stats far more useful.</div></div></header>
+        <div class="sub">Subjects are your courses. Areas are what you actually sit down and revise inside them. Target hours and current mark are optional but make your stats far more useful.</div></div>
+        <button class="btn" id="s-frompicker">Add from Knox list</button></header>
       <div class="body">
         <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end;margin-bottom:6px">
           <div><label class="fl" for="s-subname">New subject</label><input type="text" id="s-subname" placeholder="Subject name"></div>
@@ -450,11 +457,31 @@
   </div>
 </div>
 
+
+<div class="ov" id="ov-picker">
+  <div class="modal" style="max-width:840px">
+    <header>
+      <div><h2>Knox subject list</h2>
+        <div style="font-size:12.5px;color:var(--ink-soft)">Every HSC subject Knox runs, with its 2026 exam dates and course sections already filled in. Change any of it afterwards.</div></div>
+      <button class="x" data-closepicker style="font-size:20px">&times;</button>
+    </header>
+    <div class="body">
+      <input type="text" id="pk-search" placeholder="Search — try &quot;ext&quot;, &quot;maths&quot;, &quot;japanese&quot;" style="margin-bottom:10px">
+      <div class="controls" id="pk-cats" style="margin-bottom:12px"></div>
+      <div id="pk-list" style="max-height:50vh;overflow:auto"></div>
+      <label style="display:flex;align-items:center;gap:7px;margin-top:12px;font-size:12px;color:var(--ink-soft)">
+        <input type="checkbox" id="pk-retired" style="width:auto;margin:0"> Show discontinued courses (no 2026 exam)
+      </label>
+    </div>
+  </div>
+</div>
+
 <div class="tt" id="tt"></div>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
+<script src="catalogue.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

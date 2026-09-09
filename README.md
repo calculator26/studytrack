@@ -84,6 +84,28 @@ a module, a topic, a paper section, whatever you call it. Areas are optional; yo
 against a subject in general instead. Each area can carry a **target hours** figure and the
 **mark you currently score** in it, which is what makes the personal stats worth reading.
 
+You do not have to type any of it. **Choose from the Knox subject list** — in onboarding, and
+again under Setup — and the subject arrives with its 2026 HSC exam dates and its syllabus
+sections already filled in. English Advanced brings the four modules, Physics brings modules
+5 to 8, Japanese Continuers brings speaking, listening, reading, writing, kanji and grammar.
+
+Then change whatever you like. Every name is an editable field, every area has a delete
+button, and there is an add box on every subject. Rename *Module B — Eliot* to whatever your
+teacher calls it. Delete the ones you do not sit. Add *Practice essays* if that is how you
+think. The list is a starting point, not a rule — nothing in it is enforced, and typing a
+subject in by hand still works exactly as it did.
+
+### The HSC timetable
+Every written paper for the subjects you take, in date order with the real start and finish
+times, is on the **My stats** tab under *Your HSC timetable* — pulled from the official NESA
+2026 written examination timetable, which is hard-coded in `catalogue.js`. Papers you have
+already sat grey out. Subjects assessed by submission or performance rather than a written
+paper — English Extension 2, Music Extension — are called out underneath rather than
+silently dropped.
+
+If you rename a subject to something the catalogue does not recognise, it keeps the exam date
+you already had and shows as *your own date*. Nothing breaks.
+
 ### Goals
 Set hours per weekday once. Any individual day can be overridden on the Today tab. A goal of
 **0** marks a rest day, and rest days never break a streak — otherwise the plan punishes you
@@ -127,6 +149,7 @@ interface.
 | `app.js` | All the logic — auth, data, timer, charts, import |
 | `styles.css` | The design system |
 | `config.js` | Your Supabase keys and crew name |
+| `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |
 
@@ -146,6 +169,14 @@ table does not exist. Run it and refresh.
 `schema.sql` creates it; if the storage policies failed, run that section again.
 
 **The leaderboard only shows you** — everyone needs to finish onboarding before they appear.
+
+**A subject is missing from the Knox list** — add it by hand; it works exactly the same, it
+just will not prefill. Then add it to the `S` array in `catalogue.js` if you want it there
+permanently. Courses Knox has run in the past but that have no 2026 exam (PDHPE, Information
+Processes and Technology) are hidden behind the *Show discontinued courses* checkbox.
+
+**An exam date looks wrong** — `catalogue.js` is built from the NESA timetable version
+`01-05-26`. If NESA reissues it, the dates live in the `exams` array on each subject.
 
 **Nothing updates until I refresh** — realtime may not be enabled. The app also polls every
 90 seconds, so it will catch up regardless.

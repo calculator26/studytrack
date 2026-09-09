@@ -269,10 +269,9 @@ function subscribeRealtime() {
 /* =========================================================================
    ONBOARDING
    ========================================================================= */
-const QUICK_SUBJECTS = ["English Advanced","English Standard","English Extension 1","Mathematics Standard 2",
-  "Mathematics Advanced","Mathematics Extension 1","Biology","Chemistry","Physics","Business Studies",
-  "Economics","Legal Studies","Modern History","Ancient History","Studies of Religion 1","PDHPE",
-  "Enterprise Computing","Software Engineering","Visual Arts","Music 1","Geography","Design and Technology"];
+/* The Knox subject catalogue — every HSC course, its 2026 papers and its syllabus
+   sections. Purely a starting point: everything it fills in stays editable. */
+const CAT = window.HSC_CATALOGUE || { subjects: [], active: [], papers: [], categories: {}, byName: () => null };
 let obSubjects = [], obAvatarFile = null, obStep = 1;
 
 function startOnboarding() {
@@ -281,10 +280,13 @@ function startOnboarding() {
   $("ob-colour").value = ME.colour || "#2FCFA6";
   $("ob-avpreview").textContent = initials(ME.display_name);
   $("ob-avpreview").style.background = ME.colour || "#2FCFA6";
-  $("ob-quick").innerHTML = `<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:7px">Quick add — tap any that apply, or just type your own below</div>
-    <div class="controls">${QUICK_SUBJECTS.map(s => `<button class="chip" data-q="${esc(s)}">${esc(s)}</button>`).join("")}</div>`;
-  $("ob-quick").querySelectorAll("[data-q]").forEach(b => b.addEventListener("click", () => {
-    addObSubject(b.dataset.q); b.disabled = true; b.style.opacity = .45;
+  $("ob-quick").innerHTML = `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px">
+      Tap your subjects. Each one arrives with its 2026 exam date and its course sections already in it.</div>
+    <button class="btn" id="ob-openpicker" style="margin-bottom:4px">Choose from the Knox subject list</button>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:7px">Not on the list, or Knox calls it something else? Type it in below instead.</div>`;
+  $("ob-openpicker").addEventListener("click", () => openPicker({
+    taken: () => obSubjects.map(s => s.name),
+    pick: c => { addObSubject(c.name, c.exam_date, c.colour, c.areas.slice()); }
   }));
   const wk = DOW.map((d, i) => `<div><label class="fl" style="text-align:center">${d}</label>
     <input type="number" min="0" max="16" step="0.5" id="obwk${i}" value="${i < 5 ? 3 : 5}" style="text-align:center;padding:7px 4px"></div>`).join("");
@@ -326,10 +328,13 @@ $("ob-addsub").addEventListener("click", () => {
 });
 $("ob-subname").addEventListener("keydown", e => { if (e.key === "Enter") $("ob-addsub").click(); });
 
-function addObSubject(name, exam, colour) {
+function addObSubject(name, exam, colour, areas) {
   if (obSubjects.some(s => s.name.toLowerCase() === name.toLowerCase())) return;
-  obSubjects.push({ name, exam_date: exam || null,
-    colour: colour || PALETTE[obSubjects.length % PALETTE.length], areas: [] });
+  /* typing a subject by hand still gets its catalogue sections if the name matches */
+  const c = areas ? null : CAT.byName(name);
+  obSubjects.push({ name, exam_date: exam || (c && c.exam_date) || null,
+    colour: colour || (c && c.colour) || PALETTE[obSubjects.length % PALETTE.length],
+    areas: areas || (c ? c.areas.slice() : []) });
   paintObSubjects();
 }
 function paintObSubjects() {
@@ -345,7 +350,8 @@ function paintObSubjects() {
           <button class="x" data-rm="${i}" title="Remove">×</button>
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
-          ${s.areas.map((a, j) => `<span class="chip" style="cursor:default">${esc(a)}
+          ${s.areas.map((a, j) => `<span class="chip" style="cursor:default" title="Click the name to rename">
+            <span contenteditable="true" data-rna="${i}:${j}" style="outline:none;min-width:12px;display:inline-block">${esc(a)}</span>
             <button class="x" data-rma="${i}:${j}" style="font-size:12px;padding:0 2px;margin-left:3px">×</button></span>`).join("")
             || `<span style="font-size:12px;color:var(--ink-soft)">No areas yet — optional, but they make your stats much sharper.</span>`}
         </div>
@@ -359,6 +365,15 @@ function paintObSubjects() {
     obSubjects.splice(+b.dataset.rm, 1); paintObSubjects(); }));
   box.querySelectorAll("[data-rma]").forEach(b => b.addEventListener("click", () => {
     const [i, j] = b.dataset.rma.split(":").map(Number); obSubjects[i].areas.splice(j, 1); paintObSubjects(); }));
+  box.querySelectorAll("[data-rna]").forEach(el => {
+    const commit = () => {
+      const [i, j] = el.dataset.rna.split(":").map(Number);
+      const v = el.textContent.trim();
+      if (v) obSubjects[i].areas[j] = v; else paintObSubjects();
+    };
+    el.addEventListener("blur", commit);
+    el.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } });
+  });
   box.querySelectorAll("[data-aadd]").forEach(b => b.addEventListener("click", () => {
     const i = +b.dataset.aadd, inp = box.querySelector(`[data-ain="${i}"]`);
     const v = inp.value.trim(); if (!v) return;
@@ -979,6 +994,8 @@ function renderMe() {
       <div class="val" style="color:${n <= 7 ? "var(--loss)" : "var(--ink)"}">${n} d</div></div>`;
   }).join("") : `<div style="font-size:12.5px;color:var(--ink-soft)">Add exam dates to your subjects in Setup to see a countdown.</div>`;
 
+  renderTimetable();
+
   /* subject + area rails */
   const bySub = {}, byArea = {};
   DB.sessions.filter(s => s.user_id === UID).forEach(s => {
@@ -1053,7 +1070,8 @@ function renderSetup() {
       <div class="body" style="padding:12px 14px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span class="swatch" style="background:${esc(s.colour)}"></span>
-          <strong style="flex:1;min-width:120px">${esc(s.name)}</strong>
+          <input type="text" value="${esc(s.name)}" data-sname="${s.id}" title="Rename this subject"
+            style="flex:1;min-width:140px;font-weight:600;font-size:13.5px;padding:5px 8px">
           <input type="date" value="${s.exam_date || ""}" data-sexam="${s.id}" style="width:auto;font-size:12.5px;padding:5px 8px">
           <input type="color" value="${esc(s.colour)}" data-scol="${s.id}">
           <button class="btn ghost sm" data-areas="${s.id}">Areas (${as.length})</button>
@@ -1075,6 +1093,12 @@ function renderSetup() {
     await sb.from("subjects").update({ exam_date: i.value || null }).eq("id", i.dataset.sexam); await refresh();
   }));
   $("s-sublist").querySelectorAll("[data-areas]").forEach(b => b.addEventListener("click", () => openAreas(b.dataset.areas)));
+  $("s-sublist").querySelectorAll("[data-sname]").forEach(i => i.addEventListener("change", async () => {
+    const n = i.value.trim();
+    if (!n) { await refresh(); return; }
+    await sb.from("subjects").update({ name: n }).eq("id", i.dataset.sname);
+    await refresh(); toast("Subject renamed");
+  }));
 }
 $("s-saveprofile").addEventListener("click", async () => {
   await sb.from("profiles").update({ display_name: $("s-name").value.trim() || ME.display_name,
@@ -1116,16 +1140,31 @@ function openAreas(subjectId) {
 function paintAreaList() {
   const as = myAreas(UID).filter(a => a.subject_id === areaSubject);
   $("ma-list").innerHTML = as.length ? as.map(a => `
-    <div class="itemrow">
+    <div class="itemrow" style="grid-template-columns:auto 1fr 84px 74px auto;gap:8px;align-items:center">
       <span class="swatch" style="background:${esc((subjById(areaSubject) || {}).colour || "#999")}"></span>
-      <div><strong>${esc(a.name)}</strong>
-        <span style="font-size:11.5px;color:var(--ink-soft)">
-          ${a.target_hours ? ` · target ${f1(a.target_hours)} h` : ""}${a.current_pct != null ? ` · scoring ${f0(a.current_pct)}%` : ""}</span></div>
-      <button class="x" data-adel="${a.id}">×</button>
+      <input type="text" value="${esc(a.name)}" data-aname="${a.id}" title="Rename this area"
+        style="font-size:13px;padding:5px 8px">
+      <input type="number" value="${a.target_hours != null ? a.target_hours : ""}" data-atgt="${a.id}"
+        min="0" step="0.5" placeholder="target h" title="Target hours" style="font-size:12.5px;padding:5px 6px">
+      <input type="number" value="${a.current_pct != null ? a.current_pct : ""}" data-apct="${a.id}"
+        min="0" max="100" step="1" placeholder="mark %" title="Mark you currently score" style="font-size:12.5px;padding:5px 6px">
+      <button class="x" data-adel="${a.id}" title="Delete area">×</button>
     </div>`).join("") : `<div class="empty">No areas yet for this subject.</div>`;
   $("ma-list").querySelectorAll("[data-adel]").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("Delete this area? Sessions logged against it are kept but lose the label.")) return;
     await sb.from("areas").delete().eq("id", b.dataset.adel); await refresh(); paintAreaList();
   }));
+  const areaField = (attr, col, cast) => $("ma-list").querySelectorAll("[" + attr + "]").forEach(i =>
+    i.addEventListener("change", async () => {
+      const raw = i.value.trim();
+      if (col === "name" && !raw) { paintAreaList(); return; }
+      const val = col === "name" ? raw : (raw === "" ? null : cast(raw));
+      await sb.from("areas").update({ [col]: val }).eq("id", i.getAttribute(attr));
+      await refresh(); paintAreaList();
+    }));
+  areaField("data-aname", "name", String);
+  areaField("data-atgt", "target_hours", Number);
+  areaField("data-apct", "current_pct", Number);
 }
 $("ma-add").addEventListener("click", async () => {
   const n = $("ma-name").value.trim(); if (!n) return;
@@ -1140,6 +1179,180 @@ $("ma-name").addEventListener("keydown", e => { if (e.key === "Enter") $("ma-add
 document.querySelectorAll("[data-closeareas]").forEach(b => b.addEventListener("click", () => $("ov-areas").classList.remove("on")));
 $("ov-areas").addEventListener("click", e => { if (e.target.id === "ov-areas") e.currentTarget.classList.remove("on"); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") { $("ov-areas").classList.remove("on"); } });
+
+/* =========================================================================
+   KNOX SUBJECT PICKER
+   Catalogue-driven. Used by onboarding and by Setup. Everything it inserts is
+   ordinary editable data the moment it lands — nothing here is locked.
+   ========================================================================= */
+let pkCat = "all", pkHandlers = null;
+
+function openPicker(handlers) {
+  pkHandlers = handlers;
+  pkCat = "all";
+  $("pk-search").value = "";
+  $("pk-retired").checked = false;
+  const cats = Object.keys(CAT.categories);
+  $("pk-cats").innerHTML =
+    `<button class="chip" aria-pressed="true" data-pkc="all">All</button>` +
+    cats.map(k => `<button class="chip" data-pkc="${k}">${esc(CAT.categories[k].label)}</button>`).join("");
+  $("pk-cats").querySelectorAll("[data-pkc]").forEach(b => b.addEventListener("click", () => {
+    pkCat = b.dataset.pkc;
+    $("pk-cats").querySelectorAll("[data-pkc]").forEach(x =>
+      x.setAttribute("aria-pressed", x.dataset.pkc === pkCat ? "true" : "false"));
+    paintPicker();
+  }));
+  paintPicker();
+  $("ov-picker").classList.add("on");
+  setTimeout(() => $("pk-search").focus(), 30);
+}
+
+function paintPicker() {
+  const q = $("pk-search").value.trim().toLowerCase();
+  const taken = (pkHandlers.taken() || []).map(n => String(n).toLowerCase());
+  let list = $("pk-retired").checked ? CAT.subjects : CAT.active;
+  if (pkCat !== "all") list = list.filter(s => s.cat === pkCat);
+  if (q) list = list.filter(s =>
+    s.name.toLowerCase().includes(q) ||
+    s.catLabel.toLowerCase().includes(q) ||
+    s.areas.some(a => a.toLowerCase().includes(q)));
+
+  if (!list.length) {
+    $("pk-list").innerHTML = `<div class="empty">Nothing matches “${esc($("pk-search").value)}”. You can still type it in by hand — the app does not mind.</div>`;
+    return;
+  }
+
+  const groups = {};
+  list.forEach(s => { (groups[s.catLabel] = groups[s.catLabel] || []).push(s); });
+
+  $("pk-list").innerHTML = Object.keys(groups).map(g => `
+    <h3 class="sec" style="margin:14px 0 7px">${esc(g)}</h3>
+    ${groups[g].map(s => {
+      const already = taken.indexOf(s.name.toLowerCase()) !== -1;
+      const days = s.exams.map(e => fmtD(e.date)).filter((d, i, a) => a.indexOf(d) === i);
+      const when = days.length
+        ? days.join(" · ") + (s.exams.length > days.length ? " (" + s.exams.length + " papers)" : "")
+        : "no written exam";
+      return `<div class="itemrow" style="grid-template-columns:auto 1fr auto;gap:10px;align-items:center">
+        <span class="swatch" style="background:${esc(s.colour)}"></span>
+        <div>
+          <strong>${esc(s.name)}</strong>
+          <span style="font-size:11.5px;color:var(--ink-soft)"> · ${s.units} unit${s.units === 1 ? "" : "s"}</span>
+          <div style="font-size:11.5px;color:var(--ink-soft)">
+            ${esc(when)} · ${s.areas.length} section${s.areas.length === 1 ? "" : "s"}${s.note ? " · " + esc(s.note) : ""}</div>
+        </div>
+        <button class="btn ${already ? "ghost" : ""} sm" data-pkadd="${esc(s.name)}" ${already ? "disabled" : ""}
+          style="${already ? "opacity:.5" : ""}">${already ? "Added" : "Add"}</button>
+      </div>`;
+    }).join("")}`).join("");
+
+  $("pk-list").querySelectorAll("[data-pkadd]").forEach(b => b.addEventListener("click", async () => {
+    const c = CAT.byName(b.dataset.pkadd);
+    if (!c) return;
+    b.disabled = true;
+    try { await pkHandlers.pick(c); } finally { paintPicker(); }
+  }));
+}
+
+$("pk-search").addEventListener("input", paintPicker);
+$("pk-retired").addEventListener("change", paintPicker);
+document.querySelectorAll("[data-closepicker]").forEach(b =>
+  b.addEventListener("click", () => $("ov-picker").classList.remove("on")));
+$("ov-picker").addEventListener("click", e => {
+  if (e.target.id === "ov-picker") e.currentTarget.classList.remove("on");
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") $("ov-picker").classList.remove("on");
+});
+
+/* Setup tab — same picker, writes straight to the database */
+$("s-frompicker").addEventListener("click", () => openPicker({
+  taken: () => mySubjects(UID).map(s => s.name),
+  pick: async c => {
+    const { data } = await sb.from("subjects").insert({
+      user_id: UID, name: c.name, colour: c.colour,
+      exam_date: c.exam_date, position: mySubjects(UID).length
+    }).select().single();
+    if (data && c.areas.length) {
+      await sb.from("areas").insert(c.areas.map((a, j) => ({
+        user_id: UID, subject_id: data.id, name: a, position: j })));
+    }
+    await refresh();
+    toast(c.name + " added with " + c.areas.length + " sections");
+  }
+}));
+
+/* =========================================================================
+   HSC TIMETABLE
+   Every written paper for the subjects you actually take, in date order.
+   Dates come from the NESA 2026 written exam timetable, matched on subject name.
+   ========================================================================= */
+function renderTimetable() {
+  const el = $("tt-list");
+  if (!el) return;
+  const mine = mySubjects(UID);
+  const papers = [];
+  mine.forEach(s => {
+    const c = CAT.byName(s.name);
+    if (c && c.exams.length) {
+      c.exams.forEach(e => papers.push({
+        subject: s.name, colour: s.colour, paper: e.paper,
+        date: e.date, start: e.start, end: e.end
+      }));
+    } else if (s.exam_date) {
+      papers.push({ subject: s.name, colour: s.colour, paper: null,
+        date: s.exam_date, start: null, end: null, custom: true });
+    }
+  });
+  const seen = {};
+  const unique = papers.filter(p => {
+    const k = p.subject + "|" + p.paper + "|" + p.date + "|" + p.start;
+    if (seen[k]) return false;
+    seen[k] = 1; return true;
+  });
+  papers.length = 0;
+  Array.prototype.push.apply(papers, unique);
+  papers.sort((a, b) => a.date.localeCompare(b.date) || String(a.start).localeCompare(String(b.start)));
+
+  const offList = mine.filter(s => {
+    const c = CAT.byName(s.name);
+    return c && !c.exams.length;
+  });
+
+  if (!papers.length) {
+    el.innerHTML = `<div class="empty">No written papers yet. Add subjects from the Knox list in Setup and their exam dates arrive with them.</div>`;
+    $("tt-sub").textContent = "Every written paper you sit, from the NESA 2026 timetable";
+    return;
+  }
+
+  const today = todayISO();
+  const next = papers.find(p => p.date >= today);
+  const last = papers[papers.length - 1];
+  $("tt-sub").textContent = papers.length + " paper" + (papers.length === 1 ? "" : "s") +
+    (next ? " · first up " + fmtD(next.date) + ", " + Math.max(0, daysBetween(today, next.date)) + " days away" : "") +
+    " · done " + fmtD(last.date);
+
+  let lastDate = null;
+  el.innerHTML = papers.map(p => {
+    const n = daysBetween(today, p.date);
+    const head = p.date !== lastDate;
+    lastDate = p.date;
+    const past = n < 0;
+    return `${head ? `<div class="daygroup">${fmtLong(p.date)}</div>` : ""}
+      <div class="itemrow" style="grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;${past ? "opacity:.45" : ""}">
+        <span class="swatch" style="background:${esc(p.colour)}"></span>
+        <div>
+          <strong>${esc(p.subject)}</strong>
+          ${p.paper && p.paper !== p.subject ? `<div style="font-size:11.5px;color:var(--ink-soft)">${esc(p.paper)}</div>` : ""}
+          ${p.custom ? `<div style="font-size:11.5px;color:var(--ink-soft)">your own date</div>` : ""}
+        </div>
+        <div style="font-size:12px;color:var(--ink-mid);white-space:nowrap">${p.start ? esc(p.start + " – " + p.end) : ""}</div>
+        <div class="val" style="white-space:nowrap;color:${past ? "var(--ink-soft)" : n <= 7 ? "var(--loss)" : "var(--ink)"}">
+          ${past ? "done" : n + " d"}</div>
+      </div>`;
+  }).join("") + (offList.length ? `<div class="note" style="margin-top:14px">
+      No written paper for ${offList.map(s => esc(s.name)).join(", ")} — ${offList.length === 1 ? "it is" : "they are"} assessed by submission or performance, so ${offList.length === 1 ? "it will" : "they will"} not appear above.</div>` : "");
+}
 
 /* =========================================================================
    IMPORT / EXPORT
