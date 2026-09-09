@@ -1,4 +1,4 @@
-# Study Crew
+# Study Track
 
 A shared study tracker for a small group. Everyone defines their own subjects, areas and
 goals, logs their own sessions, and sees everyone else's. Static front end, Supabase for
@@ -58,14 +58,14 @@ free tier rate-limits those emails hard.
 ```bash
 git init
 git add .
-git commit -m "Study Crew"
+git commit -m "Study Track"
 git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/study-crew.git
+git remote add origin https://github.com/YOUR-USERNAME/studytrack.git
 git push -u origin main
 ```
 
 Then **Settings → Pages → Source: Deploy from a branch → main / (root) → Save.**
-A minute later it is live at `https://YOUR-USERNAME.github.io/study-crew/`.
+A minute later it is live at `https://YOUR-USERNAME.github.io/studytrack/`.
 Send that link to your mates.
 
 Finally, back in Supabase under **Authentication → URL Configuration**, add that URL to
@@ -74,6 +74,11 @@ Finally, back in Supabase under **Authentication → URL Configuration**, add th
 ---
 
 ## How it works
+
+### The header
+The mark, the group name, and a live count of **who is on the track right now** — anyone
+running a timer shows up as a bubble, you included, with a pulsing dot and their elapsed time
+on hover. Click a bubble to open that person's profile.
 
 ### Signing up
 Each person makes an account with an email, a password and a display name, then walks
@@ -112,6 +117,16 @@ you already had and shows as *your own date*. Nothing breaks.
 Set hours per weekday once. Any individual day can be overridden on the Today tab. A goal of
 **0** marks a rest day, and rest days never break a streak — otherwise the plan punishes you
 for following it.
+
+### Logging a session
+Two dropdowns: the **subject**, then the **area** inside it. The area list follows whatever
+subject you pick, and *Whole subject* is always the first option when you were not working on
+anything more specific.
+
+There is no "mode" dropdown. A fixed list of Consolidate / Drill / Timed paper never
+described what anyone actually did, so **write it in the note instead** — "Section II under
+time, 33/40, marketing was the weak one" is worth more than any dropdown, and the whole crew
+can read it.
 
 ### The timer
 Pick what you are working on and press start. It records real elapsed time, survives closing
@@ -161,7 +176,8 @@ interface.
 | `index.html` | Markup for auth, onboarding and the four tabs |
 | `app.js` | All the logic — auth, data, timer, charts, import |
 | `styles.css` | The design system |
-| `config.js` | Your Supabase keys and crew name |
+| `config.js` | Your Supabase keys and group name |
+| `favicon.svg` | The mark — a track seen from above, with a runner on the lane |
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |

@@ -6,7 +6,6 @@
 "use strict";
 
 const CFG = window.CREW_CONFIG || {};
-const MODES = ["Consolidate","Drill","Write to time","Timed paper","Review","Notes","Reading","Other"];
 const PALETTE = ["#3E7CA6","#C0564C","#3FA98A","#C9A227","#7A6BB5","#D98C3F","#2B6177","#B0577E"];
 
 let sb = null;
@@ -156,7 +155,11 @@ function authMsg(kind, text) {
 }
 function paintAuthMode() {
   const up = authMode === "up";
-  $("au-title").textContent = up ? "Join the crew" : (CFG.CREW_NAME || "Study Crew");
+  /* the brand lockup sits right above this, so do not say it twice */
+  const crew = String(CFG.CREW_NAME || "").trim();
+  const named = crew && crew.toLowerCase() !== "study track" ? crew : null;
+  $("au-title").textContent = up ? (named ? "Join " + named : "Join the crew")
+                                 : (named || "Welcome back");
   $("au-lede").textContent  = up ? "Make an account so the others can see how you are going."
                                  : "Sign in to see how the crew is going.";
   $("au-go").textContent    = up ? "Create account" : "Sign in";
@@ -542,27 +545,43 @@ $("rangechips").querySelectorAll("[data-r]").forEach(b => b.addEventListener("cl
 /* =========================================================================
    SELECTS  (subject / area pickers built from the signed-in user's own data)
    ========================================================================= */
-function areaOptions() {
+/* Two selects rather than one long list: the subject, then the part of it.
+   The area list follows whatever subject is chosen. */
+const SEL_PAIRS = [["tm-subj","tm-area"], ["f-subj","f-area"], ["ms-subj","ms-area"]];
+
+function subjectOptionsHTML() {
   const subs = mySubjects(UID);
   if (!subs.length) return `<option value="">Add a subject in Setup first</option>`;
-  return subs.map(s => {
-    const as = myAreas(UID).filter(a => a.subject_id === s.id);
-    return `<optgroup label="${esc(s.name)}">
-      <option value="s:${s.id}">${esc(s.name)} — general</option>
-      ${as.map(a => `<option value="a:${a.id}">${esc(a.name)}</option>`).join("")}
-    </optgroup>`;
-  }).join("");
+  return subs.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+}
+function areaOptionsHTML(subjectId) {
+  const as = myAreas(UID).filter(a => a.subject_id === subjectId);
+  return `<option value="">Whole subject</option>` +
+    as.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
+}
+function paintAreaSelect(sid, aid, keep) {
+  const want = keep !== undefined ? keep : $(aid).value;
+  $(aid).innerHTML = areaOptionsHTML($(sid).value);
+  if (want && $(aid).querySelector('[value="' + want + '"]')) $(aid).value = want;
 }
 function paintSelects() {
-  const html = areaOptions();
-  ["f-area","tm-area","ms-area"].forEach(id => { const v = $(id).value; $(id).innerHTML = html; if (v) $(id).value = v; });
-  const m = MODES.map(x => `<option>${x}</option>`).join("");
-  ["f-mode","tm-mode","ms-mode"].forEach(id => { if (!$(id).innerHTML) $(id).innerHTML = m; });
+  const html = subjectOptionsHTML();
+  SEL_PAIRS.forEach(([sid, aid]) => {
+    const ks = $(sid).value, ka = $(aid).value;
+    $(sid).innerHTML = html;
+    if (ks && $(sid).querySelector('[value="' + ks + '"]')) $(sid).value = ks;
+    paintAreaSelect(sid, aid, ka);
+  });
 }
-function splitTarget(v) {
-  if (!v) return { subject_id: null, area_id: null };
-  if (v.startsWith("a:")) { const a = areaById(v.slice(2)); return { subject_id: a ? a.subject_id : null, area_id: a ? a.id : null }; }
-  return { subject_id: v.slice(2), area_id: null };
+SEL_PAIRS.forEach(([sid, aid]) =>
+  $(sid).addEventListener("change", () => paintAreaSelect(sid, aid, "")));
+
+function readPair(sid, aid) {
+  return { subject_id: $(sid).value || null, area_id: $(aid).value || null };
+}
+function setPair(sid, aid, subject_id, area_id) {
+  if (subject_id) $(sid).value = subject_id;
+  paintAreaSelect(sid, aid, area_id || "");
 }
 function labelOf(s) {
   if (s.area_id) { const a = areaById(s.area_id); if (a) return a.name; }
@@ -595,7 +614,7 @@ function paintTimer() {
   $("tm-stop").disabled   = !t;
   $("tm-cancel").disabled = !t;
   $("tsub").textContent = t ? (t.label + (t.running ? "" : " · paused")) : "Nothing running";
-  document.title = (t && t.running ? "▶ " + hms(elapsedMs()).slice(0, 5) + " — " : "") + (CFG.CREW_NAME || "Study Crew");
+  document.title = (t && t.running ? "▶ " + hms(elapsedMs()).slice(0, 5) + " — " : "") + "Study Track";
   paintLive();
 }
 function startTick() { if (tickHandle) clearInterval(tickHandle); tickHandle = setInterval(paintTimer, 1000); }
@@ -617,13 +636,12 @@ async function pushTimer() {
 $("tm-start").addEventListener("click", async () => {
   if (localTimer) { localTimer.running = true; localTimer.started_at = new Date().toISOString(); }
   else {
-    const v = $("tm-area").value;
-    if (!v) { toast("Add a subject in Setup first"); return; }
-    const t = splitTarget(v);
-    const opt = $("tm-area").selectedOptions[0];
-    localTimer = { label: (opt ? opt.textContent.trim() : "Study") + " · " + $("tm-mode").value,
+    const t = readPair("tm-subj", "tm-area");
+    if (!t.subject_id) { toast("Add a subject in Setup first"); return; }
+    const sj = subjById(t.subject_id), ar = t.area_id ? areaById(t.area_id) : null;
+    localTimer = { label: ar ? (sj ? sj.name + " · " + ar.name : ar.name) : (sj ? sj.name : "Study"),
       subject_id: t.subject_id, area_id: t.area_id, acc_ms: 0,
-      started_at: new Date().toISOString(), running: true, mode: $("tm-mode").value, day: CUR };
+      started_at: new Date().toISOString(), running: true, day: CUR };
   }
   paintTimer(); startTick(); pushTimer();
 });
@@ -639,9 +657,8 @@ $("tm-cancel").addEventListener("click", () => {
 $("tm-stop").addEventListener("click", () => {
   if (!localTimer) return;
   const mins = Math.max(1, Math.round(elapsedMs() / 60000));
-  $("ms-area").innerHTML = areaOptions();
-  $("ms-area").value = localTimer.area_id ? "a:" + localTimer.area_id : (localTimer.subject_id ? "s:" + localTimer.subject_id : "");
-  $("ms-mode").value = localTimer.mode || MODES[0];
+  $("ms-subj").innerHTML = subjectOptionsHTML();
+  setPair("ms-subj", "ms-area", localTimer.subject_id, localTimer.area_id);
   $("ms-min").value = mins;
   $("ms-note").value = "";
   $("ms-sub").textContent = hms(elapsedMs()) + " on " + fmtLong(localTimer.day || CUR);
@@ -653,18 +670,18 @@ $("ms-discard").addEventListener("click", async () => {
   localTimer = null; await pushTimer(); $("ov-save").classList.remove("on"); paintTimer();
 });
 $("ms-save").addEventListener("click", async () => {
-  const t = splitTarget($("ms-area").value);
+  const t = readPair("ms-subj", "ms-area");
   const day = (localTimer && localTimer.day) || CUR;
-  await addSession(day, t, $("ms-mode").value, +$("ms-min").value, $("ms-note").value.trim());
+  await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim());
   localTimer = null; await pushTimer();
   $("ov-save").classList.remove("on"); paintTimer();
 });
 
-async function addSession(day, target, mode, minutes, note) {
+async function addSession(day, target, minutes, note) {
   if (!minutes || minutes < 1) { toast("Minutes needs to be at least 1"); return; }
   const { error } = await sb.from("sessions").insert({
     user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
-    day, minutes, mode, note: note || null });
+    day, minutes, note: note || null });
   if (error) { toast("Could not save: " + error.message); return; }
   toast("Logged " + f1(minutes / 60) + " h");
   await refresh();
@@ -673,8 +690,9 @@ async function addSession(day, target, mode, minutes, note) {
 /* ---------- manual add ---------- */
 document.querySelectorAll("[data-min]").forEach(b => b.addEventListener("click", () => $("f-min").value = b.dataset.min));
 $("f-add").addEventListener("click", async () => {
-  const v = $("f-area").value; if (!v) { toast("Add a subject in Setup first"); return; }
-  await addSession(CUR, splitTarget(v), $("f-mode").value, +$("f-min").value, $("f-note").value.trim());
+  const t = readPair("f-subj", "f-area");
+  if (!t.subject_id) { toast("Add a subject in Setup first"); return; }
+  await addSession(CUR, t, +$("f-min").value, $("f-note").value.trim());
   $("f-note").value = "";
 });
 $("h-date").addEventListener("change", e => { if (e.target.value) { CUR = e.target.value; renderHome(); } });
@@ -701,9 +719,14 @@ function renderAll() {
     `${f1(DB.sessions.reduce((a, s) => a + s.minutes / 60, 0))} hours in total.`;
 }
 function renderShell() {
-  $("crewname").textContent = CFG.CREW_NAME || "Study Crew";
+  $("crewname").textContent = "Study Track";
+  const crew = String(CFG.CREW_NAME || "").trim();
+  const chip = $("crewchip");
+  if (crew && crew.toLowerCase() !== "study track") { chip.textContent = crew; chip.hidden = false; }
+  else chip.hidden = true;
+  $("meblock").dataset.profile = UID;
   const total = DB.sessions.reduce((a, s) => a + s.minutes / 60, 0);
-  $("crewsub").textContent = `${DB.profiles.length} members · ${f1(total)} hours logged together`;
+  $("crewsub").textContent = `${DB.profiles.length} ${DB.profiles.length === 1 ? "member" : "members"} · ${f1(total)} hours logged together`;
   $("me-av").outerHTML = avatarHTML(ME, "lg").replace('class="av lg"', 'class="av lg" id="me-av"');
   $("me-name").textContent = ME.display_name;
   const board = leaderboard(7);
@@ -714,12 +737,35 @@ function renderShell() {
 /* =========================================================================
    RENDER — home
    ========================================================================= */
+/* The header strip: who is on the track right now. */
+function paintNowBar(all, now) {
+  const box = $("nowbar");
+  if (!box) return;
+  const live = all.filter(t => t.running);
+  if (!live.length) { box.innerHTML = ""; box.classList.remove("on"); return; }
+  box.classList.add("on");
+  const shown = live.slice(0, 5);
+  box.innerHTML =
+    `<span class="nowlabel"><i class="nowdot"></i>${live.length} studying</span>` +
+    `<span class="nowavs">` + shown.map(t => {
+      const p = profileOf(t.user_id);
+      const ms = t.acc_ms + (now - new Date(t.started_at).getTime());
+      const mine = t.user_id === UID;
+      return `<span class="nowav${mine ? " self" : ""}" data-profile="${esc(t.user_id)}"
+        title="${esc(p.display_name)}${mine ? " (you)" : ""} · ${esc(t.label || "studying")} · ${hms(ms)}">
+        ${avatarHTML(p, "sm")}</span>`;
+    }).join("") +
+    (live.length > shown.length ? `<span class="nowmore">+${live.length - shown.length}</span>` : "") +
+    `</span>`;
+}
+
 function paintLive() {
   const now = Date.now();
   const rows = DB.timers.filter(t => t.user_id !== UID)
     .filter(t => now - new Date(t.updated_at).getTime() < 8 * 3600e3);
   const mine = localTimer ? [{ ...localTimer, user_id: UID }] : [];
   const all = mine.concat(rows);
+  paintNowBar(all, now);
   const box = $("livestrip");
   if (!box) return;
   if (!all.length) { box.innerHTML = `<div class="empty" style="width:100%">Nobody is running a timer right now. Be the one who starts.</div>`; return; }
@@ -808,7 +854,7 @@ function entryHTML(s, withWho) {
   return `<div class="entry"><div class="top">
     <div>${withWho ? `<span class="wholink" data-profile="${esc(s.user_id)}" title="See ${esc(p.display_name)}'s full profile">${esc(p.display_name)}</span><span style="color:var(--ink-soft);font-size:11.5px"> · </span>` : ""}
       <strong style="color:${colourOf(s)}">${esc(labelOf(s))}</strong>
-      <span style="color:var(--ink-soft);font-size:11.5px"> · ${esc(s.mode || "")}${withWho ? " · " + fmtD(s.day) : ""}</span></div>
+      ${withWho ? `<span style="color:var(--ink-soft);font-size:11.5px"> · ${fmtD(s.day)}</span>` : ""}</div>
     <div style="text-align:right;font-weight:600">${f1(s.minutes / 60)} h</div>
     ${s.user_id === UID ? `<button class="x" data-del="${s.id}" title="Remove">×</button>` : "<span></span>"}
   </div>${s.note ? `<div class="enote">${esc(s.note)}</div>` : ""}</div>`;

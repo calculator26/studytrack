@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Study Crew</title>
+<title>Study Track</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="favicon.svg">
+<meta name="theme-color" content="#12161C">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -17,7 +20,15 @@
 <!-- ============ AUTH ============ -->
 <div id="auth" class="authwrap hide">
   <div class="authbox">
-    <h1 id="au-title">Study Crew</h1>
+    <div class="authbrand"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+          <rect x="7.5" y="10" width="17" height="12" rx="6" fill="none" stroke="#fff" stroke-opacity=".38" stroke-width="2.4"/>
+          <path d="M13.5 10h5a6 6 0 0 1 6 6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="24.5" cy="16" r="2.9" fill="#fff"/>
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#FF7A4D"/><stop offset="1" stop-color="#E8402A"/></linearGradient></defs>
+        </svg><span>Study Track</span></div>
+    <h1 id="au-title">Study Track</h1>
     <p class="lede" id="au-lede">Sign in to see how the crew is going.</p>
     <div id="au-msg"></div>
     <div class="field" id="au-namefield" style="display:none">
@@ -117,17 +128,31 @@
 <header class="top">
   <div class="wrap">
     <div class="mast">
-      <div>
-        <h1 id="crewname">Study Crew</h1>
-        <p id="crewsub">—</p>
-      </div>
-      <div class="meblock">
-        <div id="me-av" class="av lg">?</div>
-        <div>
-          <div class="nm" id="me-name">—</div>
-          <div class="sm" id="me-rank">—</div>
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+          <rect x="7.5" y="10" width="17" height="12" rx="6" fill="none" stroke="#fff" stroke-opacity=".38" stroke-width="2.4"/>
+          <path d="M13.5 10h5a6 6 0 0 1 6 6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="24.5" cy="16" r="2.9" fill="#fff"/>
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#FF7A4D"/><stop offset="1" stop-color="#E8402A"/></linearGradient></defs>
+        </svg>
+        <div class="brandtext">
+          <h1 id="crewname">Study Track</h1>
+          <p id="crewsub">—</p>
         </div>
-        <button class="btn ghost sm" id="signout" style="margin-left:6px">Sign out</button>
+        <span class="crewchip" id="crewchip" hidden></span>
+      </div>
+      <div class="mastright">
+        <div class="nowbar" id="nowbar"></div>
+        <div class="meblock" id="meblock" data-profile="" title="See your profile">
+          <div id="me-av" class="av lg">?</div>
+          <div>
+            <div class="nm" id="me-name">—</div>
+            <div class="sm" id="me-rank">—</div>
+          </div>
+        </div>
+        <button class="btn ghost sm" id="signout">Sign out</button>
       </div>
     </div>
     <nav class="tabs" role="tablist">
@@ -171,11 +196,11 @@
       <div>
         <div class="card mb16">
           <header><div><h2>Session timer</h2>
-            <div class="sub">The crew sees this the moment you start.</div></div></header>
+            <div class="sub">Everyone sees this the moment you start.</div></div></header>
           <div class="body">
-            <div class="grid" style="grid-template-columns:1.5fr 1fr;gap:10px;margin-bottom:4px">
-              <div><label class="fl" for="tm-area">What are you working on</label><select id="tm-area"></select></div>
-              <div><label class="fl" for="tm-mode">Mode</label><select id="tm-mode"></select></div>
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px">
+              <div><label class="fl" for="tm-subj">Subject</label><select id="tm-subj"></select></div>
+              <div><label class="fl" for="tm-area">Area</label><select id="tm-area"></select></div>
             </div>
             <div class="timer">
               <div class="tdisp" id="tdisp">00:00:00</div>
@@ -193,13 +218,13 @@
         <div class="card">
           <header><h2>Log a block by hand</h2><div class="sub">For anything you did not time</div></header>
           <div class="body">
-            <div class="grid" style="grid-template-columns:1.6fr 1fr .6fr auto;gap:10px;align-items:end">
-              <div><label class="fl" for="f-area">What</label><select id="f-area"></select></div>
-              <div><label class="fl" for="f-mode">Mode</label><select id="f-mode"></select></div>
+            <div class="grid" style="grid-template-columns:1.3fr 1.3fr .7fr auto;gap:10px;align-items:end">
+              <div><label class="fl" for="f-subj">Subject</label><select id="f-subj"></select></div>
+              <div><label class="fl" for="f-area">Area</label><select id="f-area"></select></div>
               <div><label class="fl" for="f-min">Minutes</label><input type="number" id="f-min" min="1" max="1440" step="5" value="60"></div>
               <div><button class="btn" id="f-add">Add</button></div>
             </div>
-            <div style="margin-top:10px"><label class="fl" for="f-note">What did you do? (optional — the crew can read this)</label>
+            <div style="margin-top:10px"><label class="fl" for="f-note">What did you do? (optional — everyone can read this)</label>
               <textarea id="f-note" placeholder="e.g. Two body paragraphs under time. Second one ran long."></textarea></div>
             <div class="controls" style="margin-top:9px">
               <span style="font-size:11.5px;color:var(--ink-soft)">Quick</span>
@@ -430,9 +455,9 @@
   <div class="modal">
     <header><div><h2>Session finished</h2><div style="font-size:12.5px;color:var(--ink-soft)" id="ms-sub">—</div></div></header>
     <div class="body">
-      <div class="grid" style="grid-template-columns:1.5fr 1fr .7fr;gap:10px">
-        <div><label class="fl" for="ms-area">What</label><select id="ms-area"></select></div>
-        <div><label class="fl" for="ms-mode">Mode</label><select id="ms-mode"></select></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr .7fr;gap:10px">
+        <div><label class="fl" for="ms-subj">Subject</label><select id="ms-subj"></select></div>
+        <div><label class="fl" for="ms-area">Area</label><select id="ms-area"></select></div>
         <div><label class="fl" for="ms-min">Minutes</label><input type="number" id="ms-min" min="1" max="1440" step="1"></div>
       </div>
       <div style="margin-top:12px"><label class="fl" for="ms-note">What did you get done? (the crew can read this)</label>
