@@ -165,35 +165,86 @@ function paintAuthMode() {
   $("au-switch").textContent = up ? "Sign in" : "Create one";
   $("au-pass").setAttribute("autocomplete", up ? "new-password" : "current-password");
 }
-$("au-switch").addEventListener("click", () => { authMode = authMode === "up" ? "in" : "up"; authMsg(); paintAuthMode(); });
+function switchMode(m) { authMode = m; authMsg(); paintAuthMode(); }
+$("au-switch").addEventListener("click", () => switchMode(authMode === "up" ? "in" : "up"));
 $("au-go").addEventListener("click", doAuth);
 ["au-email","au-pass","au-name"].forEach(id =>
-  $(id).addEventListener("keydown", e => { if (e.key === "Enter") doAuth(); }));
+  $(id).addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doAuth(); } }));
 
+/* Supabase speaks in error strings. Say something a person can act on. */
+function friendlyAuthError(err) {
+  const m = String((err && err.message) || "").toLowerCase();
+  if (m.includes("invalid login credentials"))
+    return "That email and password do not match. Check both — or create an account if you have not yet.";
+  if (m.includes("email not confirmed"))
+    return "Your email has not been confirmed yet. Click the link in the email Supabase sent you, then sign in.";
+  if (m.includes("already registered") || m.includes("already been registered"))
+    return "There is already an account on that email. Sign in instead.";
+  if (m.includes("password should be") || m.includes("password must"))
+    return "That password is too short — use at least 6 characters.";
+  if (m.includes("rate limit") || m.includes("too many"))
+    return "Too many attempts just now. Wait a minute and try again.";
+  if (m.includes("failed to fetch") || m.includes("networkerror"))
+    return "Could not reach the server. Check your connection and try again.";
+  return (err && err.message) || "That did not work.";
+}
+
+let authBusy = false;
 async function doAuth() {
+  if (authBusy) return;                                  /* stop double submits */
+  const up    = authMode === "up";
   const email = $("au-email").value.trim().toLowerCase();
   const pass  = $("au-pass").value;
   const name  = $("au-name").value.trim();
+
   if (!email || !pass) { authMsg("err", "Email and password are both needed."); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { authMsg("err", "That does not look like an email address."); return; }
+  if (up && !name) { authMsg("err", "Pick a display name — it is how you show up on the leaderboard."); return; }
+  if (up && pass.length < 6) { authMsg("err", "Use a password of at least 6 characters."); return; }
   const allow = CFG.ALLOWED_EMAILS || [];
-  if (authMode === "up" && allow.length && !allow.map(x => x.toLowerCase()).includes(email)) {
+  if (up && allow.length && !allow.map(x => x.toLowerCase()).includes(email)) {
     authMsg("err", "That email is not on the invite list for this crew."); return;
   }
-  $("au-go").disabled = true; authMsg();
+
+  authBusy = true;
+  $("au-go").disabled = true;
+  $("au-go").textContent = up ? "Creating account…" : "Signing in…";
+  authMsg();
   try {
-    if (authMode === "up") {
-      if (!name) { authMsg("err", "Pick a display name."); $("au-go").disabled = false; return; }
-      const { error } = await sb.auth.signUp({ email, password: pass, options: { data: { display_name: name } } });
+    if (up) {
+      const { data, error } = await sb.auth.signUp({
+        email, password: pass, options: { data: { display_name: name } }
+      });
       if (error) throw error;
-      const { error: e2 } = await sb.auth.signInWithPassword({ email, password: pass });
-      if (e2) { authMsg("ok", "Account created. Check your email to confirm, then sign in."); authMode = "in"; paintAuthMode(); }
+
+      /* Supabase hands back a user with no identities when the email is taken,
+         rather than admitting the account exists. Treat that as "sign in". */
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        switchMode("in");   /* switching clears the message, so say it after */
+        authMsg("err", "There is already an account on that email. Sign in instead.");
+        return;
+      }
+      /* Confirmation off: signUp already returns a session and we are in. */
+      if (data.session) { await enterSession(data.session); return; }
+
+      /* Confirmation on, or the session did not come back — try signing in. */
+      const { data: d2, error: e2 } = await sb.auth.signInWithPassword({ email, password: pass });
+      if (!e2 && d2 && d2.session) { await enterSession(d2.session); return; }
+      switchMode("in");
+      authMsg("ok", "Account created. Click the confirmation link in your email, then come back and sign in.");
     } else {
-      const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+      const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
       if (error) throw error;
+      if (!data || !data.session) throw new Error("Signed in, but no session came back. Try again.");
+      await enterSession(data.session);
     }
   } catch (err) {
-    authMsg("err", err.message || "That did not work.");
-  } finally { $("au-go").disabled = false; }
+    authMsg("err", friendlyAuthError(err));
+  } finally {
+    authBusy = false;
+    $("au-go").disabled = false;
+    paintAuthMode();                                     /* restores the label */
+  }
 }
 $("signout").addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
 
@@ -213,25 +264,67 @@ function show(which) {
   }
   paintAuthMode();
   const { data } = await sb.auth.getSession();
-  await onSession(data.session);
-  sb.auth.onAuthStateChange((_e, s) => { if (!s) { show("auth"); } });
+  await enterSession(data.session);
+
+  /* This is what actually drives the app after a sign-in or sign-up. Without it
+     a successful sign-in leaves you sitting on the login screen. */
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_OUT" || !session) { UID = null; ME = null; show("auth"); return; }
+    if (event === "SIGNED_IN" || event === "USER_UPDATED") enterSession(session);
+  });
 })();
+
+/* One way in, whoever calls it, and safe to call twice for the same session. */
+let entering = null;
+async function enterSession(session) {
+  if (!session) { UID = null; ME = null; show("auth"); return; }
+  if (entering === session.user.id) return;
+  entering = session.user.id;
+  try { await onSession(session); }
+  finally { entering = null; }
+}
+
+/* The signup trigger in schema.sql normally creates the profile row before we
+   get here. Occasionally we win the race, so wait for it before inserting. */
+async function ensureProfile(session) {
+  for (let i = 0; i < 2; i++) {
+    await new Promise(r => setTimeout(r, 200 + i * 250));
+    await loadAll();
+    const p = DB.profiles.find(x => x.id === UID);
+    if (p) return p;
+  }
+  const meta = session.user.user_metadata || {};
+  const { error } = await sb.from("profiles").insert({
+    id: UID,
+    display_name: meta.display_name || String(session.user.email || "").split("@")[0] || "New member"
+  });
+  if (error && error.code !== "23505") console.error("profile insert", error);
+  await loadAll();
+  return DB.profiles.find(x => x.id === UID) || null;
+}
 
 async function onSession(session) {
   if (!session) { show("auth"); return; }
   UID = session.user.id;
   show("boot");
-  await loadAll();
-  ME = DB.profiles.find(p => p.id === UID);
-  if (!ME) {
-    await sb.from("profiles").insert({ id: UID, display_name: session.user.email.split("@")[0] });
-    await loadAll(); ME = DB.profiles.find(p => p.id === UID);
+  try {
+    await loadAll();
+    ME = DB.profiles.find(p => p.id === UID) || await ensureProfile(session);
+    if (!ME) {
+      show("auth");
+      authMsg("err", "Signed in, but there is no profile row for you and one could not be made. Has schema.sql been run on this project?");
+      return;
+    }
+    if (!ME.onboarded) { startOnboarding(); return; }
+    show("app");
+    subscribeRealtime();
+    restoreTimer();
+    renderAll();
+  } catch (err) {
+    console.error(err);
+    show("auth");
+    authMsg("err", "Signed in, but the data would not load: " + ((err && err.message) || err));
   }
-  if (!ME.onboarded) { startOnboarding(); return; }
-  show("app");
-  subscribeRealtime();
-  restoreTimer();
-  renderAll();
 }
 
 async function loadAll() {
@@ -388,8 +481,12 @@ $("ob-next2").addEventListener("click", () => {
 $("ob-finish").addEventListener("click", async () => {
   $("ob-finish").disabled = true;
   try {
-    let avatar_url = ME.avatar_url || null;
-    if (obAvatarFile) avatar_url = await uploadAvatar(obAvatarFile);
+    let avatar_url = (ME && ME.avatar_url) || null;
+    if (obAvatarFile) {
+      /* a picture is not worth losing the whole signup over */
+      try { avatar_url = await uploadAvatar(obAvatarFile); }
+      catch (e) { toast("Could not upload the picture — carrying on without it"); }
+    }
     const wk = DOW.map((_, i) => Number($("obwk" + i).value));
     await sb.from("profiles").update({
       display_name: $("ob-name").value.trim(),
@@ -709,7 +806,7 @@ function renderHome() {
 function entryHTML(s, withWho) {
   const p = profileOf(s.user_id);
   return `<div class="entry"><div class="top">
-    <div>${withWho ? `<span style="color:var(--ink-soft);font-size:11.5px">${esc(p.display_name)} · </span>` : ""}
+    <div>${withWho ? `<span class="wholink" data-profile="${esc(s.user_id)}" title="See ${esc(p.display_name)}'s full profile">${esc(p.display_name)}</span><span style="color:var(--ink-soft);font-size:11.5px"> · </span>` : ""}
       <strong style="color:${colourOf(s)}">${esc(labelOf(s))}</strong>
       <span style="color:var(--ink-soft);font-size:11.5px"> · ${esc(s.mode || "")}${withWho ? " · " + fmtD(s.day) : ""}</span></div>
     <div style="text-align:right;font-weight:600">${f1(s.minutes / 60)} h</div>
@@ -755,7 +852,7 @@ function renderCrew() {
   const order = [1, 0, 2];
   $("podium").innerHTML = order.map(i => {
     const r = top[i]; if (!r) return `<div></div>`;
-    return `<div class="pod p${i + 1}">
+    return `<div class="pod p${i + 1} person" data-profile="${r.id}" title="See ${esc(r.p.display_name)}'s full profile">
       <div class="rank">#${i + 1}</div>
       ${avatarHTML(r.p, i === 0 ? "xl" : "lg")}
       <div class="hrs">${f1(r.hours)}<span style="font-size:13px;font-weight:500;color:var(--ink-soft)"> h</span></div>
@@ -775,7 +872,7 @@ function renderCrew() {
     const medal = i === 0 ? "var(--gold)" : i === 1 ? "var(--silver)" : i === 2 ? "var(--bronze)" : "var(--ink-soft)";
     return `<tr class="${r.id === UID ? "me" : ""}">
       <td class="l" style="font-weight:700;color:${medal}">${i + 1}</td>
-      <td class="l"><div class="who">${avatarHTML(r.p, "sm")}<span class="nm">${esc(r.p.display_name)}</span></div></td>
+      <td class="l"><div class="who person" data-profile="${r.id}" title="See ${esc(r.p.display_name)}'s full profile">${avatarHTML(r.p, "sm")}<span class="nm">${esc(r.p.display_name)}</span></div></td>
       <td style="font-weight:700">${f1(r.hours)}</td>
       <td>${r.sessions}</td>
       <td>${f1(r.hours / Math.max(1, days.length))}</td>
@@ -1179,6 +1276,163 @@ $("ma-name").addEventListener("keydown", e => { if (e.key === "Enter") $("ma-add
 document.querySelectorAll("[data-closeareas]").forEach(b => b.addEventListener("click", () => $("ov-areas").classList.remove("on")));
 $("ov-areas").addEventListener("click", e => { if (e.target.id === "ov-areas") e.currentTarget.classList.remove("on"); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") { $("ov-areas").classList.remove("on"); } });
+
+/* =========================================================================
+   PROFILE VIEW
+   Anyone can open anyone. Everything in here is already readable by every
+   signed-in member — this just puts it in one place instead of scattered
+   across the leaderboard, the feed and the charts.
+   ========================================================================= */
+function openProfile(id) {
+  const p = profileOf(id);
+  const mine = id === UID;
+
+  const all = DB.sessions.filter(x => x.user_id === id);
+  const byDay = {};
+  all.forEach(x => { byDay[x.day] = (byDay[x.day] || 0) + x.minutes / 60; });
+  const days = Object.keys(byDay).sort();
+  const totalH = all.reduce((a, x) => a + x.minutes / 60, 0);
+  const best = days.length ? Math.max(...days.map(d => byDay[d])) : 0;
+  const avg = days.length ? totalH / days.length : 0;
+
+  const wk = leaderboard(7);
+  const rank = wk.findIndex(r => r.id === id);
+  const wkHours = rank >= 0 ? wk[rank].hours : 0;
+
+  /* goal-hit rate across every day since they first logged something */
+  let hit = 0, withGoal = 0;
+  if (days.length) {
+    for (let d = days[0]; d <= todayISO(); d = addDays(d, 1)) {
+      const g = goalFor(id, d);
+      if (g > 0) { withGoal++; if ((byDay[d] || 0) >= g) hit++; }
+    }
+  }
+
+  $("pf-head").innerHTML = `
+    <div class="pfhead">
+      ${avatarHTML(p, "xl")}
+      <div class="pfid">
+        <h2>${esc(p.display_name)}${mine ? ` <span class="pilltag">you</span>` : ""}</h2>
+        <div class="pfmeta">${p.school ? esc(p.school) + " · " : ""}${
+          rank >= 0 ? `#${rank + 1} of ${wk.length} this week · ${f1(wkHours)} h` : "no hours this week"}</div>
+      </div>
+    </div>
+    <button class="x" data-closeprofile style="font-size:20px">&times;</button>`;
+
+  const subs = mySubjects(id), areas = myAreas(id);
+  const hSub = {}, hArea = {};
+  all.forEach(x => {
+    if (x.subject_id) hSub[x.subject_id] = (hSub[x.subject_id] || 0) + x.minutes / 60;
+    if (x.area_id) hArea[x.area_id] = (hArea[x.area_id] || 0) + x.minutes / 60;
+  });
+  const mxSub = Math.max(1, ...subs.map(x => hSub[x.id] || 0));
+
+  const logDays = Object.keys(byDay).sort().reverse();
+
+  $("pf-body").innerHTML = `
+    <div class="grid g4 mb16">
+      <div class="kpi"><div class="v">${f1(totalH)}</div><div class="k">Hours logged, all time</div>
+        <div class="d">${all.length} session${all.length === 1 ? "" : "s"}</div></div>
+      <div class="kpi"><div class="v">${days.length}</div><div class="k">Days with something logged</div>
+        <div class="d">${days.length ? "since " + fmtD(days[0]) : "nothing yet"}</div></div>
+      <div class="kpi"><div class="v">${streakFor(id)}</div><div class="k">Current streak</div>
+        <div class="d">Rest days carry it through</div></div>
+      <div class="kpi"><div class="v">${f1(avg)}</div><div class="k">Average per active day</div>
+        <div class="d">Best day ${f1(best)} h${withGoal ? " · goal hit " + f0(hit / withGoal * 100) + "%" : ""}</div></div>
+    </div>
+
+    <h3 class="sec">Hours by subject</h3>
+    <div class="rail mb16">${subs.length ? subs.map(x => {
+      const v = hSub[x.id] || 0;
+      return `<div class="rowbar">
+        <div><span class="swatch" style="background:${esc(x.colour)};display:inline-block;margin-right:7px"></span>${esc(x.name)}</div>
+        <div class="track"><div class="fill" style="width:${(v / mxSub) * 100}%;background:${esc(x.colour)}"></div></div>
+        <div class="val">${f1(v)} h</div></div>`;
+    }).join("") : `<div class="empty">No subjects set up.</div>`}</div>
+
+    ${areas.length ? `<h3 class="sec">Areas</h3>
+    <div class="mb16" style="max-height:230px;overflow:auto;border:1px solid var(--rule-soft);border-radius:4px">
+      ${areas.map(a => {
+        const sj = subs.find(x => x.id === a.subject_id);
+        return `<div class="itemrow" style="padding:8px 12px">
+          <span class="swatch" style="background:${esc((sj || {}).colour || "#999")}"></span>
+          <div><strong>${esc(a.name)}</strong>
+            <span style="font-size:11.5px;color:var(--ink-soft)"> · ${esc((sj || {}).name || "")}</span></div>
+          <div style="font-size:12.5px;color:var(--ink-mid);white-space:nowrap">
+            ${f1(hArea[a.id] || 0)} h${a.target_hours ? " / " + f1(a.target_hours) : ""}${
+              a.current_pct != null ? " · " + f0(a.current_pct) + "%" : ""}</div>
+        </div>`;
+      }).join("")}
+    </div>` : ""}
+
+    <h3 class="sec">Every session${all.length ? " — " + all.length + " of them, newest first" : ""}</h3>
+    <div class="pflog">${logDays.length ? logDays.map(d => `
+      <div class="daygroup">${fmtLong(d)} · ${f1(byDay[d])} h of ${f1(goalFor(id, d))}</div>
+      <div style="padding:0 14px">${all.filter(x => x.day === d)
+        .map(x => entryHTML(x, false)).join("")}</div>`).join("")
+      : `<div class="empty">Nothing logged yet.</div>`}</div>`;
+
+  wireDeletes($("pf-body"));
+  $("ov-profile").classList.add("on");
+}
+
+/* one listener for every avatar and name in the app */
+document.addEventListener("click", e => {
+  const t = e.target.closest && e.target.closest("[data-profile]");
+  if (t && t.dataset.profile) openProfile(t.dataset.profile);
+});
+document.querySelectorAll("[data-closeprofile]").forEach(b =>
+  b.addEventListener("click", () => $("ov-profile").classList.remove("on")));
+$("ov-profile").addEventListener("click", e => {
+  if (e.target.id === "ov-profile") e.currentTarget.classList.remove("on");
+  if (e.target.closest && e.target.closest("[data-closeprofile]")) e.currentTarget.classList.remove("on");
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") $("ov-profile").classList.remove("on");
+});
+$("s-viewme").addEventListener("click", () => openProfile(UID));
+
+/* =========================================================================
+   DELETE MY ACCOUNT
+   Tries the delete_own_account() function from schema.sql, which removes the
+   auth user and lets the cascades clear everything. If that function is not
+   installed yet, clear the rows we are allowed to clear and say so plainly.
+   ========================================================================= */
+$("nuke").addEventListener("click", async () => {
+  const who = (ME && ME.display_name) || "this account";
+  if (!confirm(
+    "Delete " + who + "?\n\n" +
+    "This removes every session, subject, area and goal, the profile itself, and the login. " +
+    "You will disappear from the crew leaderboard.\n\nThere is no undo.")) return;
+  const typed = prompt('Type DELETE to confirm.');
+  if (typed !== "DELETE") { toast("Not deleted"); return; }
+
+  $("nuke").disabled = true;
+  try {
+    const { error } = await sb.rpc("delete_own_account");
+    if (error) throw error;
+    await sb.auth.signOut();
+    location.reload();
+    return;
+  } catch (err) {
+    /* function missing — wipe what row-level security lets us wipe */
+    try {
+      for (const t of ["sessions", "areas", "subjects", "goals", "live_timers"]) {
+        await sb.from(t).delete().eq("user_id", UID);
+      }
+      const { error: pe } = await sb.from("profiles").delete().eq("id", UID);
+      if (pe) throw pe;
+      await sb.auth.signOut();
+      alert("Everything of yours has been deleted.\n\n" +
+            "The login itself is still in Supabase — run the latest schema.sql to install " +
+            "delete_own_account(), or remove the user under Authentication in the dashboard.");
+      location.reload();
+    } catch (err2) {
+      $("nuke").disabled = false;
+      toast("Could not delete: " + ((err2 && err2.message) || err2));
+    }
+  }
+});
 
 /* =========================================================================
    KNOX SUBJECT PICKER

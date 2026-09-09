@@ -105,14 +105,47 @@
   window.supabase = {
     createClient() {
       return {
-        auth: {
-          getSession: () => Promise.resolve({ data: { session: { user: { id: ME, email: "lewis@example.com" } } } }),
-          onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-          signInWithPassword: () => Promise.resolve({ error: null }),
-          signUp: () => Promise.resolve({ error: null }),
-          signOut: () => Promise.resolve({ error: null })
-        },
+        auth: (function () {
+          /* Shaped like supabase-js so the real auth flow can be exercised locally.
+             ?signedout=1  start on the sign-in screen
+             ?taken=1      signUp reports the email as already registered
+             ?confirm=1    signUp needs an email confirmation before sign-in works
+             ?badpass=1    signInWithPassword rejects                             */
+          const q = location.search;
+          const flag = n => new RegExp("[?&]" + n + "=1").test(q);
+          const session = () => ({ user: { id: ME, email: "lewis@example.com", user_metadata: {} } });
+          let signedIn = !flag("signedout");
+          let listener = null;
+          const fire = (ev, s) => { if (listener) setTimeout(() => listener(ev, s), 0); };
+          return {
+            getSession: () => Promise.resolve({ data: { session: signedIn ? session() : null } }),
+            onAuthStateChange: cb => { listener = cb;
+              return { data: { subscription: { unsubscribe() { listener = null; } } } }; },
+            signInWithPassword: () => {
+              if (flag("badpass"))
+                return Promise.resolve({ data: null, error: { message: "Invalid login credentials" } });
+              if (flag("confirm") && !signedIn)
+                return Promise.resolve({ data: null, error: { message: "Email not confirmed" } });
+              signedIn = true;
+              const s = session(); fire("SIGNED_IN", s);
+              return Promise.resolve({ data: { session: s, user: s.user }, error: null });
+            },
+            signUp: () => {
+              if (flag("taken"))
+                return Promise.resolve({ data: { user: { id: ME, identities: [] }, session: null }, error: null });
+              if (flag("confirm"))
+                return Promise.resolve({ data: { user: { id: ME, identities: [{}] }, session: null }, error: null });
+              signedIn = true;
+              const s = session(); fire("SIGNED_IN", s);
+              return Promise.resolve({ data: { user: s.user, session: s }, error: null });
+            },
+            signOut: () => { signedIn = false; fire("SIGNED_OUT", null); return Promise.resolve({ error: null }); }
+          };
+        })(),
         from: builder,
+        rpc: name => Promise.resolve(name === "delete_own_account"
+          ? { data: null, error: null }
+          : { data: null, error: { message: "no such function" } }),
         storage: { from: () => ({ upload: () => Promise.resolve({ error: null }),
           getPublicUrl: () => ({ data: { publicUrl: "" } }) }) },
         channel: () => ({ on() { return this; }, subscribe() { return this; } })

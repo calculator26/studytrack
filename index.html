@@ -338,7 +338,8 @@
   <section class="panel" id="p-setup">
     <div class="grid g2 mb16">
       <div class="card">
-        <header><h2>Profile</h2></header>
+        <header><div><h2>Profile</h2><div class="sub">How you appear to everyone else</div></div>
+          <button class="btn ghost sm" id="s-viewme">View my profile</button></header>
         <div class="body">
           <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
             <div id="s-avpreview" class="av xl">?</div>
@@ -408,8 +409,12 @@
           <p style="margin:0 0 11px">Your subjects, areas and goals are yours. Nobody can edit or delete anything of yours.</p>
           <p style="margin:0 0 11px">Your streak counts consecutive days where you met your goal. A day with a goal of zero is a rest day and passes through without breaking it.</p>
           <div class="note bad" style="margin-top:14px">
-            <strong>Danger zone.</strong> This deletes every session you have logged. Subjects and goals stay.
+            <strong>Danger zone.</strong>
+            <div style="margin-top:7px">Clearing your sessions wipes every block you have logged. Your subjects, areas and goals stay put.</div>
             <div style="margin-top:9px"><button class="btn ghost sm" id="wipe" style="color:var(--loss);border-color:#E7BEBA">Delete all my sessions</button></div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid #EFC4BF">
+              Deleting your account removes <strong>everything</strong> — sessions, subjects, areas, goals, your profile and your login. You disappear from the crew leaderboard. There is no undo.</div>
+            <div style="margin-top:9px"><button class="btn ghost sm" id="nuke" style="color:var(--loss);border-color:#E7BEBA">Delete my account</button></div>
           </div>
         </div>
       </div>
@@ -457,6 +462,14 @@
   </div>
 </div>
 
+
+
+<div class="ov" id="ov-profile">
+  <div class="modal profilemodal">
+    <header id="pf-head"></header>
+    <div class="body" id="pf-body"></div>
+  </div>
+</div>
 
 <div class="ov" id="ov-picker">
   <div class="modal" style="max-width:840px">

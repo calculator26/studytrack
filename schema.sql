@@ -107,6 +107,7 @@ end $$;
 create policy "read all"   on public.profiles for select to authenticated using (true);
 create policy "insert own" on public.profiles for insert to authenticated with check (id = auth.uid());
 create policy "update own" on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+create policy "delete own" on public.profiles for delete to authenticated using (id = auth.uid());
 
 do $$
 declare t text;
@@ -135,6 +136,26 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ============================================================
+--  Let someone delete their own account, and everything in it
+-- ------------------------------------------------------------
+--  Removing the auth.users row cascades through profiles, subjects,
+--  areas, sessions, goals and live_timers. It only ever deletes the
+--  caller's own row — auth.uid() is the session's user, and cannot be
+--  spoofed from the browser.
+-- ============================================================
+create or replace function public.delete_own_account()
+returns void language plpgsql security definer set search_path = public, auth as $
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+  delete from auth.users where id = auth.uid();
+end $;
+
+revoke all on function public.delete_own_account() from public, anon;
+grant execute on function public.delete_own_account() to authenticated;
 
 -- ============================================================
 --  Realtime — so the crew view updates without a refresh

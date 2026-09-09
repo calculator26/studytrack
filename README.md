@@ -15,7 +15,9 @@ Takes about ten minutes.
 1. Go to **supabase.com**, create a free project, and wait for it to finish provisioning.
 2. Open **SQL Editor → New query**, paste in the whole of `schema.sql`, and run it.
    It creates the tables, the row-level security policies, the signup trigger, the realtime
-   publication and the avatars storage bucket. It is safe to run more than once.
+   publication, the account-deletion function and the avatars storage bucket. It is safe to
+   run more than once — **re-run it after pulling changes**, since new versions add policies
+   and functions the app expects.
 3. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key.
 
 ### 2. Point the app at it
@@ -116,6 +118,17 @@ Pick what you are working on and press start. It records real elapsed time, surv
 the tab, and appears on everyone else's **Studying right now** strip the moment it starts.
 When you finish, you are asked what you got done before it saves.
 
+### Profiles
+Click anyone — on the podium, in the leaderboard, or next to their name in the activity
+feed — and you get their whole profile: hours, streak, goal-hit rate, best day, hours by
+subject, every area with its target and current mark, and **every session they have ever
+logged**, notes and all.
+
+Your own profile is edited under Setup: picture, display name, school and colour. There is
+also a **Delete my account** button there, which removes every session, subject, area and
+goal, your profile, and the login itself. It is not reversible, and it is the fastest way to
+clear out test accounts.
+
 ### Comparison
 The Crew tab has a podium and a full leaderboard over Today / 7 days / 30 days / all time,
 with hours, sessions, average per day, longest day, goal-hit rate, streak and a seven-day
@@ -169,6 +182,10 @@ table does not exist. Run it and refresh.
 `schema.sql` creates it; if the storage policies failed, run that section again.
 
 **The leaderboard only shows you** — everyone needs to finish onboarding before they appear.
+
+**"Delete my account" says the login is still there** — your project has not got the
+`delete_own_account()` function yet. Re-run `schema.sql`; it is safe to run again. Until
+then the button still clears all of your data, it just cannot remove the login itself.
 
 **A subject is missing from the Knox list** — add it by hand; it works exactly the same, it
 just will not prefill. Then add it to the `S` array in `catalogue.js` if you want it there

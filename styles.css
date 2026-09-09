@@ -205,3 +205,121 @@ h3.sec{font-size:12.5px;color:var(--ink-mid);font-weight:600;margin:0 0 9px}
 @media (max-width:620px){.g4{grid-template-columns:1fr}.rowbar{grid-template-columns:110px 1fr 78px}
   .tdisp{font-size:44px}.podium{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* =========================================================================
+   REFINEMENTS
+   Same restrained, professional look — just sitting better. Softer corners,
+   real elevation instead of a flat hairline, motion on the things you touch,
+   and a few styles for the profile view.
+   ========================================================================= */
+:root{
+  --shadow:0 1px 2px rgba(18,35,46,.05), 0 2px 6px rgba(18,35,46,.05);
+  --shadow-lift:0 2px 4px rgba(18,35,46,.06), 0 8px 20px rgba(18,35,46,.09);
+  --r:6px; --r-sm:5px;
+  --ease:cubic-bezier(.2,.7,.3,1);
+}
+
+/* ---------- surfaces ---------- */
+body{background:linear-gradient(180deg,#EAEEF0 0%,var(--ground) 340px)}
+.card,.kpi{border-radius:var(--r)}
+.card{transition:box-shadow .18s var(--ease),border-color .18s var(--ease)}
+.card:hover{box-shadow:var(--shadow-lift)}
+.card>header{padding:15px 18px 13px;background:linear-gradient(180deg,#FCFDFD,var(--surface));
+  border-radius:var(--r) var(--r) 0 0}
+.card>header h2{font-size:15px;letter-spacing:-.022em}
+.kpi{transition:box-shadow .18s var(--ease),transform .18s var(--ease)}
+.kpi:hover{box-shadow:var(--shadow-lift);transform:translateY(-1px)}
+.kpi .v{letter-spacing:-.04em}
+
+/* ---------- controls ---------- */
+select,input[type=text],input[type=email],input[type=password],input[type=number],
+input[type=date],textarea{border-radius:var(--r-sm);transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
+select:hover,input:hover:not(:focus),textarea:hover:not(:focus){border-color:var(--ink-soft)}
+select:focus,input:focus,textarea:focus{outline:none;border-color:var(--navy);
+  box-shadow:0 0 0 3px rgba(43,97,119,.15)}
+input[type=color]{border-radius:var(--r-sm)}
+button.btn{border-radius:var(--r-sm);transition:background .15s var(--ease),border-color .15s var(--ease),
+  box-shadow .15s var(--ease),transform .06s var(--ease)}
+button.btn:hover{box-shadow:0 2px 8px rgba(18,35,46,.16)}
+button.btn:active:not(:disabled){transform:translateY(1px);box-shadow:none}
+button.btn.ghost:hover{background:var(--surface-2);box-shadow:none}
+button.btn:focus-visible,.chip:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(43,97,119,.3)}
+.chip{border-radius:100px;transition:background .15s var(--ease),border-color .15s var(--ease),color .15s var(--ease)}
+.chip:hover{border-color:var(--ink-soft);background:var(--surface-2)}
+.chip[aria-pressed="true"]:hover{background:#1B3444}
+.x{transition:color .12s var(--ease),background .12s var(--ease)}
+
+/* ---------- header ---------- */
+header.top{background:linear-gradient(180deg,#162935,var(--ink));
+  box-shadow:0 1px 0 rgba(255,255,255,.05) inset}
+nav.tabs button{transition:color .15s var(--ease),border-color .15s var(--ease)}
+.meblock .av{transition:transform .15s var(--ease),box-shadow .15s var(--ease)}
+
+/* ---------- tables ---------- */
+.tblwrap{border-radius:0 0 var(--r) var(--r)}
+thead th{position:sticky;top:0;z-index:2;
+  box-shadow:inset 0 -1px 0 var(--rule)}
+tbody tr{transition:background .12s var(--ease)}
+.pill{letter-spacing:.01em}
+
+/* ---------- clickable people ---------- */
+.person{cursor:pointer;border-radius:var(--r-sm);transition:background .14s var(--ease),
+  box-shadow .14s var(--ease),transform .14s var(--ease)}
+.who.person{padding:3px 7px;margin:-3px -7px}
+.who.person:hover{background:rgba(43,97,119,.09)}
+.who.person:hover .nm{color:var(--navy)}
+.pod.person:hover{box-shadow:var(--shadow-lift);transform:translateY(-2px)}
+.wholink{font-size:11.5px;color:var(--ink-soft);cursor:pointer;border-bottom:1px dotted var(--rule);
+  transition:color .14s var(--ease),border-color .14s var(--ease)}
+.wholink:hover{color:var(--navy);border-bottom-color:var(--navy)}
+.livecard{border-radius:var(--r);transition:box-shadow .16s var(--ease)}
+.livecard:hover{box-shadow:var(--shadow)}
+
+/* ---------- profile view ---------- */
+.profilemodal{max-width:860px}
+.pfhead{display:flex;align-items:center;gap:16px;min-width:0}
+.pfid{min-width:0}
+.pfid h2{font-size:21px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.pfmeta{font-size:12.5px;color:var(--ink-soft);margin-top:4px}
+.pilltag{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--l4);color:#08312A;padding:2px 8px;border-radius:100px}
+.pflog{border:1px solid var(--rule-soft);border-radius:var(--r);overflow:hidden;max-height:46vh;overflow-y:auto}
+.pflog .daygroup:first-child{border-top:0}
+.pflog .daygroup{position:sticky;top:0;z-index:1}
+
+/* ---------- modals ---------- */
+.ov{background:rgba(12,25,33,.5);backdrop-filter:blur(3px);
+  animation:ovin .16s var(--ease)}
+@keyframes ovin{from{opacity:0}to{opacity:1}}
+.modal{border-radius:10px;box-shadow:0 24px 70px rgba(0,0,0,.34);animation:mdin .2s var(--ease)}
+@keyframes mdin{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
+.modal>header{padding:17px 22px 15px;background:linear-gradient(180deg,#FCFDFD,var(--surface));
+  border-radius:10px 10px 0 0}
+.modal .body{padding:20px 22px 22px}
+
+/* ---------- auth ---------- */
+.authwrap{background:
+  radial-gradient(900px 520px at 22% -8%, rgba(47,207,166,.16), transparent 62%),
+  radial-gradient(760px 460px at 88% 108%, rgba(43,97,119,.34), transparent 60%),
+  var(--ink)}
+.authbox{border-radius:12px;padding:34px 32px;box-shadow:0 26px 70px rgba(0,0,0,.42)}
+.authbox h1{font-size:26px;letter-spacing:-.03em}
+.authbox p.lede{margin-bottom:24px}
+.field{margin-bottom:15px}
+.msg{border-radius:var(--r-sm);line-height:1.5}
+.switch button:hover{text-decoration:underline}
+.steps i{transition:background .25s var(--ease)}
+.obwrap{max-width:760px}
+
+/* ---------- misc ---------- */
+.empty{border-radius:var(--r)}
+.note{border-radius:var(--r-sm)}
+.toast{border-radius:7px}
+.daygroup{border-top:1px solid var(--rule-soft)}
+.itemrow{transition:background .12s var(--ease)}
+
+@media (max-width:620px){
+  .authbox{padding:26px 22px}
+  .pfhead{gap:12px}
+  .pfid h2{font-size:18px}
+}
