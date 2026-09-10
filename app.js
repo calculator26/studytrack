@@ -369,24 +369,68 @@ async function pollTimers() {
   } catch (e) { /* a dropped poll is not worth bothering anyone about */ }
 }
 
+/* ---------------------------------------------------------------------------
+   Coalescing the crew feed.
+
+   Realtime fans out: one person logging a session wakes every connected
+   client at the same instant, and refresh() is six full-table reads — the
+   whole sessions table among them. Ten people with a tab each turned every
+   single write into sixty queries, all at once, and a running timer
+   heartbeats into live_timers every sixty seconds on top of that. That is
+   what flattened the free-tier instance.
+
+   So: bursts collapse into one read, and a tab nobody is looking at does no
+   work at all. It catches up the moment you look at it again.
+   --------------------------------------------------------------------------- */
+const REFRESH_GAP = 8000;    /* never re-read everything more often than this */
+const TIMERS_GAP  = 5000;
+let refreshHandle = null, refreshAt = 0;
+let timersHandle  = null, timersAt  = 0;
+let missedWhileHidden = false;
+
+function refreshSoon() {
+  if (document.hidden) { missedWhileHidden = true; return; }
+  if (refreshHandle) return;                       /* one is already queued */
+  refreshHandle = setTimeout(() => {
+    refreshHandle = null; refreshAt = Date.now(); missedWhileHidden = false;
+    refresh();
+  }, Math.max(0, REFRESH_GAP - (Date.now() - refreshAt)));
+}
+
+function pollTimersSoon() {
+  if (document.hidden) { missedWhileHidden = true; return; }
+  if (timersHandle) return;
+  timersHandle = setTimeout(() => {
+    timersHandle = null; timersAt = Date.now();
+    pollTimers();
+  }, Math.max(0, TIMERS_GAP - (Date.now() - timersAt)));
+}
+
 function subscribeRealtime() {
   try {
     sb.channel("crew")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, () => refresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, () => pollTimers())
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    }, () => refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, refreshSoon)
+      .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    }, refreshSoon)
       .subscribe();
   } catch (e) { /* realtime is a bonus, not a requirement */ }
 
   if (pollHandle) return;                       /* only ever wire these up once */
-  pollHandle = setInterval(pollTimers, 15000);  /* who is studying, every 15s */
-  setInterval(() => refresh(), 90000);          /* everything else */
+  /* Realtime already tells us the moment anything changes. These intervals
+     are only a safety net for a dropped socket, so they can be lazy — and
+     they do nothing at all for a tab in the background. */
+  pollHandle = setInterval(() => { if (!document.hidden) pollTimersSoon(); }, 30000);
+  setInterval(() => { if (!document.hidden) refreshSoon(); }, 300000);
 
-  /* a hidden tab gets throttled to roughly once a minute, so catch up on return */
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) { paintTimer(); pollTimers(); }
+    if (document.hidden) return;
+    paintTimer();
+    pollTimersSoon();
+    /* Only re-read everything if something actually happened while you were
+       away, or it has gone stale sitting there. */
+    if (missedWhileHidden || Date.now() - refreshAt > REFRESH_GAP) refreshSoon();
   });
-  window.addEventListener("online", pollTimers);
+  window.addEventListener("online", () => { pollTimersSoon(); refreshSoon(); });
 }
 
 /* =========================================================================
