@@ -592,9 +592,6 @@ function subjectOptionsHTML(owner) {
   const subs = mySubjects(owner || UID);
   if (!subs.length) return `<option value="">${owner && owner !== UID
     ? "This member has no subjects" : "Add a subject in Setup first"}</option>`;
-function subjectOptionsHTML() {
-  const subs = mySubjects(UID);
-  if (!subs.length) return `<option value="">Add a subject in Setup first</option>`;
   return subs.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 function areaOptionsHTML(subjectId, owner) {
@@ -1031,10 +1028,6 @@ function openEdit(id) {
   editingId = id;
   editingOwner = s.user_id;
   $("e-subj").innerHTML = subjectOptionsHTML(s.user_id);
-  if (s.user_id !== UID) { toast("You can only edit your own sessions"); return; }
-
-  editingId = id;
-  $("e-subj").innerHTML = subjectOptionsHTML();
   /* An imported session, or one whose subject has since been deleted, has no
      subject at all — start it on the first one rather than on whatever the
      select happened to be showing. */
@@ -1050,15 +1043,6 @@ function openEdit(id) {
   setTimeout(() => $("e-min").focus(), 60);
 }
 function closeEdit() { editingId = null; editingOwner = null; $("ov-edit").classList.remove("on"); }
-  setPair("e-subj", "e-area", s.subject_id, s.area_id);
-  $("e-day").value  = s.day;
-  $("e-min").value  = s.minutes;
-  $("e-note").value = s.note || "";
-  $("me-sub").textContent = "Logged " + fmtLong(s.day) + " · " + f1(s.minutes / 60) + " h at the time";
-  $("ov-edit").classList.add("on");
-  setTimeout(() => $("e-min").focus(), 60);
-}
-function closeEdit() { editingId = null; $("ov-edit").classList.remove("on"); }
 
 /* A profile modal is built once and left alone, so an edit made from inside
    one has to redraw it or you are looking at the row you just changed. */
@@ -1085,7 +1069,6 @@ $("e-del").addEventListener("click", async () => {
     await admLog("session.delete", owner, profileOf(owner).display_name,
       before ? `${f1(before.minutes / 60)} h on ${before.day} — ${labelOf(before)}` : "session", before);
   }
-  const id = editingId;
   closeEdit();
   const { error } = await sb.from("sessions").delete().eq("id", id);
   if (error) { toast("Could not delete: " + error.message); return; }
@@ -1110,7 +1093,6 @@ $("e-save").addEventListener("click", async () => {
       `${before ? f1(before.minutes / 60) + " h on " + before.day : "session"} → ${f1(minutes / 60)} h on ${day}`,
       before);
   }
-  const id = editingId;
   const { error } = await sb.from("sessions").update({
     subject_id: t.subject_id, area_id: t.area_id,
     day, minutes, note: $("e-note").value.trim() || null }).eq("id", id);
