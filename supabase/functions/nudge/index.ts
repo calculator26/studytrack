@@ -197,15 +197,27 @@ function compose(c: Cand): { title: string; body: string } {
           : "Nothing logged all week. Start small tonight — twenty minutes counts.",
       };
 
-    default: // goal_miss
+    default: { // goal_miss
+      /* Short of the goal is not the same as having done nothing, and
+         telling someone who has put in two hours that they logged nothing
+         is the fastest way to get the whole thing muted. */
+      const done = Number(c.hours_today) > 0;
+      const short = Math.max(0, Number(c.goal_hours) - Number(c.hours_today));
       return {
-        title: "Nothing logged today",
-        body: pick([
-          `Your goal is ${goal} h. Twenty-five minutes now still counts.`,
-          `${goal} h was the plan. A short session beats none.`,
-          "Still time to put something on the board.",
-        ]),
+        title: done ? `${today} h of ${goal} h today` : "Nothing logged today",
+        body: done
+          ? pick([
+            `${f1(short)} h to go. Twenty minutes would close most of that.`,
+            `${f1(short)} h short. Still time tonight.`,
+            `Nearly there — ${f1(short)} h left on today's goal.`,
+          ])
+          : pick([
+            `Your goal is ${goal} h. Twenty-five minutes now still counts.`,
+            `${goal} h was the plan. A short session beats none.`,
+            "Still time to put something on the board.",
+          ]),
       };
+    }
   }
 }
 
