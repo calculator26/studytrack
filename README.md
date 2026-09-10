@@ -18,7 +18,19 @@ Takes about ten minutes.
    publication, the account-deletion function and the avatars storage bucket. It is safe to
    run more than once — **re-run it after pulling changes**, since new versions add policies
    and functions the app expects.
-3. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key.
+3. **Set who the administrators are.** Near the top of `schema.sql` there is one array:
+
+   ```sql
+   and lower(u.email) = any (array[
+     'lchristie26@knox.nsw.edu.au',
+     'akhannaboyle26@knox.nsw.edu.au'
+   ])
+   ```
+
+   Those addresses get the admin console. Edit the list and re-run the file to change it.
+   It is a function rather than a table on purpose: nothing reachable from the browser can
+   grant anybody admin, because the anon key cannot redefine a function.
+4. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key.
 
 ### 2. Point the app at it
 
@@ -207,6 +219,46 @@ also a **Delete my account** button there, which removes every session, subject,
 goal, your profile, and the login itself. It is not reversible, and it is the fastest way to
 clear out test accounts.
 
+### The admin console
+The addresses listed in `schema.sql` get one extra thing: a dark control room for keeping the
+crew honest. The way in is a button at the bottom of **Setup**, and it is only rendered after
+the *database* confirms the account is an administrator — nobody else sees it.
+
+Five sections:
+
+- **Overview** — members, sessions, hours, who is running a timer right now, and a 14-day bar
+  of the whole crew's output.
+- **Members** — everyone, with sessions, hours, streak, when they last logged anything and
+  whether they are still mid-setup. Rename someone, change their school, clear every session
+  they have logged, or remove the account outright.
+- **Sessions** — every block anyone has ever logged, searchable by note, subject or person and
+  filterable by member and date. Edit opens the same sheet members use on their own sessions,
+  so a correction looks exactly like one they would have made. Tick several and delete them
+  together.
+- **Integrity** — the anti-abuse part. It flags single blocks over six hours, days totalling
+  more than sixteen, dates in the future, dates from before the member joined, exact duplicate
+  entries, and timers left running overnight. Every flag is a **signal, not a verdict** — a
+  seven hour Saturday before trials is real, and the console says so rather than accusing
+  anyone. Nothing is ever removed automatically.
+- **Audit log** — every removal and profile change made from the console, with a snapshot of
+  the row as it was.
+
+**The audit log cannot be edited or cleared, by anyone.** It has no update policy and no delete
+policy in `schema.sql`, so an administrator can delete a member's session but cannot delete the
+record of having done it. That is deliberate: the console is a lot of power over other people's
+work, and the log is what keeps it accountable.
+
+Two other deliberate limits. An admin **cannot create a session in somebody else's name** —
+the insert policy is unchanged, and no part of moderation needs that, so leaving it out means
+nobody can fabricate work for another member. And an admin **cannot delete their own account**
+from the console; that still lives in Setup, where it belongs.
+
+The panel itself is only a door, not a lock. Every check in `admin.js` runs in the browser and
+could be bypassed by anyone willing to open devtools — what actually stops them is the row
+level security in `schema.sql`, where every update and delete policy reads
+`user_id = auth.uid() or public.is_admin()`. Force the panel open without being an admin and
+you get a working-looking screen whose every button quietly changes nothing.
+
 ### Comparison
 The Crew tab has a podium and a full leaderboard over Today / 7 days / 30 days / all time,
 with hours, sessions, average per day, longest day, goal-hit rate, streak and a seven-day
@@ -231,6 +283,11 @@ are reading them, because they are.
 enforced by the database, not the interface. Your own sessions you can edit and delete freely
 — see *Fixing a session you already logged* above.
 
+The exception is a **crew administrator**, who can correct or remove anyone's entries so that
+abuse can actually be cleaned up. There is no way to hide this: every such action is written to
+an append-only audit log that even the administrator who wrote it cannot alter. Administrators
+are named in `schema.sql` and nowhere else.
+
 Editing is silent: a session that has been changed does not say so, and the crew sees the new
 version. Nothing keeps the old one.
 
@@ -250,11 +307,17 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `config.js` | Your Supabase keys and group name |
 | `favicon.svg` | The mark — a track seen from above, with a runner on the lane |
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
+| `admin.js` | The admin console — overview, members, sessions, integrity flags, audit log |
+| `admin.css` | The console's own dark theme, kept apart from the app's design system |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |
 | `sw.js` | Service worker. Handles reminder notifications, and deliberately caches nothing |
 | `manifest.json` | Lets the app be installed to a Home Screen, which iOS requires for reminders |
 | `supabase/functions/nudge/` | The scheduled job that decides who needs a nudge and sends it |
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |
+
+`_test/index.html` takes a few switches: `?admin=0` signs you in as an ordinary member so you
+can check the console really is invisible, and `?dirty=1` seeds one entry per integrity rule so
+the flagging can be exercised.
 
 To try it locally without a Supabase project at all, open `_test/index.html` in a browser.
 It runs the whole interface against four fake members and three weeks of invented sessions.
@@ -284,6 +347,15 @@ the `VAPID_PRIVATE_KEY` secret is probably missing from the Supabase project, or
 **"Delete my account" says the login is still there** — your project has not got the
 `delete_own_account()` function yet. Re-run `schema.sql`; it is safe to run again. Until
 then the button still clears all of your data, it just cannot remove the login itself.
+
+**The admin console button is not there** — the account you are signed in as is not in the
+array in `schema.sql`, or the file has not been re-run since that array was added. The app asks
+the database directly (`select is_admin()`); if the function does not exist yet, there is simply
+no console and nothing breaks.
+
+**The console opens but nothing it does sticks** — the panel is running against a project whose
+policies still say `user_id = auth.uid()` with no admin clause. Re-run `schema.sql`. Every
+button will look like it worked and change nothing until you do.
 
 **A subject is missing from the Knox list** — add it by hand; it works exactly the same, it
 just will not prefill. Then add it to the `S` array in `catalogue.js` if you want it there

@@ -1,0 +1,269 @@
+/* =========================================================================
+   STUDY TRACK — ADMIN CONSOLE
+   -------------------------------------------------------------------------
+   Its own theme on purpose. The app is light, airy and encouraging; the
+   console is dark, dense and cold, because you should never be in any doubt
+   about which one you are looking at when you are one click from deleting
+   somebody's year of work.
+
+   Data colours are cool and were validated for contrast and colour-vision
+   separation against this surface. Red is reserved for destructive controls
+   and critical flags — it is never a series colour here.
+   ========================================================================= */
+.adm{
+  position:fixed; inset:0; z-index:200;
+  display:flex; flex-direction:column;
+  font-family:"Archivo",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+
+  /* surfaces */
+  --a-void:#080A0F; --a-bg:#0B0E14; --a-surface:#141821; --a-surface-2:#1A1F2B;
+  --a-raise:#212736;
+  /* lines */
+  --a-rule:#242B3A; --a-rule-soft:#1B2130;
+  /* ink */
+  --a-ink:#EAEDF4; --a-ink-mid:#98A2B8; --a-ink-soft:#68738B; --a-ink-faint:#48526604;
+  /* chrome accent — privilege, and destructive action */
+  --a-accent:#FF5A3C; --a-accent-dim:#C43D25; --a-accent-wash:rgba(255,90,60,.11);
+  /* data — validated on --a-surface: contrast >=3:1, adjacent CVD dE 9.4 */
+  --a-data:#3987E5; --a-data-2:#199E70; --a-data-3:#D95926;
+  /* status — fixed roles, always shipped with an icon and a word */
+  --a-good:#0CA30C; --a-warn:#FAB219; --a-serious:#EC835A; --a-critical:#D03B3B;
+
+  --a-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  background:var(--a-bg); color:var(--a-ink);
+  animation:admIn .2s cubic-bezier(.2,.8,.25,1);
+}
+@keyframes admIn{from{opacity:0;transform:scale(.995)}to{opacity:1;transform:none}}
+.adm[hidden]{display:none !important}
+
+/* the faint grid behind everything — texture, not decoration */
+.adm::before{
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.021) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.021) 1px,transparent 1px);
+  background-size:52px 52px;
+  mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 100%);
+}
+.adm *{position:relative}
+
+/* ---------- top bar ---------- */
+.adm-top{
+  flex:0 0 auto; display:flex; align-items:center; gap:16px;
+  padding:0 18px; height:56px;
+  background:linear-gradient(180deg,var(--a-void),var(--a-bg));
+  border-bottom:1px solid var(--a-rule);
+}
+.adm-brand{display:flex; align-items:center; gap:11px; min-width:0}
+.adm-key{
+  width:28px;height:28px;border-radius:8px;flex:0 0 auto;
+  background:linear-gradient(140deg,var(--a-accent),var(--a-accent-dim));
+  display:grid;place-items:center;font-size:14px;
+  box-shadow:0 0 0 1px rgba(255,90,60,.35), 0 0 22px -4px rgba(255,90,60,.55);
+}
+.adm-title{font-size:13.5px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.adm-title span{display:block;font:600 9.5px/1.4 var(--a-mono);letter-spacing:.16em;
+  text-transform:uppercase;color:var(--a-accent)}
+.adm-live{
+  margin-left:auto; display:flex; align-items:center; gap:9px;
+  font:500 11px/1 var(--a-mono); color:var(--a-ink-soft); white-space:nowrap;
+}
+.adm-dot{width:6px;height:6px;border-radius:50%;background:var(--a-accent);
+  box-shadow:0 0 0 3px var(--a-accent-wash); animation:admPulse 2.4s ease-in-out infinite}
+@keyframes admPulse{0%,100%{opacity:1}50%{opacity:.35}}
+.adm-close{
+  appearance:none;border:1px solid var(--a-rule);background:var(--a-surface);
+  color:var(--a-ink-mid);border-radius:8px;padding:7px 13px;cursor:pointer;
+  font-size:12.5px;font-weight:600;min-height:34px;
+  transition:background .14s,color .14s,border-color .14s}
+.adm-close:hover{background:var(--a-raise);color:var(--a-ink);border-color:#31394B}
+
+/* ---------- body: rail + content ---------- */
+.adm-shell{flex:1 1 auto; display:flex; min-height:0}
+.adm-rail{
+  flex:0 0 208px; border-right:1px solid var(--a-rule); padding:14px 11px;
+  display:flex; flex-direction:column; gap:2px; overflow:auto;
+  background:linear-gradient(180deg,rgba(255,255,255,.014),transparent 220px);
+}
+.adm-navlabel{font:700 9.5px/1 var(--a-mono);letter-spacing:.15em;text-transform:uppercase;
+  color:var(--a-ink-soft);padding:12px 9px 7px}
+.adm-nav{
+  appearance:none;border:0;background:transparent;color:var(--a-ink-mid);
+  text-align:left;padding:9px 11px;border-radius:9px;cursor:pointer;
+  font-size:13px;font-weight:550;display:flex;align-items:center;gap:10px;
+  min-height:38px; transition:background .14s,color .14s}
+.adm-nav .ic{width:17px;text-align:center;font-size:13px;opacity:.85;flex:0 0 auto}
+.adm-nav .ct{margin-left:auto;font:600 10.5px/1 var(--a-mono);color:var(--a-ink-soft);
+  background:var(--a-surface-2);padding:3px 6px;border-radius:5px}
+.adm-nav:hover{background:var(--a-surface);color:var(--a-ink)}
+.adm-nav[aria-current="true"]{background:var(--a-surface-2);color:var(--a-ink);
+  box-shadow:inset 2px 0 0 var(--a-accent)}
+.adm-nav[aria-current="true"] .ct{background:var(--a-accent-wash);color:var(--a-accent)}
+.adm-railfoot{margin-top:auto;padding:12px 9px 4px;border-top:1px solid var(--a-rule-soft);
+  font-size:11px;color:var(--a-ink-soft);line-height:1.55}
+
+.adm-content{flex:1 1 auto; overflow:auto; padding:20px 22px 60px; min-width:0}
+.adm-h{display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+.adm-h h2{margin:0;font-size:19px;font-weight:680;letter-spacing:-.02em}
+.adm-h p{margin:3px 0 0;font-size:12.5px;color:var(--a-ink-mid);max-width:72ch}
+.adm-h .sp{margin-left:auto}
+
+/* ---------- cards ---------- */
+.adm-card{background:var(--a-surface);border:1px solid var(--a-rule);border-radius:13px;
+  margin-bottom:16px;overflow:hidden}
+.adm-card>header{padding:13px 16px;border-bottom:1px solid var(--a-rule-soft);
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.adm-card>header h3{margin:0;font-size:13.5px;font-weight:650}
+.adm-card>header .sub{font-size:11.5px;color:var(--a-ink-soft)}
+.adm-card .pad{padding:16px}
+
+/* ---------- stat tiles ---------- */
+.adm-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:11px;margin-bottom:16px}
+.adm-tile{background:var(--a-surface);border:1px solid var(--a-rule);border-radius:12px;padding:14px 15px}
+.adm-tile .v{font:700 25px/1.05 var(--a-mono);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.adm-tile .k{font-size:11.5px;color:var(--a-ink-mid);margin-top:7px}
+.adm-tile .d{font-size:11px;color:var(--a-ink-soft);margin-top:3px}
+.adm-tile.alert{border-color:rgba(208,59,59,.45);background:linear-gradient(180deg,rgba(208,59,59,.09),var(--a-surface))}
+.adm-tile.alert .v{color:var(--a-critical)}
+
+/* ---------- tables ---------- */
+.adm-scroll{overflow-x:auto}
+table.adm-t{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
+table.adm-t th{
+  text-align:right;font:700 9.5px/1 var(--a-mono);letter-spacing:.11em;text-transform:uppercase;
+  color:var(--a-ink-soft);padding:0 12px 9px;border-bottom:1px solid var(--a-rule);
+  white-space:nowrap;position:sticky;top:0;background:var(--a-surface);z-index:2}
+table.adm-t th.l,table.adm-t td.l{text-align:left}
+table.adm-t td{padding:10px 12px;border-bottom:1px solid var(--a-rule-soft);text-align:right;
+  font-variant-numeric:tabular-nums;vertical-align:middle}
+table.adm-t tbody tr{transition:background .12s}
+table.adm-t tbody tr:hover{background:var(--a-surface-2)}
+table.adm-t tbody tr.sel{background:rgba(57,135,229,.10)}
+table.adm-t tbody tr:last-child td{border-bottom:0}
+.adm-who{display:flex;align-items:center;gap:9px;min-width:0}
+.adm-who .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.adm-av{width:26px;height:26px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  font-size:10px;font-weight:700;color:#0B0E14;overflow:hidden}
+.adm-av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.adm-mono{font:500 11px/1.4 var(--a-mono);color:var(--a-ink-soft)}
+.adm-note{color:var(--a-ink-mid);font-size:11.5px;max-width:320px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- controls ---------- */
+.adm-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+/* styles.css puts width:100% on every select and input in the document, which
+   would stack this filter row one control per line. Opt out explicitly. */
+.adm-in,.adm-sel{
+  appearance:none;background:var(--a-surface-2);border:1px solid var(--a-rule);
+  color:var(--a-ink);border-radius:8px;padding:8px 11px;font-size:12.5px;
+  font-family:inherit;min-height:36px;width:auto;max-width:100%}
+.adm-bar input[type=date].adm-in{flex:0 0 auto;width:158px}
+.adm-bar .adm-sel{flex:0 0 auto;max-width:210px}
+.adm-sel{padding-right:30px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='7'><path d='M1 1l4.5 4.5L10 1' fill='none' stroke='%2398A2B8' stroke-width='1.7' stroke-linecap='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center}
+.adm-in:focus,.adm-sel:focus{outline:none;border-color:var(--a-data);
+  box-shadow:0 0 0 3px rgba(57,135,229,.18)}
+.adm-in::placeholder{color:var(--a-ink-soft)}
+.adm-grow{flex:1 1 220px;width:auto;min-width:0}
+
+.adm-btn{
+  appearance:none;border:1px solid var(--a-rule);background:var(--a-surface-2);color:var(--a-ink);
+  border-radius:8px;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;
+  font-family:inherit;min-height:36px;white-space:nowrap;
+  transition:background .14s,border-color .14s,color .14s,opacity .14s}
+.adm-btn:hover{background:var(--a-raise);border-color:#333C50}
+.adm-btn:disabled{opacity:.4;cursor:not-allowed}
+.adm-btn.danger{color:#FF8D78;border-color:rgba(208,59,59,.42);background:rgba(208,59,59,.10)}
+.adm-btn.danger:hover{background:rgba(208,59,59,.20);border-color:rgba(208,59,59,.7)}
+.adm-btn.primary{background:var(--a-data);border-color:var(--a-data);color:#fff}
+.adm-btn.primary:hover{background:#4E96EA}
+.adm-btn.sm{padding:5px 9px;min-height:30px;font-size:11.5px}
+.adm-act{display:flex;gap:6px;justify-content:flex-end}
+
+/* ---------- flags / status ---------- */
+.adm-flag{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:650;
+  padding:3px 8px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+.adm-flag .fi{font-size:10px}
+.adm-flag.critical{color:#FF9A9A;background:rgba(208,59,59,.15);border-color:rgba(208,59,59,.4)}
+.adm-flag.serious {color:#F5B79B;background:rgba(236,131,90,.14);border-color:rgba(236,131,90,.38)}
+.adm-flag.warn    {color:#FFD470;background:rgba(250,178,25,.13);border-color:rgba(250,178,25,.35)}
+.adm-flag.good    {color:#69D169;background:rgba(12,163,12,.14);border-color:rgba(12,163,12,.38)}
+.adm-flag.mute    {color:var(--a-ink-soft);background:var(--a-surface-2);border-color:var(--a-rule)}
+
+/* ---------- charts ---------- */
+.adm-chart{width:100%;height:auto;display:block;overflow:visible}
+.adm-chart .grid{stroke:var(--a-rule-soft);stroke-width:1}
+.adm-chart .axis{fill:var(--a-ink-soft);font:500 10px/1 var(--a-mono)}
+.adm-bararea rect.bar{transition:opacity .12s}
+.adm-bararea:hover rect.bar{opacity:.45}
+.adm-bararea rect.bar:hover{opacity:1}
+.adm-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--a-ink-mid);
+  margin-top:10px}
+.adm-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:6px}
+
+/* ---------- empty / misc ---------- */
+.adm-empty{color:var(--a-ink-soft);font-size:12.5px;padding:30px;text-align:center;
+  border:1px dashed var(--a-rule);border-radius:11px;background:var(--a-surface-2)}
+.adm-warnbox{border:1px solid rgba(250,178,25,.35);background:rgba(250,178,25,.07);
+  border-radius:11px;padding:13px 15px;font-size:12.5px;color:#F3DCA8;line-height:1.6;
+  margin-bottom:16px}
+.adm-warnbox strong{color:#FFD470}
+.adm-sub{font-size:11.5px;color:var(--a-ink-soft);margin-top:8px;line-height:1.6}
+.adm-selbar{display:flex;align-items:center;gap:11px;padding:10px 14px;
+  background:rgba(57,135,229,.12);border:1px solid rgba(57,135,229,.35);
+  border-radius:10px;margin-bottom:12px;font-size:12.5px}
+.adm-ck{width:15px;height:15px;accent-color:var(--a-data);cursor:pointer;margin:0}
+
+/* ---------- stacking ----------
+   The console covers the whole app (header 60, tooltip 99, pill 110), but it
+   OPENS the shared edit sheet, so modals have to come back over the top of it
+   or they render behind and cannot be clicked. Toasts stay above modals, as
+   they already did. Raising .ov also fixes a pre-existing oddity in the app
+   proper: the floating timer pill used to sit on top of an open modal. */
+.ov{z-index:260}
+.toast{z-index:280}
+
+/* the trigger that lives in Setup — only ever rendered for a verified admin */
+.admkey{
+  appearance:none;cursor:pointer;display:inline-flex;align-items:center;gap:9px;
+  background:linear-gradient(140deg,#141821,#0B0E14);
+  border:1px solid #2A3140;color:#C8D0E0;border-radius:10px;
+  padding:9px 14px;font:600 12.5px/1 inherit;min-height:38px;
+  transition:border-color .16s,box-shadow .16s,color .16s}
+.admkey:hover{border-color:var(--a-accent);color:#fff;
+  box-shadow:0 0 0 3px rgba(255,90,60,.14), 0 0 26px -8px rgba(255,90,60,.7)}
+.admkey .g{font-size:13px}
+.admkey .t span{display:block;font:700 8.5px/1.5 var(--a-mono);letter-spacing:.15em;
+  text-transform:uppercase;color:#FF7A60}
+
+/* ---------- phone ---------- */
+@media (max-width:900px){
+  .adm-shell{flex-direction:column}
+  .adm-rail{flex:0 0 auto;flex-direction:row;overflow-x:auto;gap:6px;padding:9px 10px;
+    border-right:0;border-bottom:1px solid var(--a-rule)}
+  .adm-navlabel,.adm-railfoot{display:none}
+  .adm-nav{padding:8px 12px;white-space:nowrap;min-height:38px}
+  .adm-nav[aria-current="true"]{box-shadow:inset 0 -2px 0 var(--a-accent)}
+  .adm-content{padding:15px 13px 60px}
+  .adm-top{padding:0 13px}
+  .adm-title span{display:none}
+  .adm-note{max-width:150px}
+}
+@media (max-width:620px){
+  /* the top bar has to hold a brand, a status and a way out in 390px */
+  .adm-top{gap:9px;padding:0 11px}
+  .adm-title{font-size:12px}
+  .adm-live{font-size:10px;gap:6px}
+  .adm-livetext{display:none}          /* the dot and the flag count carry it */
+  .adm-close{padding:7px 10px;font-size:12px;white-space:nowrap}
+  /* Same rule the app uses for its own wide charts: scroll it rather than
+     scaling the axis labels down to nothing. */
+  .adm-chart{min-width:520px}
+  .adm-tiles{grid-template-columns:1fr 1fr;gap:9px}
+  .adm-tile .v{font-size:21px}
+  .adm-in,.adm-sel,.adm-btn{font-size:16px}   /* iOS will not zoom the page */
+  .adm-btn.sm{font-size:13px}
+  .adm-grow{flex:1 1 100%}
+  .adm-bar input[type=date].adm-in{flex:1 1 0;width:auto;min-width:0}
+  .adm-bar .adm-sel{flex:1 1 100%;max-width:none}
+}
