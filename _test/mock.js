@@ -6,7 +6,8 @@
 
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
   const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [],
-              notification_prefs: [], push_subscriptions: [], notification_log: [] };
+              notification_prefs: [], push_subscriptions: [], notification_log: [],
+              nudges: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
@@ -85,6 +86,13 @@
       updated_at: new Date().toISOString() });
   }
 
+  /* Two mates have prodded you, so the collapsed banner is visible locally. */
+  T.nudges.push(
+    { id: uid(900), from_user: uid(2), to_user: ME, seen_at: null,
+      created_at: new Date(Date.now() - 9 * 60000).toISOString() },
+    { id: uid(901), from_user: uid(3), to_user: ME, seen_at: null,
+      created_at: new Date(Date.now() - 3 * 60000).toISOString() });
+
   T.live_timers.push({ user_id: uid(3), label: "Module B — Eliot · Write to time", subject_id: null, area_id: null,
     started_at: new Date(Date.now() - 22 * 60000).toISOString(), acc_ms: 0, running: true,
     updated_at: new Date().toISOString() });
@@ -108,6 +116,7 @@
       limit(n) { cap = n; return api; },
       eq(col, val) { filters.push([col, val]); return api; },
       in(col, vals) { filters.push([col, vals, "in"]); return api; },
+      is(col, val) { filters.push([col, val, "is"]); return api; },
       single() { const r = apply(); return Promise.resolve({ data: r[0] || null, error: null }); },
       insert(payload) {
         const arr = Array.isArray(payload) ? payload : [payload];
@@ -130,6 +139,8 @@
       },
       update(patch) { const p = Promise.resolve({ data: null, error: null });
         p.eq = (c, v) => { filters.push([c, v]); apply().forEach(r => Object.assign(r, patch));
+          return Promise.resolve({ data: null, error: null }); };
+        p.in = (c, vals) => { filters.push([c, vals, "in"]); apply().forEach(r => Object.assign(r, patch));
           return Promise.resolve({ data: null, error: null }); };
         return p; },
       delete() { const p = Promise.resolve({ data: null, error: null });
@@ -208,6 +219,27 @@
            then never appear, and openAdmin() should refuse. */
         rpc: (name, args) => {
           if (name === "delete_own_account") return Promise.resolve({ data: null, error: null });
+          /* Mirrors nudge_mate() so the button can be exercised locally. The
+             real rules live in the database; these are only for the harness. */
+          if (name === "nudge_mate") {
+            const target = args && args.target;
+            const say = reason => Promise.resolve({ data: { ok: false, reason }, error: null });
+            if (!target || target === ME) return say("You cannot nudge yourself");
+            const t = T.live_timers.find(r => r.user_id === target);
+            if (t && Date.now() - new Date(t.updated_at || 0).getTime() < 5 * 60000)
+              return say("They are studying right now");
+            if (T.sessions.some(r => r.user_id === target &&
+                Date.now() - new Date(r.created_at || 0).getTime() < 30 * 60000))
+              return say("They logged a session in the last half hour");
+            const last = T.nudges.filter(n => n.from_user === ME && n.to_user === target)
+              .map(n => new Date(n.created_at).getTime()).sort().pop();
+            if (last && Date.now() - last < 15 * 60000)
+              return say("You have nudged them already. Try again in " +
+                Math.max(1, Math.ceil((15 * 60000 - (Date.now() - last)) / 60000)) + " minutes");
+            T.nudges.push({ id: uid(950 + T.nudges.length), from_user: ME, to_user: target,
+              seen_at: null, created_at: new Date().toISOString() });
+            return Promise.resolve({ data: { ok: true }, error: null });
+          }
           if (name === "is_admin") return Promise.resolve({ data: !/admin=0/.test(location.search), error: null });
           if (name === "admin_delete_user") {
             const id = args && args.target;

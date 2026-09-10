@@ -280,6 +280,46 @@ Deno.serve(async (req) => {
     return json({ sent: results.filter((s) => s < 300).length, statuses: results });
   }
 
+  /* --- one member prodding another ---
+     Reached only from nudge_mate() in the database, which has already
+     applied every rule. Nothing here re-decides whether the poke was
+     allowed; it just delivers one that was. */
+  if (body.mode === "poke") {
+    if (!VAPID_PRIVATE) return json({ error: "VAPID_PRIVATE_KEY is not set" }, 500);
+
+    const { data: n } = await db.from("nudges")
+      .select("id, from_user, to_user").eq("id", String(body.nudge_id ?? "")).single();
+    if (!n) return json({ error: "no such nudge" }, 404);
+
+    const { data: sender } = await db.from("profiles")
+      .select("display_name").eq("id", n.from_user).single();
+    const { data: subs } = await db.from("push_subscriptions")
+      .select("id, endpoint, p256dh, auth").eq("user_id", n.to_user);
+
+    const who = sender?.display_name || "Someone";
+    let ok = 0;
+    for (const s of (subs ?? []) as Sub[]) {
+      try {
+        const r = await pushTo(s, {
+          title: `${who} nudged you`,
+          body: "They reckon it is about time you got started.",
+          kind: "poke",
+          url: "/",
+        });
+        if (r.status < 300) {
+          ok++;
+          await db.from("push_subscriptions")
+            .update({ last_ok_at: new Date().toISOString(), fail_count: 0 }).eq("id", s.id);
+        } else if (r.status === 404 || r.status === 410) {
+          await db.from("push_subscriptions").delete().eq("id", s.id);
+        }
+      } catch (e) { console.error("poke push failed", String(e)); }
+    }
+    /* Pokes deliberately stay out of notification_log: its unique index on
+       (user_id, kind, day) would cap them at one a day. */
+    return json({ sent: ok });
+  }
+
   /* --- the scheduled run --- */
   if (!VAPID_PRIVATE) return json({ error: "VAPID_PRIVATE_KEY is not set" }, 500);
 

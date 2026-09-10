@@ -324,6 +324,7 @@ async function onSession(session) {
     restoreTimer();
     renderAll();
     initReminders();
+    loadPokes();
     /* Asks the database whether this account is an administrator and reveals
        the console entry in Setup if it is. Never blocks the app: a project
        that has not re-run schema.sql simply has no console. */
@@ -413,6 +414,14 @@ function subscribeRealtime() {
       .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    }, refreshSoon)
       .subscribe();
+
+    /* Nudges are addressed to one person, so each client listens only for
+       its own. No filter here would mean every poke woke the whole crew. */
+    sb.channel("nudges:" + UID)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "nudges", filter: "to_user=eq." + UID
+      }, loadPokes)
+      .subscribe();
   } catch (e) { /* realtime is a bonus, not a requirement */ }
 
   if (pollHandle) return;                       /* only ever wire these up once */
@@ -429,6 +438,7 @@ function subscribeRealtime() {
     /* Only re-read everything if something actually happened while you were
        away, or it has gone stale sitting there. */
     if (missedWhileHidden || Date.now() - refreshAt > REFRESH_GAP) refreshSoon();
+    loadPokes();   /* one tiny indexed read against a partial index */
   });
   window.addEventListener("online", () => { pollTimersSoon(); refreshSoon(); });
 }
@@ -1651,12 +1661,20 @@ function openProfile(id) {
       </div>
     </div>
     <div class="pfacts">
-      ${mine ? `<button class="btn ghost sm" id="pf-signout">Sign out</button>` : ""}
+      ${mine ? `<button class="btn ghost sm" id="pf-signout">Sign out</button>`
+             : (() => {
+                 const why = nudgeBlockedBecause(id);
+                 return `<button class="btn sm" id="pf-nudge"${why ? " disabled" : ""} title="${
+                   esc(why ? NUDGE_BLOCK_TEXT[why] : "Tell them to get started")}">Nudge</button>`;
+               })()}
       <button class="x" data-closeprofile style="font-size:20px">&times;</button>
     </div>`;
 
   const so = $("pf-signout");
   if (so) so.addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
+
+  const nb = $("pf-nudge");
+  if (nb) nb.addEventListener("click", () => sendNudge(id));
 
   const subs = mySubjects(id), areas = myAreas(id);
   const hSub = {}, hArea = {};
@@ -2336,6 +2354,11 @@ function paintNudgeBar() {
   if (!bar) return;
   const s = nudgeState();
 
+  /* One prompt at a time. If a mate has actually nudged you, that says the
+     same thing with a person attached, and two stacked bars with the same
+     button is just noise — the Today ring still shows where you stand. */
+  if (POKES.length) { bar.className = "hide"; bar.innerHTML = ""; return; }
+
   if (!s || nudgeDismissed()) { bar.className = "hide"; bar.innerHTML = ""; return; }
 
   bar.className = s.due ? "due" : "";
@@ -2441,5 +2464,139 @@ if ($("s-calcopy")) {
     const tok = window.crypto && crypto.randomUUID ? crypto.randomUUID() : null;
     if (!tok) { toast("This browser cannot generate a new link"); return; }
     if (await savePrefs({ feed_token: tok })) toast("New link issued");
+  });
+}
+
+/* =========================================================================
+   NUDGE YOUR MATES
+   A button on someone's profile that prods them to get started. Every rule
+   lives in nudge_mate() in the database — the anon key is public, so
+   anything checked here could just as easily be skipped here. What follows
+   is only about showing the right thing.
+   ========================================================================= */
+let POKES = [];
+
+/* Why this person cannot be nudged, or null if they can. Mirrors the
+   database's rules so the button can explain itself before you press it;
+   the server stays the authority either way. */
+function nudgeBlockedBecause(id) {
+  if (!id || id === UID) return "yourself";
+  const t = DB.timers.find(x => x.user_id === id);
+  if (t && Date.now() - new Date(t.updated_at || 0).getTime() < LIVE_FRESH_MS) return "studying";
+  const halfHourAgo = Date.now() - 30 * 60e3;
+  if (DB.sessions.some(s => s.user_id === id &&
+      new Date(s.created_at || 0).getTime() > halfHourAgo)) return "recent";
+  return null;
+}
+
+const NUDGE_BLOCK_TEXT = {
+  yourself: "You cannot nudge yourself",
+  studying: "They are studying right now",
+  recent:   "They logged a session in the last half hour"
+};
+
+async function sendNudge(targetId) {
+  const btn = $("pf-nudge");
+  if (btn) { btn.disabled = true; btn.textContent = "Nudging…"; }
+  try {
+    const { data, error } = await sb.rpc("nudge_mate", { target: targetId });
+    if (error) throw error;
+    if (data && data.ok) {
+      toast("Nudge sent");
+      if (btn) btn.textContent = "Nudged";
+      return;
+    }
+    toast((data && data.reason) || "Could not nudge them");
+    if (btn) { btn.disabled = false; btn.textContent = "Nudge"; }
+  } catch (e) {
+    console.error(e);
+    toast("Could not nudge them right now");
+    if (btn) { btn.disabled = false; btn.textContent = "Nudge"; }
+  }
+}
+
+/* ---------- the inbox ---------- */
+async function loadPokes() {
+  if (!UID || !sb) return;
+  try {
+    const { data } = await sb.from("nudges")
+      .select("id, from_user, created_at")
+      .eq("to_user", UID).is("seen_at", null)
+      .order("created_at", { ascending: false }).limit(50);
+    POKES = data || [];
+  } catch (e) { POKES = []; }
+  paintPokeBar();
+}
+
+/* "Lewis", "Lewis and Sam", "Lewis, Sam and 3 others" */
+function pokeNames() {
+  const names = [];
+  POKES.forEach(n => {
+    const p = profileOf(n.from_user);
+    const first = String((p && p.display_name) || "Someone").trim().split(/\s+/)[0];
+    if (names.indexOf(first) < 0) names.push(first);
+  });
+  if (names.length === 0) return "Someone";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return names[0] + " and " + names[1];
+  const rest = names.length - 2;
+  return names[0] + ", " + names[1] + " and " + rest + (rest === 1 ? " other" : " others");
+}
+
+function pokeWhen(iso) {
+  const t = new Date(iso);
+  const time = t.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  const day = isoOf(t);
+  if (day === todayISO()) return "at " + time;
+  if (day === addDays(todayISO(), -1)) return "yesterday at " + time;
+  return t.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) + ", " + time;
+}
+
+async function dismissPokes() {
+  const ids = POKES.map(n => n.id);
+  POKES = [];
+  paintPokeBar();
+  if (!ids.length) return;
+  try {
+    await sb.from("nudges").update({ seen_at: new Date().toISOString() }).in("id", ids);
+  } catch (e) { console.error(e); }
+}
+
+/* The inbox loads after the first render, so whichever bar wins has to be
+   settled again once it arrives rather than only at render time. */
+function reconcileBars() {
+  try { paintNudgeBar(); } catch (e) { /* not wired up yet */ }
+}
+
+function paintPokeBar() {
+  const bar = $("pokebar");
+  if (!bar) return;
+  if (!POKES.length) {
+    bar.className = "hide"; bar.innerHTML = "";
+    reconcileBars();
+    return;
+  }
+
+  const many = POKES.length > 1;
+  bar.className = "";
+  bar.innerHTML =
+    `<span class="pb-icon" aria-hidden="true">👋</span>
+     <div class="pb-text">
+       <strong>${esc(pokeNames())} nudged you</strong>
+       <span>${many
+         ? esc(POKES.length + " nudges, the most recent " + pokeWhen(POKES[0].created_at) + ".")
+         : esc(pokeWhen(POKES[0].created_at) + " · they reckon it is about time you got started.")}</span>
+     </div>
+     <button class="btn sm" id="pb-go">Start a session</button>
+     <button class="x" id="pb-hide" title="Dismiss" aria-label="Dismiss">×</button>`;
+
+  reconcileBars();
+  $("pb-hide").addEventListener("click", dismissPokes);
+  $("pb-go").addEventListener("click", () => {
+    dismissPokes();                       /* acting on it counts as reading it */
+    const tab = document.querySelector('nav.tabs button[data-p="home"]');
+    if (tab) tab.click();
+    const start = $("tm-start");
+    if (start) { start.scrollIntoView({ block: "center", behavior: "smooth" }); start.focus(); }
   });
 }

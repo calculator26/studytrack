@@ -610,3 +610,113 @@ grant execute on function public.calendar_exams(uuid) to service_role;
 -- run_nudges() is SECURITY DEFINER and owned by postgres, so it is fine.
 revoke all on all functions in schema net from public, anon, authenticated;
 revoke usage on schema net from public, anon, authenticated;
+
+-- ============================================================
+--  NUDGE YOUR MATES
+--  A button on someone's profile that prods them to get started.
+--  Every rule lives here rather than in the browser: the anon key is
+--  public, so anything the client checks, the client can also skip.
+-- ============================================================
+create table if not exists public.nudges (
+  id         uuid primary key default gen_random_uuid(),
+  from_user  uuid not null references auth.users on delete cascade,
+  to_user    uuid not null references auth.users on delete cascade,
+  created_at timestamptz not null default now(),
+  seen_at    timestamptz
+);
+create index if not exists nudges_inbox_idx on public.nudges(to_user, created_at desc) where seen_at is null;
+create index if not exists nudges_pair_idx  on public.nudges(from_user, to_user, created_at desc);
+
+alter table public.nudges enable row level security;
+
+drop policy if exists "nudges read own"    on public.nudges;
+drop policy if exists "nudges dismiss own" on public.nudges;
+
+-- You see what you sent and what you were sent. Who is nudging whom is not
+-- crew-wide gossip the way sessions deliberately are.
+create policy "nudges read own" on public.nudges for select to authenticated
+  using (to_user = auth.uid() or from_user = auth.uid());
+
+create policy "nudges dismiss own" on public.nudges for update to authenticated
+  using (to_user = auth.uid()) with check (to_user = auth.uid());
+
+-- Deliberately no insert policy: nudge_mate() is the only way a row can
+-- appear, which is what makes the rules unskippable.
+
+create or replace function public.nudge_mate(target uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  me        uuid := auth.uid();
+  last_sent timestamptz;
+  mins_left int;
+  new_id    uuid;
+  secret    text;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'reason', 'You are not signed in');
+  end if;
+  if target is null or target = me then
+    return jsonb_build_object('ok', false, 'reason', 'You cannot nudge yourself');
+  end if;
+  if not exists (select 1 from public.profiles where id = target) then
+    return jsonb_build_object('ok', false, 'reason', 'That person is not here any more');
+  end if;
+
+  -- Mid-session. Five minutes matches LIVE_FRESH_MS in app.js, and a paused
+  -- timer counts: they are at their desk either way.
+  if exists (select 1 from public.live_timers lt
+              where lt.user_id = target and lt.updated_at > now() - interval '5 minutes') then
+    return jsonb_build_object('ok', false, 'reason', 'They are studying right now');
+  end if;
+
+  if exists (select 1 from public.sessions s
+              where s.user_id = target and s.created_at > now() - interval '30 minutes') then
+    return jsonb_build_object('ok', false, 'reason', 'They logged a session in the last half hour');
+  end if;
+
+  select max(created_at) into last_sent
+    from public.nudges where from_user = me and to_user = target;
+
+  if last_sent is not null and last_sent > now() - interval '15 minutes' then
+    mins_left := greatest(1, ceil(extract(epoch from
+                   (last_sent + interval '15 minutes' - now())) / 60.0));
+    return jsonb_build_object('ok', false,
+      'reason', 'You have nudged them already. Try again in ' || mins_left ||
+                case when mins_left = 1 then ' minute' else ' minutes' end);
+  end if;
+
+  insert into public.nudges (from_user, to_user) values (me, target) returning id into new_id;
+
+  -- Best-effort push, only for someone who already asked for notifications.
+  -- Failing here must never fail the nudge itself.
+  select cron_secret into secret from public.notification_config where id = 1;
+  if secret is not null and exists (select 1 from public.notification_prefs np
+                                     where np.user_id = target and np.push_on) then
+    begin
+      perform net.http_post(
+        url     := 'https://jebvozocpxhiplvvjobl.supabase.co/functions/v1/nudge',
+        body    := jsonb_build_object('mode', 'poke', 'nudge_id', new_id),
+        headers := jsonb_build_object('Content-Type', 'application/json', 'x-nudge-key', secret),
+        timeout_milliseconds := 20000
+      );
+    exception when others then null;
+    end;
+  end if;
+
+  return jsonb_build_object('ok', true, 'id', new_id);
+end $fn$;
+
+revoke all on function public.nudge_mate(uuid) from public, anon;
+grant execute on function public.nudge_mate(uuid) to authenticated;
+
+-- Realtime, so a nudge lands while they are looking. Each client filters to
+-- its own rows, so this never fans out to the whole crew.
+do $$
+begin
+  begin execute 'alter publication supabase_realtime add table public.nudges';
+  exception when others then null; end;
+end $$;

@@ -227,6 +227,35 @@ need push, which works on phones.
 Treat the link like a password — anyone who has it can read your exam dates. **Reset link**
 issues a new one and kills the old one immediately; you then re-add it in your calendar.
 
+### Nudging a mate
+
+Open somebody's profile and there is a **Nudge** button. Press it and a banner
+appears on their screen saying you prodded them, with the time you did it. If they
+have reminders switched on it also goes to their phone.
+
+It refuses more often than it fires, on purpose:
+
+| It will not send if | Why |
+|---|---|
+| They have a timer running | They are already doing the thing |
+| Their timer is merely paused | Still mid-session — they stepped away for a drink |
+| They logged a session in the last half hour | They have just finished |
+| You nudged that person under 15 minutes ago | One per person per quarter hour |
+| It is yourself | Obviously |
+
+The button tells you which of these applies before you press it, and the answer
+comes from the database rather than the page — the anon key is public, so a rule
+the browser enforces is a rule the browser can skip.
+
+The banner **stays until you dismiss it**. If several people nudged you while you
+were away they collapse into one — *"Lewis, Sam and 3 others nudged you"* — rather
+than stacking up a wall of guilt. While a nudge is showing, your own progress bar
+steps aside, since two bars with the same button is just noise.
+
+Who nudged whom is the one thing in the app the crew cannot see. Sessions and
+hours are deliberately public; your nudges are visible only to you and the person
+at the other end.
+
 ### While a session is running
 The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
 tells you where you are up to without switching to it. It shows `❚❚` while paused.
