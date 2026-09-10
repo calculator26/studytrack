@@ -1,0 +1,15 @@
+{
+  "name": "Study Track",
+  "short_name": "Study Track",
+  "description": "A shared study tracker. Log what you revise, see what everyone else is doing.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#12161C",
+  "theme_color": "#12161C",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

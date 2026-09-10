@@ -152,6 +152,36 @@ still deletes on the spot.
 The pencil only appears on your own rows. It is not the interface being polite about it —
 the database will not let you write to anyone else's session no matter what the browser asks.
 
+### Study reminders
+
+**Setup → Study reminders** turns on a notification that lands on your device at a time you
+pick, on days you have not logged anything. It costs nothing and involves no third party:
+the browser makers carry the message themselves, and no email is ever sent.
+
+Turning it on asks the browser for permission **once**. If you say no, the browser remembers
+and only its own site settings — the padlock beside the address bar — can undo it, so say yes
+if you actually want reminders.
+
+You get at most one a day, in your own timezone, and it varies with what your data says:
+
+| When | What it says |
+|---|---|
+| Nothing logged today | Reminds you what your goal was |
+| An exam inside a fortnight | Names the subject and how little you have done on it |
+| A streak of three days or more | Tells you it is on the line |
+| You already hit your goal | Says well done and leaves you alone |
+| Sunday | A one-line summary of the week |
+
+Pick days to skip with the Mon–Sun chips. **Send a test** proves it reaches this device.
+
+**On iPhone and iPad there is one extra step.** Safari only allows reminders once the app is
+on your Home Screen: tap Share, then *Add to Home Screen*, and open it from there. In an
+ordinary Safari tab the switch stays greyed out, because nothing would arrive. Chrome, Edge,
+Firefox and Safari 16.1+ on desktop, and Chrome on Android, all work in a normal tab.
+
+Reminders are per device. Turn them on for your phone and your laptop separately if you want
+both. Turning them off removes that device.
+
 ### While a session is running
 The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
 tells you where you are up to without switching to it. It shows `❚❚` while paused.
@@ -204,6 +234,10 @@ enforced by the database, not the interface. Your own sessions you can edit and 
 Editing is silent: a session that has been changed does not say so, and the crew sees the new
 version. Nothing keeps the old one.
 
+Reminder settings and registered devices are the one thing in here the crew **cannot** see.
+Unlike sessions and goals, those rows are readable only by you. Nobody can tell whether you
+have reminders on, and the nudge itself is generated and sent without any human seeing it.
+
 ---
 
 ## Files
@@ -217,6 +251,9 @@ version. Nothing keeps the old one.
 | `favicon.svg` | The mark — a track seen from above, with a runner on the lane |
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |
+| `sw.js` | Service worker. Handles reminder notifications, and deliberately caches nothing |
+| `manifest.json` | Lets the app be installed to a Home Screen, which iOS requires for reminders |
+| `supabase/functions/nudge/` | The scheduled job that decides who needs a nudge and sends it |
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |
 
 To try it locally without a Supabase project at all, open `_test/index.html` in a browser.
@@ -235,6 +272,14 @@ table does not exist. Run it and refresh.
 `schema.sql` creates it; if the storage policies failed, run that section again.
 
 **The leaderboard only shows you** — everyone needs to finish onboarding before they appear.
+
+**Reminders say "not available in this browser"** — on iPhone or iPad, add the app to your
+Home Screen and open it from there. Elsewhere it means the browser is too old for web push.
+
+**Reminders are on but nothing arrives** — check the browser has not blocked notifications
+for the site, then press *Send a test*. If the test works and the nightly nudge does not,
+the `VAPID_PRIVATE_KEY` secret is probably missing from the Supabase project, or the
+`study-nudges` cron job is not scheduled.
 
 **"Delete my account" says the login is still there** — your project has not got the
 `delete_own_account()` function yet. Re-run `schema.sql`; it is safe to run again. Until

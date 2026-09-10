@@ -323,6 +323,7 @@ async function onSession(session) {
     subscribeRealtime();
     restoreTimer();
     renderAll();
+    initReminders();
   } catch (err) {
     console.error(err);
     show("auth");
@@ -793,6 +794,7 @@ $("h-goalreset").addEventListener("click", async () => {
 function renderAll() {
   paintSelects();
   renderShell(); renderHome(); renderCrew(); renderMe(); renderSetup();
+  try { paintReminders(); } catch (e) { console.error(e); }
   $("footnote").textContent =
     `${DB.profiles.length} member${DB.profiles.length === 1 ? "" : "s"} · ` +
     `${DB.sessions.length} sessions logged between everyone · ` +
@@ -1986,3 +1988,214 @@ $("wipe").addEventListener("click", async () => {
   await sb.from("sessions").delete().eq("user_id", UID);
   await refresh(); toast("All your sessions deleted");
 });
+
+/* =========================================================================
+   STUDY REMINDERS
+   Web push, straight to the browser vendors. No third party service, no
+   email, no account anywhere: the device registers itself here, and a job
+   inside Supabase works out when somebody could do with a nudge.
+   ========================================================================= */
+const VAPID_PUBLIC_KEY =
+  "BKDaGDZxF1RmeuB6AZW6-AWNQClD2B_rt8nxpHWRrUn1O-4l23URyIiWSFRjO12rxiCA5zxNO7FYL1yZHJszSpo";
+const NUDGE_URL = String(CFG.SUPABASE_URL || "").replace(/\/+$/, "") + "/functions/v1/nudge";
+
+let PREFS = null;
+let swReg = null;
+
+const pushSupported = () => !!sb && "serviceWorker" in navigator &&
+  "PushManager" in window && "Notification" in window;
+
+/* iPadOS reports itself as a Mac, hence the touch check. */
+const iOSish = () => /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const standalone = () => window.matchMedia("(display-mode: standalone)").matches ||
+  navigator.standalone === true;
+
+function b64ToBytes(s) {
+  const p = "=".repeat((4 - s.length % 4) % 4);
+  const raw = atob((s + p).replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function ensureSW() {
+  if (swReg) return swReg;
+  swReg = await navigator.serviceWorker.register("sw.js");
+  await navigator.serviceWorker.ready;
+  return swReg;
+}
+
+async function loadPrefs() {
+  try {
+    const { data } = await sb.from("notification_prefs").select("*").eq("user_id", UID);
+    PREFS = (data && data[0]) || null;
+  } catch (e) { PREFS = null; }
+}
+
+async function savePrefs(patch) {
+  const row = Object.assign(
+    { user_id: UID, push_on: false, remind_at: "19:30:00", quiet_days: [] },
+    PREFS || {}, patch,
+    {
+      /* Rewritten on every save, so a nudge still lands at the right hour
+         if someone travels or the clocks change. */
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Australia/Sydney",
+      updated_at: new Date().toISOString()
+    });
+  delete row.created_at;
+  try {
+    const { data, error } = await sb.from("notification_prefs")
+      .upsert(row, { onConflict: "user_id" }).select();
+    if (error) throw error;
+    PREFS = (data && data[0]) || row;
+  } catch (e) {
+    console.error(e); toast("Could not save your reminder settings"); return false;
+  }
+  paintReminders();
+  return true;
+}
+
+async function remindersOn() {
+  let perm;
+  try { perm = await Notification.requestPermission(); }
+  catch (e) { perm = Notification.permission; }
+  if (perm !== "granted") {
+    toast(perm === "denied" ? "This browser is blocking notifications for the site"
+                            : "Reminders need permission to show notifications");
+    return false;
+  }
+
+  const reg = await ensureSW();
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: b64ToBytes(VAPID_PUBLIC_KEY)
+    });
+  }
+
+  const j = sub.toJSON();
+  const { error } = await sb.from("push_subscriptions").upsert({
+    user_id:    UID,
+    endpoint:   j.endpoint,
+    p256dh:     j.keys.p256dh,
+    auth:       j.keys.auth,
+    user_agent: String(navigator.userAgent).slice(0, 300)
+  }, { onConflict: "endpoint" });
+  if (error) { console.error(error); toast("Could not register this device"); return false; }
+
+  return await savePrefs({ push_on: true });
+}
+
+async function remindersOff() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) {
+      await sb.from("push_subscriptions").delete().eq("endpoint", sub.endpoint);
+      await sub.unsubscribe();
+    }
+  } catch (e) { console.error(e); }
+  return await savePrefs({ push_on: false });
+}
+
+function paintReminders() {
+  if (!$("s-remcard")) return;
+  const why = $("s-remwhy"), tog = $("s-remtoggle"), test = $("s-remtest");
+  const on  = !!(PREFS && PREFS.push_on);
+
+  if (!pushSupported()) {
+    why.classList.remove("hide");
+    why.innerHTML = iOSish() && !standalone()
+      ? "<strong>One extra step on iPhone and iPad.</strong> Safari only allows reminders once this is on your Home Screen. Tap Share, then <strong>Add to Home Screen</strong>, open it from there, and the switch below will work."
+      : "This browser cannot show reminders. Chrome, Edge, Firefox and Safari 16.1 or newer all can.";
+    tog.disabled = true; test.disabled = true;
+    $("s-remstate").className = "note";
+    $("s-remstate").textContent = "Reminders are not available in this browser.";
+    return;
+  }
+
+  why.classList.add("hide");
+  if (Notification.permission === "denied") {
+    why.classList.remove("hide");
+    why.innerHTML = "<strong>Notifications are blocked for this site.</strong> That can only be undone in the browser's own settings — look for the padlock beside the address bar.";
+  }
+
+  tog.disabled = false;
+  tog.textContent = on ? "Turn off" : "Turn on";
+  tog.classList.toggle("ghost", on);
+  test.disabled = !on;
+
+  const at = String((PREFS && PREFS.remind_at) || "19:30").slice(0, 5);
+  $("s-remtime").value = at;
+
+  /* DOW here runs Monday first; Postgres counts Sunday as 0. */
+  const quiet = (PREFS && PREFS.quiet_days) || [];
+  $("s-remdays").innerHTML = DOW.map((d, i) => {
+    const pg = (i + 1) % 7;
+    return `<button class="chip" data-quiet="${pg}" aria-pressed="${quiet.indexOf(pg) >= 0}">${d}</button>`;
+  }).join("");
+  $("s-remdays").querySelectorAll("[data-quiet]").forEach(b => b.addEventListener("click", async () => {
+    const pg = Number(b.dataset.quiet);
+    await savePrefs({ quiet_days: quiet.indexOf(pg) >= 0 ? quiet.filter(x => x !== pg) : quiet.concat(pg) });
+  }));
+
+  const tz = (PREFS && PREFS.timezone) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  $("s-remstate").className = "note" + (on ? " ok" : "");
+  $("s-remstate").textContent = on
+    ? `On. If you have logged nothing by ${at} (${tz}) this device gets a nudge. One a day at most, and never on a day you have skipped.`
+    : "Reminders are off. Turning them on asks the browser for permission, once.";
+}
+
+if ($("s-remtoggle")) {
+  $("s-remtoggle").addEventListener("click", async () => {
+    const b = $("s-remtoggle"); b.disabled = true;
+    try {
+      if (PREFS && PREFS.push_on) { if (await remindersOff()) toast("Reminders off"); }
+      else if (await remindersOn()) toast("Reminders on");
+    } catch (e) { console.error(e); toast("Could not change that"); }
+    finally { b.disabled = false; paintReminders(); }
+  });
+
+  $("s-remtime").addEventListener("change", async () => {
+    const v = $("s-remtime").value || "19:30";
+    if (await savePrefs({ remind_at: v.length === 5 ? v + ":00" : v })) toast("Reminder time saved");
+  });
+
+  $("s-remtest").addEventListener("click", async () => {
+    const b = $("s-remtest"); b.disabled = true;
+    try {
+      const { data } = await sb.auth.getSession();
+      const tok = data && data.session && data.session.access_token;
+      if (!tok) { toast("Sign in again first"); return; }
+      const r = await fetch(NUDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + tok },
+        body: JSON.stringify({ mode: "test" })
+      });
+      const j = await r.json().catch(() => ({}));
+      toast(r.ok && j.sent ? "Sent — watch for the banner"
+                           : "Could not send: " + (j.error || r.status));
+    } catch (e) { console.error(e); toast("Could not send the test"); }
+    finally { b.disabled = false; }
+  });
+}
+
+/* Runs once after sign-in, and never blocks the app from rendering. */
+async function initReminders() {
+  if (!$("s-remcard")) return;
+  if (!pushSupported()) { paintReminders(); return; }
+  try { await ensureSW(); } catch (e) { console.error("service worker:", e); }
+  await loadPrefs();
+  /* If the browser quietly dropped the subscription — cleared data, months
+     away — but we still think reminders are on, put it back. */
+  try {
+    if (PREFS && PREFS.push_on && Notification.permission === "granted") {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (!sub) await remindersOn();
+    }
+  } catch (e) { console.error(e); }
+  paintReminders();
+}

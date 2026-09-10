@@ -395,6 +395,24 @@
       </div>
     </div>
 
+    <div class="card mb16" id="s-remcard">
+      <header><div><h2>Study reminders</h2>
+        <div class="sub">A nudge on this device at a time you pick, on days you have not logged anything. Nothing is emailed, and nobody else can see whether you have them on.</div></div>
+        <button class="btn ghost sm" id="s-remtest">Send a test</button></header>
+      <div class="body">
+        <div class="note hide" id="s-remwhy" style="margin-bottom:14px"></div>
+        <div id="s-remgrid">
+          <div><label class="fl">Reminders</label>
+            <button class="btn" id="s-remtoggle">Turn on</button></div>
+          <div><label class="fl" for="s-remtime">Remind me at</label>
+            <input type="time" id="s-remtime" value="19:30"></div>
+          <div><label class="fl">Days to skip</label>
+            <div id="s-remdays"></div></div>
+        </div>
+        <div class="note" style="margin-top:14px" id="s-remstate">Reminders are off.</div>
+      </div>
+    </div>
+
     <div class="card mb16">
       <header><div><h2>Subjects and areas</h2>
         <div class="sub">Subjects are your courses. Areas are what you actually sit down and revise inside them. Target hours and current mark are optional but make your stats far more useful.</div></div>

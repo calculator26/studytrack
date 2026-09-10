@@ -6,6 +6,7 @@
 <title>Study Track</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="favicon.svg">
+<link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#12161C">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -393,6 +394,24 @@
           </div>
           <div class="note" style="margin-top:14px">A goal of 0 marks a rest day, which never breaks a streak.</div>
         </div>
+      </div>
+    </div>
+
+    <div class="card mb16" id="s-remcard">
+      <header><div><h2>Study reminders</h2>
+        <div class="sub">A nudge on this device at a time you pick, on days you have not logged anything. Nothing is emailed, and nobody else can see whether you have them on.</div></div>
+        <button class="btn ghost sm" id="s-remtest">Send a test</button></header>
+      <div class="body">
+        <div class="note hide" id="s-remwhy" style="margin-bottom:14px"></div>
+        <div id="s-remgrid">
+          <div><label class="fl">Reminders</label>
+            <button class="btn" id="s-remtoggle">Turn on</button></div>
+          <div><label class="fl" for="s-remtime">Remind me at</label>
+            <input type="time" id="s-remtime" value="19:30"></div>
+          <div><label class="fl">Days to skip</label>
+            <div id="s-remdays"></div></div>
+        </div>
+        <div class="note" style="margin-top:14px" id="s-remstate">Reminders are off.</div>
       </div>
     </div>
 
