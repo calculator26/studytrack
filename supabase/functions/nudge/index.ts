@@ -223,7 +223,6 @@ const json = (b: unknown, status = 200) =>
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (!VAPID_PRIVATE) return json({ error: "VAPID_PRIVATE_KEY is not set" }, 500);
 
   const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
@@ -242,26 +241,36 @@ Deno.serve(async (req) => {
     const { data: who } = await db.auth.getUser(token);
     if (!who?.user) return json({ error: "not signed in" }, 401);
 
+    if (!VAPID_PRIVATE) return json({ error: "VAPID_PRIVATE_KEY is not set" }, 500);
+
     const { data: subs } = await db.from("push_subscriptions")
       .select("id, endpoint, p256dh, auth").eq("user_id", who.user.id);
     if (!subs?.length) return json({ error: "no devices registered" }, 400);
 
+    // One bad device must not sink the whole test, so each is caught.
     const results = await Promise.all(subs.map(async (s) => {
-      const r = await pushTo(s as Sub, {
-        title: "Study Track reminders are on",
-        body: "This is what a nudge will look like.",
-        kind: "test",
-        url: "/",
-      });
-      if (r.status === 404 || r.status === 410) {
-        await db.from("push_subscriptions").delete().eq("id", (s as Sub).id);
+      try {
+        const r = await pushTo(s as Sub, {
+          title: "Study Track reminders are on",
+          body: "This is what a nudge will look like.",
+          kind: "test",
+          url: "/",
+        });
+        if (r.status === 404 || r.status === 410) {
+          await db.from("push_subscriptions").delete().eq("id", (s as Sub).id);
+        }
+        return r.status;
+      } catch (e) {
+        console.error("test push failed", String(e));
+        return -1;
       }
-      return r.status;
     }));
     return json({ sent: results.filter((s) => s < 300).length, statuses: results });
   }
 
   /* --- the scheduled run --- */
+  if (!VAPID_PRIVATE) return json({ error: "VAPID_PRIVATE_KEY is not set" }, 500);
+
   const { data: cands, error } = await db.rpc("nudge_candidates");
   if (error) return json({ error: error.message }, 500);
 
