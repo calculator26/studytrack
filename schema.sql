@@ -554,3 +554,59 @@ revoke all on function public.run_nudges() from public, anon, authenticated;
 select cron.unschedule('study-nudges')
   where exists (select 1 from cron.job where jobname = 'study-nudges');
 select cron.schedule('study-nudges', '*/15 * * * *', $$select public.run_nudges()$$);
+
+-- ---------- the calendar feed -------------------------------------------
+--  A channel that survives a notification block: the reminder is delivered
+--  by the person's own calendar rather than by the browser. Needed because
+--  a managed school browser can switch notifications off by policy, and
+--  nothing in the page can override that.
+--
+--  Also deploy supabase/functions/calendar (verify_jwt off: Google Calendar
+--  fetches a subscribed feed anonymously and cannot send an auth header,
+--  so the token in the query string is the whole access control).
+alter table public.notification_prefs
+  add column if not exists feed_token uuid not null default gen_random_uuid();
+
+create or replace function public.calendar_feed(token uuid)
+returns table (
+  user_id      uuid,
+  display_name text,
+  remind_at    time,
+  quiet_days   int[],
+  timezone     text
+)
+language sql security definer set search_path = public as $fn$
+  select np.user_id, p.display_name, np.remind_at, np.quiet_days, np.timezone
+  from public.notification_prefs np
+  join public.profiles p on p.id = np.user_id
+  where np.feed_token = token
+$fn$;
+revoke all on function public.calendar_feed(uuid) from public, anon, authenticated;
+grant execute on function public.calendar_feed(uuid) to service_role;
+
+create or replace function public.calendar_exams(target uuid)
+returns table (title text, exam_date date)
+language sql security definer set search_path = public as $fn$
+  select e.title, e.exam_date from (
+    select s.name as title, s.exam_date
+      from public.subjects s
+     where s.user_id = target and s.exam_date is not null
+    union
+    select sub.name || ' — ' || a.name as title, a.exam_date
+      from public.areas a
+      join public.subjects sub on sub.id = a.subject_id
+     where a.user_id = target and a.exam_date is not null
+  ) e
+  where e.exam_date >= current_date - 1
+  order by e.exam_date, e.title
+$fn$;
+revoke all on function public.calendar_exams(uuid) from public, anon, authenticated;
+grant execute on function public.calendar_exams(uuid) to service_role;
+
+-- ---------- hardening ----------------------------------------------------
+-- pg_net grants EXECUTE to PUBLIC on install, handing every signed-in user
+-- an HTTP client inside the database. PostgREST does not expose the `net`
+-- schema so it is not reachable today, but it is a standing SSRF primitive.
+-- run_nudges() is SECURITY DEFINER and owned by postgres, so it is fine.
+revoke all on all functions in schema net from public, anon, authenticated;
+revoke usage on schema net from public, anon, authenticated;

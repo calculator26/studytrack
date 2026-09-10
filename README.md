@@ -194,6 +194,39 @@ Firefox and Safari 16.1+ on desktop, and Chrome on Android, all work in a normal
 Reminders are per device. Turn them on for your phone and your laptop separately if you want
 both. Turning them off removes that device.
 
+### If notifications are blocked
+
+Plenty of school and work laptops have notifications switched off by policy. When that
+happens the switch above stays greyed out and says so, rather than pretending to work.
+Two things still reach you.
+
+**The app nudges you itself.** A bar across the top of the app shows where you stand
+against today's goal. Once your reminder time has passed it turns orange, the tab title
+starts alternating with `⚠ 0 h today` whenever you are looking at another tab, and a dot
+appears on the tab icon. None of that is a notification, so no policy can switch it off.
+Dismiss it with the × and it stays gone until tomorrow.
+
+**Your calendar can do it instead.** Setup → Study reminders → *Calendar reminder* gives
+you a personal link. Add it once and your calendar delivers the reminder — the browser is
+not involved, so a notification block does not apply.
+
+In Google Calendar: **Other calendars → + → From URL**, paste, Add. On iPhone: Settings →
+Calendar → Accounts → Add Account → Other → Add Subscribed Calendar.
+
+The feed carries two things:
+
+- a repeating **Log your study** reminder at your chosen time, skipping the days you chose
+  to skip, marked free so it never makes you look busy
+- **every exam you have dated**, as a real all-day entry, with alerts a week before and the
+  day before
+
+It cannot say *"you have done nothing today"*, because calendars only re-fetch a subscribed
+feed every few hours. It carries what is known in advance. For live, data-aware nudges you
+need push, which works on phones.
+
+Treat the link like a password — anyone who has it can read your exam dates. **Reset link**
+issues a new one and kills the old one immediately; you then re-add it in your calendar.
+
 ### While a session is running
 The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
 tells you where you are up to without switching to it. It shows `❚❚` while paused.
@@ -313,6 +346,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `sw.js` | Service worker. Handles reminder notifications, and deliberately caches nothing |
 | `manifest.json` | Lets the app be installed to a Home Screen, which iOS requires for reminders |
 | `supabase/functions/nudge/` | The scheduled job that decides who needs a nudge and sends it |
+| `supabase/functions/calendar/` | Serves each person's `.ics` feed — the reminder channel that works where notifications are blocked |
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |
 
 `_test/index.html` takes a few switches: `?admin=0` signs you in as an ordinary member so you
@@ -337,7 +371,16 @@ table does not exist. Run it and refresh.
 **The leaderboard only shows you** — everyone needs to finish onboarding before they appear.
 
 **Reminders say "not available in this browser"** — on iPhone or iPad, add the app to your
-Home Screen and open it from there. Elsewhere it means the browser is too old for web push.
+Home Screen and open it from there. Otherwise it is usually a managed browser with
+notifications switched off by policy, which nothing in the app can override: use the
+calendar reminder instead. To check, open `chrome://settings/content/notifications` — if it
+says *managed by your organisation*, that is the answer.
+
+**The calendar link 404s** — you reset it and are still subscribed to the old one. Copy the
+current link from Setup and re-add it.
+
+**The calendar reminder is a day out of date** — subscribed feeds are re-fetched on the
+calendar's own schedule, often only every few hours, and nothing on our side can hurry it.
 
 **Reminders are on but nothing arrives** — check the browser has not blocked notifications
 for the site, then press *Send a test*. If the test works and the nightly nudge does not,

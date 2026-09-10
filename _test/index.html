@@ -166,6 +166,10 @@
 
 <main class="wrap">
 
+  <!-- A nudge that needs no permission, because it is just the page. Where
+       notifications are blocked by policy this is the only channel left. -->
+  <div id="nudgebar" class="hide"></div>
+
   <!-- ---------- HOME ---------- -->
   <section class="panel on" id="p-home">
     <div class="card mb16" id="live-card">
@@ -411,6 +415,16 @@
             <div id="s-remdays"></div></div>
         </div>
         <div class="note" style="margin-top:14px" id="s-remstate">Reminders are off.</div>
+        <div id="s-calblock">
+          <div class="s-calhead">Calendar reminder</div>
+          <div class="sub" style="margin-bottom:11px">Works even where notifications are switched off, because your calendar delivers it rather than the browser. Add this link once and you get a daily prompt plus every exam you have dated.</div>
+          <div class="s-calrow">
+            <input type="text" id="s-calurl" readonly spellcheck="false" aria-label="Your personal calendar link">
+            <button class="btn ghost sm" id="s-calcopy">Copy</button>
+            <button class="btn ghost sm" id="s-calreset" title="Invalidate the old link and issue a new one">Reset link</button>
+          </div>
+          <div class="note" style="margin-top:12px">In Google Calendar, go to <strong>Other calendars → + → From URL</strong>, paste, then Add. Treat the link like a password: anyone who has it can read your exam dates.</div>
+        </div>
       </div>
     </div>
 

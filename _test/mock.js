@@ -1,7 +1,12 @@
 /* In-memory stand-in for supabase-js, used only to exercise the UI locally. */
 (function () {
+  /* Lets the app skip anything that cannot work against a mock backend,
+     such as registering a service worker that does not exist here. */
+  window.STUDYTRACK_MOCK = true;
+
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
-  const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [] };
+  const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [],
+              notification_prefs: [], push_subscriptions: [], notification_log: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
@@ -17,6 +22,13 @@
   ];
   people.forEach((p, i) => p.created_at = joined(30 - i * 2));
   T.profiles = people;
+
+  /* Reminder prefs for the signed-in stand-in, so the Study reminders card
+     and its calendar link render as they would in the real app. */
+  T.notification_prefs = [{
+    user_id: ME, push_on: false, remind_at: "19:30:00", timezone: "Australia/Sydney",
+    quiet_days: [], weekly_digest: true, feed_token: "00000000-0000-4000-8000-0000000000ff"
+  }];
 
   const subjectDefs = [
     ["English Advanced", "#3E7CA6", add(today(), 34), ["Common Module — 1984","Module A — Hag-Seed","Module B — Eliot","Module C — Craft"]],

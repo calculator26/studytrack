@@ -668,7 +668,8 @@ function paintTimer() {
   $("tm-cancel").disabled = !t;
   $("tsub").textContent = t ? (t.label + (t.running ? "" : " · paused")) : "Nothing running";
   document.title = t ? (t.running ? "▶ " : "❚❚ ") + shortTime(elapsedMs()) + " · Study Track"
-                     : "Study Track";
+                     : nudgeTitle();
+  paintFavicon();
   paintNowPill();
   paintLive();
 }
@@ -806,6 +807,7 @@ $("h-goalreset").addEventListener("click", async () => {
 function renderAll() {
   paintSelects();
   renderShell(); renderHome(); renderCrew(); renderMe(); renderSetup();
+  try { paintNudgeBar(); } catch (e) { console.error(e); }
   try { paintReminders(); } catch (e) { console.error(e); }
   $("footnote").textContent =
     `${DB.profiles.length} member${DB.profiles.length === 1 ? "" : "s"} · ` +
@@ -2044,8 +2046,10 @@ const NUDGE_URL = String(CFG.SUPABASE_URL || "").replace(/\/+$/, "") + "/functio
 let PREFS = null;
 let swReg = null;
 
-const pushSupported = () => !!sb && "serviceWorker" in navigator &&
-  "PushManager" in window && "Notification" in window;
+/* The mock harness is excluded: there is no service worker at its scope and
+   no backend to push from, so attempting it only litters the console. */
+const pushSupported = () => !!sb && !window.STUDYTRACK_MOCK &&
+  "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
 /* iPadOS reports itself as a Mac, hence the touch check. */
 const iOSish = () => /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -2147,11 +2151,15 @@ function paintReminders() {
   const why = $("s-remwhy"), tog = $("s-remtoggle"), test = $("s-remtest");
   const on  = !!(PREFS && PREFS.push_on);
 
+  paintCalendar();
+
   if (!pushSupported()) {
     why.classList.remove("hide");
-    why.innerHTML = iOSish() && !standalone()
+    why.innerHTML = window.STUDYTRACK_MOCK
+      ? "<strong>Local test harness.</strong> Reminders need the real app over https, so the switch is off here. The layout below is what everyone actually sees."
+      : iOSish() && !standalone()
       ? "<strong>One extra step on iPhone and iPad.</strong> Safari only allows reminders once this is on your Home Screen. Tap Share, then <strong>Add to Home Screen</strong>, open it from there, and the switch below will work."
-      : "This browser cannot show reminders. Chrome, Edge, Firefox and Safari 16.1 or newer all can.";
+      : "<strong>This browser will not show notifications.</strong> Usually that is a school or workplace policy switching them off outright, and nothing here can undo it. <strong>Use the calendar reminder below instead</strong> — your calendar delivers that one, so the block does not apply to it.";
     tog.disabled = true; test.disabled = true;
     $("s-remstate").className = "note";
     $("s-remstate").textContent = "Reminders are not available in this browser.";
@@ -2161,7 +2169,7 @@ function paintReminders() {
   why.classList.add("hide");
   if (Notification.permission === "denied") {
     why.classList.remove("hide");
-    why.innerHTML = "<strong>Notifications are blocked for this site.</strong> That can only be undone in the browser's own settings — look for the padlock beside the address bar.";
+    why.innerHTML = "<strong>Notifications are blocked for this site.</strong> That can only be undone in the browser's own settings — look for the padlock beside the address bar. If your school manages this browser it may not be undoable at all, in which case use the calendar reminder below.";
   }
 
   tog.disabled = false;
@@ -2227,17 +2235,167 @@ if ($("s-remtoggle")) {
 /* Runs once after sign-in, and never blocks the app from rendering. */
 async function initReminders() {
   if (!$("s-remcard")) return;
-  if (!pushSupported()) { paintReminders(); return; }
-  try { await ensureSW(); } catch (e) { console.error("service worker:", e); }
   await loadPrefs();
-  /* If the browser quietly dropped the subscription — cleared data, months
-     away — but we still think reminders are on, put it back. */
-  try {
-    if (PREFS && PREFS.push_on && Notification.permission === "granted") {
-      const reg = await navigator.serviceWorker.getRegistration();
-      const sub = reg && await reg.pushManager.getSubscription();
-      if (!sub) await remindersOn();
-    }
-  } catch (e) { console.error(e); }
+  /* A row for everyone, whether or not push works in this browser: the
+     calendar feed is keyed on the token in it, and that is the channel that
+     survives a school notification block. */
+  if (!PREFS) await savePrefs({});
+  if (pushSupported()) {
+    try { await ensureSW(); } catch (e) { console.error("service worker:", e); }
+    /* If the browser quietly dropped the subscription — cleared data, months
+       away — but we still think reminders are on, put it back. */
+    try {
+      if (PREFS && PREFS.push_on && Notification.permission === "granted") {
+        const reg = await navigator.serviceWorker.getRegistration();
+        const sub = reg && await reg.pushManager.getSubscription();
+        if (!sub) await remindersOn();
+      }
+    } catch (e) { console.error(e); }
+  }
   paintReminders();
+}
+
+/* =========================================================================
+   THE IN-APP NUDGE
+   Notifications can be switched off by policy; a page cannot. So the app
+   itself carries the reminder: a bar across the top, the tab title while
+   you are looking elsewhere, and a dot on the favicon. No permission is
+   asked for any of it, and nothing can block it.
+   ========================================================================= */
+
+/* Null means "say nothing" — a rest day, a skipped day, or goal already met. */
+function nudgeState() {
+  if (!UID || !ME || !DB.sessions) return null;
+  const day = todayISO();
+  const goal = goalFor(UID, day);
+  if (!(goal > 0)) return null;                       /* rest day, never nag */
+  const hours = hoursFor(UID, day);
+  if (hours >= goal) return null;                     /* done for the day */
+  if (PREFS && (PREFS.quiet_days || []).indexOf(new Date().getDay()) >= 0) return null;
+
+  const at = String((PREFS && PREFS.remind_at) || "19:30").slice(0, 5);
+  const now = new Date();
+  const due = now.getHours() * 60 + now.getMinutes() >=
+              Number(at.slice(0, 2)) * 60 + Number(at.slice(3, 5));
+  return { goal, hours, due, at, short: goal - hours };
+}
+
+/* Declared, not assigned to a const: paintTimer calls into this from far
+   earlier in the file, and a const would sit in its temporal dead zone. */
+function nudgeDismissed() {
+  try { return localStorage.getItem("studytrack-nudge-dismissed") === todayISO(); }
+  catch (e) { return false; }   /* private window, or storage switched off */
+}
+
+function paintNudgeBar() {
+  const bar = $("nudgebar");
+  if (!bar) return;
+  const s = nudgeState();
+
+  if (!s || nudgeDismissed()) { bar.className = "hide"; bar.innerHTML = ""; return; }
+
+  bar.className = s.due ? "due" : "";
+  bar.innerHTML =
+    `<span class="nb-dot"></span>
+     <div class="nb-text">
+       <strong>${s.hours > 0 ? f1(s.hours) + " h of " + f1(s.goal) + " h today"
+                             : "Nothing logged today"}</strong>
+       <span>${s.due ? `${f1(s.short)} h short, and it is past ${s.at}. Twenty minutes still counts.`
+                     : `${f1(s.short)} h to go.`}</span>
+     </div>
+     <button class="btn sm" id="nb-go">Start a session</button>
+     <button class="x" id="nb-hide" title="Hide until tomorrow" aria-label="Hide until tomorrow">×</button>`;
+
+  $("nb-go").addEventListener("click", () => {
+    const tab = document.querySelector('nav.tabs button[data-p="home"]');
+    if (tab) tab.click();
+    const start = $("tm-start");
+    if (start) { start.scrollIntoView({ block: "center", behavior: "smooth" }); start.focus(); }
+  });
+  $("nb-hide").addEventListener("click", () => {
+    try { localStorage.setItem("studytrack-nudge-dismissed", todayISO()); } catch (e) { /* private window */ }
+    paintNudgeBar();
+  });
+}
+
+/* Fed to paintTimer, which owns document.title on a one second tick. Only
+   flashes while the tab is in the background: flickering the title of the
+   tab you are actually reading is just irritating. */
+function nudgeTitle() {
+  const s = nudgeState();
+  if (!s || !s.due || !document.hidden || nudgeDismissed()) return "Study Track";
+  return Math.floor(Date.now() / 2000) % 2
+    ? "Study Track"
+    : "⚠ " + (s.hours > 0 ? f1(s.hours) + " h" : "0 h") + " today";
+}
+
+/* A dot on the tab icon. Redraws only when the state actually flips, since
+   its caller runs every second. */
+let faviconBadged = null;
+function paintFavicon() {
+  const link = document.querySelector('link[rel="icon"]');
+  if (!link) return;
+  if (paintFavicon.plain == null) paintFavicon.plain = link.getAttribute("href");
+
+  const s = nudgeState();
+  const want = !!(s && s.due && !nudgeDismissed());
+  if (want === faviconBadged) return;
+  faviconBadged = want;
+
+  if (!want) { link.setAttribute("href", paintFavicon.plain); return; }
+  try {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = c.height = 64;
+        const x = c.getContext("2d");
+        x.drawImage(img, 0, 0, 64, 64);
+        x.beginPath();
+        x.arc(47, 47, 16, 0, Math.PI * 2);
+        x.fillStyle = "#E8402A"; x.fill();
+        x.lineWidth = 6; x.strokeStyle = "#fff"; x.stroke();
+        link.setAttribute("href", c.toDataURL("image/png"));
+      } catch (e) { /* canvas blocked — the bar and the title still work */ }
+    };
+    img.src = paintFavicon.plain;
+  } catch (e) { /* ignore */ }
+}
+
+/* =========================================================================
+   THE CALENDAR FEED
+   The channel that survives a notification block, because the reminder is
+   delivered by the calendar rather than the browser.
+   ========================================================================= */
+function calendarURL() {
+  if (!PREFS || !PREFS.feed_token) return "";
+  return String(CFG.SUPABASE_URL || "").replace(/\/+$/, "") +
+         "/functions/v1/calendar?t=" + PREFS.feed_token;
+}
+
+function paintCalendar() {
+  const box = $("s-calurl");
+  if (!box) return;
+  const url = calendarURL();
+  box.value = url;
+  box.placeholder = url ? "" : "Your link will appear here in a moment";
+  const on = !!url;
+  if ($("s-calcopy"))  $("s-calcopy").disabled  = !on;
+  if ($("s-calreset")) $("s-calreset").disabled = !on;
+}
+
+if ($("s-calcopy")) {
+  $("s-calcopy").addEventListener("click", async () => {
+    const v = $("s-calurl").value;
+    if (!v) return;
+    try { await navigator.clipboard.writeText(v); toast("Link copied"); }
+    catch (e) { $("s-calurl").select(); toast("Copy it with Ctrl or Cmd + C"); }
+  });
+
+  $("s-calreset").addEventListener("click", async () => {
+    if (!confirm("Issue a new calendar link?\n\nThe old one stops working immediately, and you will have to re-add the new one in your calendar.")) return;
+    const tok = window.crypto && crypto.randomUUID ? crypto.randomUUID() : null;
+    if (!tok) { toast("This browser cannot generate a new link"); return; }
+    if (await savePrefs({ feed_token: tok })) toast("New link issued");
+  });
 }

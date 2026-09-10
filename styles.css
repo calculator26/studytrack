@@ -728,3 +728,31 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 @media (max-width:760px){
   #s-remgrid{grid-template-columns:1fr;gap:14px}
 }
+
+/* ---------- the in-app nudge ----------
+   The one reminder channel no policy can switch off, because it is not a
+   notification at all — it is the page telling you where you stand. */
+#nudgebar{display:flex;align-items:center;gap:13px;margin:0 0 16px;padding:12px 15px;
+  background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--ink-soft);
+  border-radius:var(--r);box-shadow:var(--sh-1)}
+#nudgebar.due{border-left-color:var(--accent);background:var(--accent-wash);border-color:#F6D3C8}
+#nudgebar .nb-dot{width:9px;height:9px;border-radius:50%;background:var(--ink-soft);flex:none}
+#nudgebar.due .nb-dot{background:var(--accent);animation:nbpulse 2.4s var(--ease) infinite}
+#nudgebar .nb-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;line-height:1.4}
+#nudgebar .nb-text strong{font-size:13.5px;color:var(--ink)}
+#nudgebar .nb-text span{font-size:12.5px;color:var(--ink-mid)}
+@keyframes nbpulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+#s-calblock{margin-top:18px;padding-top:16px;border-top:1px solid var(--rule-soft)}
+.s-calhead{font-weight:600;font-size:13.5px;margin-bottom:4px}
+.s-calrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.s-calrow input{flex:1;min-width:210px;font-size:12px;font-family:var(--mono,ui-monospace,monospace);
+  color:var(--ink-mid);background:var(--surface-2)}
+
+@media (max-width:640px){
+  #nudgebar{flex-wrap:wrap;gap:10px}
+  #nudgebar .nb-text{flex-basis:100%;order:-1}
+}
+@media (prefers-reduced-motion:reduce){
+  #nudgebar.due .nb-dot{animation:none}
+}
