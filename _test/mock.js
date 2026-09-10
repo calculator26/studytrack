@@ -1,19 +1,21 @@
 /* In-memory stand-in for supabase-js, used only to exercise the UI locally. */
 (function () {
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
-  const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [] };
+  const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
   const add = (s, n) => { const d = new Date(s); d.setDate(d.getDate()+n); const p=x=>String(x).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
 
+  const joined = n => new Date(Date.now() - n * 864e5).toISOString();
   const people = [
     { id: ME,     display_name: "Lewis Christie", colour: "#2FCFA6", school: "Knox", onboarded: !/onboard=1/.test(location.search), default_goal: 3, weekday_goals: [3,3,3,3,2,5,5] },
     { id: uid(2), display_name: "Sam Whitfield",  colour: "#C0564C", school: "Knox", onboarded: true, default_goal: 4, weekday_goals: [4,4,4,4,3,6,6] },
     { id: uid(3), display_name: "Priya Raman",    colour: "#7A6BB5", school: "Abbotsleigh", onboarded: true, default_goal: 5, weekday_goals: [5,5,5,5,4,7,7] },
     { id: uid(4), display_name: "Tom Beckett",    colour: "#C9A227", school: "Knox", onboarded: true, default_goal: 2, weekday_goals: [2,2,2,2,2,4,4] }
   ];
+  people.forEach((p, i) => p.created_at = joined(30 - i * 2));
   T.profiles = people;
 
   const subjectDefs = [
@@ -49,6 +51,28 @@
       }
     }
   });
+  /* ?dirty=1 seeds one entry per integrity rule so the admin console's
+     detection can actually be exercised locally. Off by default. */
+  if (/dirty=1/.test(location.search)) {
+    const sam = uid(2), pri = uid(3);
+    const samAreas = T.areas.filter(a => a.user_id === sam);
+    const A = samAreas[0], B = samAreas[1];
+    const mk = o => T.sessions.push(Object.assign({ id: uid(ssid++), user_id: sam,
+      subject_id: A.subject_id, area_id: A.id, mode: null, note: null,
+      created_at: new Date().toISOString() }, o));
+
+    mk({ day: add(today(), -1), minutes: 480, note: "marathon — should flag as a long session" });
+    mk({ day: add(today(), 4),  minutes: 60,  note: "dated next week — should flag as future" });
+    mk({ day: add(today(), -900), minutes: 90, note: "long before joining — should flag" });
+    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "twin A" });
+    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "twin B — exact duplicate" });
+    for (let i = 0; i < 6; i++) mk({ day: add(today(), -3), minutes: 180, note: "impossible day filler " + i });
+
+    T.live_timers.push({ user_id: pri, label: "Left running overnight", subject_id: null, area_id: null,
+      started_at: new Date(Date.now() - 11 * 3600e3).toISOString(), acc_ms: 0, running: true,
+      updated_at: new Date().toISOString() });
+  }
+
   T.live_timers.push({ user_id: uid(3), label: "Module B — Eliot · Write to time", subject_id: null, area_id: null,
     started_at: new Date(Date.now() - 22 * 60000).toISOString(), acc_ms: 0, running: true,
     updated_at: new Date().toISOString() });
@@ -64,11 +88,14 @@
     }
     let rows = T[table] ? T[table].slice() : [];
     const filters = [];
+    let sort = null, cap = null;
     const api = {
       select() { return api; },
-      order() { return api; },
-      limit() { return api; },
+      /* honoured rather than ignored, so local ordering matches production */
+      order(col, opts) { sort = { col, asc: !opts || opts.ascending !== false }; return api; },
+      limit(n) { cap = n; return api; },
       eq(col, val) { filters.push([col, val]); return api; },
+      in(col, vals) { filters.push([col, vals, "in"]); return api; },
       single() { const r = apply(); return Promise.resolve({ data: r[0] || null, error: null }); },
       insert(payload) {
         const arr = Array.isArray(payload) ? payload : [payload];
@@ -94,6 +121,9 @@
           return Promise.resolve({ data: null, error: null }); };
         return p; },
       delete() { const p = Promise.resolve({ data: null, error: null });
+        p.in = (c, v) => { filters.push([c, v, "in"]); const gone = apply();
+          T[table] = T[table].filter(r => !gone.includes(r));
+          return Promise.resolve({ data: null, error: null }); };
         p.eq = (c, v) => { filters.push([c, v]); const gone = apply();
           T[table] = T[table].filter(r => !gone.includes(r));
           const q = Promise.resolve({ data: null, error: null });
@@ -103,7 +133,21 @@
         return p; },
       then(res) { return Promise.resolve({ data: apply(), error: null }).then(res); }
     };
-    function apply() { return (T[table] || []).filter(r => filters.every(([c, v]) => r[c] === v)); }
+    function apply() {
+      let out = (T[table] || []).filter(r => filters.every(([c, v, op]) =>
+        op === "in" ? v.includes(r[c]) : r[c] === v));
+      if (sort) {
+        const { col, asc } = sort;
+        out = out.slice().sort((a, b) => {
+          const x = a[col], y = b[col];
+          if (x === y) return 0;
+          if (x === null || x === undefined) return 1;
+          if (y === null || y === undefined) return -1;
+          return (x < y ? -1 : 1) * (asc ? 1 : -1);
+        });
+      }
+      return cap != null ? out.slice(0, cap) : out;
+    }
     return api;
   }
 
@@ -148,9 +192,22 @@
           };
         })(),
         from: builder,
-        rpc: name => Promise.resolve(name === "delete_own_account"
-          ? { data: null, error: null }
-          : { data: null, error: { message: "no such function" } }),
+        /* ?admin=0 exercises the non-admin path — the console entry should
+           then never appear, and openAdmin() should refuse. */
+        rpc: (name, args) => {
+          if (name === "delete_own_account") return Promise.resolve({ data: null, error: null });
+          if (name === "is_admin") return Promise.resolve({ data: !/admin=0/.test(location.search), error: null });
+          if (name === "admin_delete_user") {
+            const id = args && args.target;
+            if (!id) return Promise.resolve({ data: null, error: { message: "no user given" } });
+            if (id === ME) return Promise.resolve({ data: null, error: { message: "use Delete my account" } });
+            ["profiles","subjects","areas","sessions","goals","live_timers"].forEach(t => {
+              T[t] = T[t].filter(r => (t === "profiles" ? r.id : r.user_id) !== id);
+            });
+            return Promise.resolve({ data: null, error: null });
+          }
+          return Promise.resolve({ data: null, error: { message: "no such function" } });
+        },
         storage: { from: () => ({ upload: () => Promise.resolve({ error: null }),
           getPublicUrl: () => ({ data: { publicUrl: "" } }) }) },
         channel: () => ({ on() { return this; }, subscribe() { return this; } })

@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../admin.css">
 </head>
 <body>
 
@@ -430,7 +431,7 @@
         <header><h2>About and privacy</h2></header>
         <div class="body" style="font-size:13px;color:var(--ink-mid);line-height:1.65">
           <p style="margin:0 0 11px">Everyone signed in can see everyone else's sessions, hours and notes. That is the whole point of the app — but it does mean <strong style="color:var(--ink)">write your notes as if your mates are reading them, because they are.</strong></p>
-          <p style="margin:0 0 11px">Your subjects, areas and goals are yours. Nobody can edit or delete anything of yours.</p>
+          <p style="margin:0 0 11px">Your subjects, areas and goals are yours. You can edit or delete your own sessions whenever you like; <strong style="color:var(--ink)">nobody else can</strong>, and that is enforced by the database rather than this page. A crew administrator can remove entries that break the rules, and every removal they make is logged.</p>
           <p style="margin:0 0 11px">Your streak counts consecutive days where you met your goal. A day with a goal of zero is a rest day and passes through without breaking it.</p>
           <div class="note bad" style="margin-top:14px">
             <strong>Danger zone.</strong>
@@ -439,6 +440,18 @@
             <div style="margin-top:14px;padding-top:12px;border-top:1px solid #EFC4BF">
               Deleting your account removes <strong>everything</strong> — sessions, subjects, areas, goals, your profile and your login. You disappear from the crew leaderboard. There is no undo.</div>
             <div style="margin-top:9px"><button class="btn ghost sm" id="nuke" style="color:var(--loss);border-color:#E7BEBA">Delete my account</button></div>
+          </div>
+
+          <!-- Only ever unhidden after the DATABASE confirms this account is an
+               administrator (sb.rpc("is_admin")). Everyone else never sees it,
+               and forcing it visible achieves nothing — the policies decide. -->
+          <div id="s-adminrow" hidden style="margin-top:16px;padding-top:14px;border-top:1px solid var(--rule-soft)">
+            <button class="admkey" id="s-admin">
+              <span class="g"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path d="M12 2.6l7 3v5.7c0 4.4-2.9 8.3-7 9.5-4.1-1.2-7-5.1-7-9.5V5.6l7-3z" fill="none" stroke="#FF7A60" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="10.6" r="2.1" fill="#FF7A60"/><path d="M12 12.7v3.1" stroke="#FF7A60" stroke-width="1.9" stroke-linecap="round"/></svg></span>
+              <span class="t">Admin console<span>Crew moderation</span></span>
+            </button>
+            <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px">
+              Visible to you because the database recognises this account as an administrator.</div>
           </div>
         </div>
       </div>
@@ -553,10 +566,27 @@
   <button class="np-btn np-fin" id="np-stop">Finish</button>
 </div>
 
+<!-- ============ ADMIN CONSOLE ============ -->
+<div class="adm" id="adm" hidden>
+  <div class="adm-top">
+    <div class="adm-brand">
+      <span class="adm-key"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path d="M12 2.6l7 3v5.7c0 4.4-2.9 8.3-7 9.5-4.1-1.2-7-5.1-7-9.5V5.6l7-3z" fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="10.6" r="2.1" fill="#fff"/><path d="M12 12.7v3.1" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></svg></span>
+      <span class="adm-title">Study Track<span>Admin console</span></span>
+    </div>
+    <div class="adm-live" id="adm-live"></div>
+    <button class="adm-close" id="adm-close">Back to the app</button>
+  </div>
+  <div class="adm-shell">
+    <nav class="adm-rail" id="adm-rail"></nav>
+    <div class="adm-content" id="adm-body"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="mock.js"></script>
 <script src="../catalogue.js"></script>
 <script src="../app.js"></script>
+<script src="../admin.js"></script>
 </body>
 </html>

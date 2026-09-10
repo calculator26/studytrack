@@ -323,6 +323,10 @@ async function onSession(session) {
     subscribeRealtime();
     restoreTimer();
     renderAll();
+    /* Asks the database whether this account is an administrator and reveals
+       the console entry in Setup if it is. Never blocks the app: a project
+       that has not re-run schema.sql simply has no console. */
+    if (typeof adminBoot === "function") adminBoot();
   } catch (err) {
     console.error(err);
     show("auth");
@@ -581,24 +585,31 @@ $("rangechips").querySelectorAll("[data-r]").forEach(b => b.addEventListener("cl
    The area list follows whatever subject is chosen. */
 const SEL_PAIRS = [["tm-subj","tm-area"], ["f-subj","f-area"], ["ms-subj","ms-area"], ["e-subj","e-area"]];
 
-function subjectOptionsHTML() {
-  const subs = mySubjects(UID);
-  if (!subs.length) return `<option value="">Add a subject in Setup first</option>`;
+/* `owner` is almost always you. It is somebody else only when an admin is
+   correcting their session, and then the lists have to be *their* subjects —
+   a session cannot point at a subject its owner does not have. */
+function subjectOptionsHTML(owner) {
+  const subs = mySubjects(owner || UID);
+  if (!subs.length) return `<option value="">${owner && owner !== UID
+    ? "This member has no subjects" : "Add a subject in Setup first"}</option>`;
   return subs.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
-function areaOptionsHTML(subjectId) {
-  const as = myAreas(UID).filter(a => a.subject_id === subjectId);
+function areaOptionsHTML(subjectId, owner) {
+  const as = myAreas(owner || UID).filter(a => a.subject_id === subjectId);
   return `<option value="">Whole subject</option>` +
     as.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
 }
-function paintAreaSelect(sid, aid, keep) {
+function paintAreaSelect(sid, aid, keep, owner) {
   const want = keep !== undefined ? keep : $(aid).value;
-  $(aid).innerHTML = areaOptionsHTML($(sid).value);
+  $(aid).innerHTML = areaOptionsHTML($(sid).value, owner);
   if (want && $(aid).querySelector('[value="' + want + '"]')) $(aid).value = want;
 }
 function paintSelects() {
   const html = subjectOptionsHTML();
   SEL_PAIRS.forEach(([sid, aid]) => {
+    /* The edit sheet may be showing another member's subjects right now.
+       A background refresh must not quietly swap them for yours. */
+    if (sid === "e-subj" && editingId) return;
     const ks = $(sid).value, ka = $(aid).value;
     $(sid).innerHTML = html;
     if (ks && $(sid).querySelector('[value="' + ks + '"]')) $(sid).value = ks;
@@ -606,14 +617,15 @@ function paintSelects() {
   });
 }
 SEL_PAIRS.forEach(([sid, aid]) =>
-  $(sid).addEventListener("change", () => paintAreaSelect(sid, aid, "")));
+  $(sid).addEventListener("change", () =>
+    paintAreaSelect(sid, aid, "", sid === "e-subj" ? editingOwner : UID)));
 
 function readPair(sid, aid) {
   return { subject_id: $(sid).value || null, area_id: $(aid).value || null };
 }
-function setPair(sid, aid, subject_id, area_id) {
+function setPair(sid, aid, subject_id, area_id, owner) {
   if (subject_id) $(sid).value = subject_id;
-  paintAreaSelect(sid, aid, area_id || "");
+  paintAreaSelect(sid, aid, area_id || "", owner);
 }
 function labelOf(s) {
   if (s.area_id) { const a = areaById(s.area_id); if (a) return a.name; }
@@ -1000,28 +1012,37 @@ function wireEntryActions(scope) {
    only drawn on yours in the first place.
    ========================================================================= */
 let editingId = null;
+let editingOwner = null;    /* whose session is in the sheet — you, unless an admin is moderating */
 let openProfileId = null;   /* which profile modal is on screen, so an edit can redraw it */
 
 function openEdit(id) {
   const s = DB.sessions.find(x => x.id === id);
   if (!s) { toast("That session is gone"); return; }
-  if (s.user_id !== UID) { toast("You can only edit your own sessions"); return; }
+  const mine = s.user_id === UID;
+  /* The browser-side half of the check. The database half is the "update own"
+     policy in schema.sql, which is what actually decides. */
+  if (!mine && !(typeof IS_ADMIN !== "undefined" && IS_ADMIN)) {
+    toast("You can only edit your own sessions"); return;
+  }
 
   editingId = id;
-  $("e-subj").innerHTML = subjectOptionsHTML();
+  editingOwner = s.user_id;
+  $("e-subj").innerHTML = subjectOptionsHTML(s.user_id);
   /* An imported session, or one whose subject has since been deleted, has no
      subject at all — start it on the first one rather than on whatever the
      select happened to be showing. */
   $("e-subj").selectedIndex = 0;
-  setPair("e-subj", "e-area", s.subject_id, s.area_id);
+  setPair("e-subj", "e-area", s.subject_id, s.area_id, s.user_id);
   $("e-day").value  = s.day;
   $("e-min").value  = s.minutes;
   $("e-note").value = s.note || "";
-  $("me-sub").textContent = "Logged " + fmtLong(s.day) + " · " + f1(s.minutes / 60) + " h at the time";
+  $("me-sub").innerHTML = (mine ? "" :
+      `<strong style="color:var(--accent-ink)">Moderating ${esc(profileOf(s.user_id).display_name)}'s session</strong> · `) +
+    "Logged " + esc(fmtLong(s.day)) + " · " + f1(s.minutes / 60) + " h at the time";
   $("ov-edit").classList.add("on");
   setTimeout(() => $("e-min").focus(), 60);
 }
-function closeEdit() { editingId = null; $("ov-edit").classList.remove("on"); }
+function closeEdit() { editingId = null; editingOwner = null; $("ov-edit").classList.remove("on"); }
 
 /* A profile modal is built once and left alone, so an edit made from inside
    one has to redraw it or you are looking at the row you just changed. */
@@ -1042,12 +1063,18 @@ document.addEventListener("keydown", e => {
 $("e-del").addEventListener("click", async () => {
   if (!editingId) return;
   if (!confirm("Delete this session? It cannot be undone.")) return;
-  const id = editingId;
+  const id = editingId, owner = editingOwner;
+  const before = DB.sessions.find(x => x.id === id);
+  if (owner && owner !== UID && typeof admLog === "function") {
+    await admLog("session.delete", owner, profileOf(owner).display_name,
+      before ? `${f1(before.minutes / 60)} h on ${before.day} — ${labelOf(before)}` : "session", before);
+  }
   closeEdit();
   const { error } = await sb.from("sessions").delete().eq("id", id);
   if (error) { toast("Could not delete: " + error.message); return; }
   toast("Session deleted");
   await refreshEntries();
+  if (typeof ADM !== "undefined" && ADM.open) renderAdmin();
 });
 
 $("e-save").addEventListener("click", async () => {
@@ -1059,7 +1086,13 @@ $("e-save").addEventListener("click", async () => {
   const minutes = Math.round(+$("e-min").value);
   if (!minutes || minutes < 1 || minutes > 1440) { toast("Minutes has to be between 1 and 1440"); return; }
 
-  const id = editingId;
+  const id = editingId, owner = editingOwner;
+  const before = DB.sessions.find(x => x.id === id);
+  if (owner && owner !== UID && typeof admLog === "function") {
+    await admLog("session.edit", owner, profileOf(owner).display_name,
+      `${before ? f1(before.minutes / 60) + " h on " + before.day : "session"} → ${f1(minutes / 60)} h on ${day}`,
+      before);
+  }
   const { error } = await sb.from("sessions").update({
     subject_id: t.subject_id, area_id: t.area_id,
     day, minutes, note: $("e-note").value.trim() || null }).eq("id", id);
@@ -1067,6 +1100,7 @@ $("e-save").addEventListener("click", async () => {
   closeEdit();
   toast("Session updated");
   await refreshEntries();
+  if (typeof ADM !== "undefined" && ADM.open) renderAdmin();
 });
 
 /* =========================================================================
@@ -1649,6 +1683,14 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !editingId) closeProfile();
 });
 $("s-viewme").addEventListener("click", () => openProfile(UID));
+
+/* ---------- admin console ---------- */
+$("s-admin").addEventListener("click", () => {
+  if (typeof openAdmin === "function") openAdmin();
+});
+$("adm-close").addEventListener("click", () => {
+  if (typeof closeAdmin === "function") closeAdmin();
+});
 
 /* =========================================================================
    DELETE MY ACCOUNT
