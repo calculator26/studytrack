@@ -137,12 +137,23 @@
         });
         return Promise.resolve({ data: arr, error: null });
       },
-      update(patch) { const p = Promise.resolve({ data: null, error: null });
-        p.eq = (c, v) => { filters.push([c, v]); apply().forEach(r => Object.assign(r, patch));
-          return Promise.resolve({ data: null, error: null }); };
-        p.in = (c, vals) => { filters.push([c, vals, "in"]); apply().forEach(r => Object.assign(r, patch));
-          return Promise.resolve({ data: null, error: null }); };
-        return p; },
+      /* An update reports nothing back unless you ask with select(), which is
+         how PostgREST behaves — and the timer heartbeat leans on it to tell a
+         row it actually touched from a row that is no longer there. */
+      update(patch) {
+        const run = () => {
+          const hit = apply();
+          hit.forEach(r => Object.assign(r, patch));
+          const rows = hit.map(r => Object.assign({}, r));
+          const pr = Promise.resolve({ data: null, error: null });
+          pr.select = () => Promise.resolve({ data: rows, error: null });
+          return pr;
+        };
+        const p = Promise.resolve({ data: null, error: null });
+        p.eq = (c, v) => { filters.push([c, v]); return run(); };
+        p.in = (c, vals) => { filters.push([c, vals, "in"]); return run(); };
+        return p;
+      },
       delete() { const p = Promise.resolve({ data: null, error: null });
         p.in = (c, v) => { filters.push([c, v, "in"]); const gone = apply();
           T[table] = T[table].filter(r => !gone.includes(r));

@@ -73,6 +73,14 @@ const DB = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], tim
 let CUR = todayISO();
 let RANGE = 7;
 let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
+/* Whether our live_timers row is known to be on the table. A heartbeat may only
+   conclude that a session was finished elsewhere if the row was there to begin
+   with — otherwise a start that never reached the server would come back a
+   minute later as a timer silently binned, taking the time on it with it.
+   Declared up here with the rest of the timer state because restoreTimer() and
+   the cross-tab listener both touch it, and both can run before the bottom of
+   this file has been reached. */
+let timerLive = false;
 
 const profileOf = id => DB.profiles.find(p => p.id === id) || {id, display_name:"Unknown", colour:"#7B8D98"};
 const mySubjects = uid => DB.subjects.filter(s => s.user_id === uid);
@@ -336,7 +344,31 @@ async function onSession(session) {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Who is allowed to write DB.timers.
+
+   Two readers race for it: the quick live_timers poll, and the live_timers
+   leg of the six-table loadAll(). loadAll is slow — it drags the whole
+   sessions table behind it — so its snapshot of the timers is taken early
+   and lands late. Without a guard it happily reinstates a started_at that
+   a poll has already superseded, and every clock on screen jumps back to
+   where it was before, until the next poll drags it forward again. That
+   flicker is what looks like a caching bug from the outside.
+
+   So reads take a ticket on the way out, and a read that comes back after
+   a newer one has already landed is thrown away.
+   --------------------------------------------------------------------------- */
+let timersIssued = 0, timersApplied = 0;
+const timersTicket = () => ++timersIssued;
+function applyTimers(rows, ticket) {
+  if (ticket <= timersApplied) return false;     /* a fresher read beat us home */
+  timersApplied = ticket;
+  DB.timers = rows || [];
+  return true;
+}
+
 async function loadAll() {
+  const ticket = timersTicket();
   const [pr, su, ar, se, go, ti] = await Promise.all([
     sb.from("profiles").select("*"),
     sb.from("subjects").select("*").order("position"),
@@ -346,7 +378,8 @@ async function loadAll() {
     sb.from("live_timers").select("*")
   ]);
   DB.profiles = pr.data || []; DB.subjects = su.data || []; DB.areas = ar.data || [];
-  DB.sessions = se.data || []; DB.goals = go.data || []; DB.timers = ti.data || [];
+  DB.sessions = se.data || []; DB.goals = go.data || [];
+  applyTimers(ti.data, ticket);
   DB.profiles.forEach(p => {
     if (typeof p.weekday_goals === "string") { try { p.weekday_goals = JSON.parse(p.weekday_goals); } catch (e) { p.weekday_goals = null; } }
   });
@@ -362,10 +395,11 @@ async function refresh(rerender) {
    live areas, leaving the rest of the page — and anything you are typing — alone. */
 async function pollTimers() {
   if (!sb || !UID || document.hidden) return;
+  const ticket = timersTicket();
   try {
     const { data, error } = await sb.from("live_timers").select("*");
     if (error) return;
-    DB.timers = data || [];
+    if (!applyTimers(data, ticket)) return;   /* stale by the time it arrived */
     paintLive();          /* the signature decides whether the DOM actually changes */
   } catch (e) { /* a dropped poll is not worth bothering anyone about */ }
 }
@@ -762,23 +796,80 @@ function startClock() {
     paintTimer();
     /* while your own timer runs, touch updated_at now and then so everyone else
        can tell the difference between "still going" and "closed the laptop" */
-    if (localTimer && Date.now() - lastBeat > 60000) { lastBeat = Date.now(); pushTimer(); }
+    if (localTimer && Date.now() - lastBeat > 60000) { lastBeat = Date.now(); pushTimer(true); }
   }, 1000);
 }
 function restoreTimer() {
   const row = DB.timers.find(t => t.user_id === UID);
-  if (row) localTimer = row;
+  if (row) { localTimer = row; timerLive = true; }   /* we just read it, so it exists */
   paintTimer();
   startClock();
 }
-async function pushTimer() {
-  if (!localTimer) { await sb.from("live_timers").delete().eq("user_id", UID); }
-  else {
-    await sb.from("live_timers").upsert({
-      user_id: UID, label: localTimer.label, subject_id: localTimer.subject_id, area_id: localTimer.area_id,
-      started_at: localTimer.started_at, acc_ms: localTimer.acc_ms, running: localTimer.running,
-      updated_at: new Date().toISOString()
-    });
+/* ---------------------------------------------------------------------------
+   Mirroring your timer into live_timers.
+
+   The row is keyed on user_id, so every tab and device you have open writes
+   to the same one. That matters more than it sounds. A tab left open on a
+   phone still believes its timer is running, and a blind upsert from its
+   heartbeat puts a session you already finished back on the board carrying
+   its own stale started_at — so everyone else's screen flips between that
+   and the truth every sixty seconds.
+
+   So a press of a button is authoritative: it upserts, or it deletes. A
+   heartbeat only ever touches a row that is already there, and if there is
+   nothing to touch it takes the hint and drops the timer here too.
+   --------------------------------------------------------------------------- */
+
+/* Tabs belonging to one person also agree among themselves, so two of them
+   can never sit pushing different started_at values into the one row. */
+let timerChannel = null;
+try { timerChannel = new BroadcastChannel("studytrack-timer"); } catch (e) { timerChannel = null; }
+
+function announceTimer() {
+  if (!timerChannel || !UID) return;
+  try { timerChannel.postMessage({ uid: UID, timer: localTimer }); } catch (e) { /* no listeners */ }
+}
+if (timerChannel) timerChannel.onmessage = ev => {
+  const m = ev && ev.data;
+  if (!m || !UID || m.uid !== UID) return;
+  localTimer = m.timer || null;
+  timerLive = !!localTimer;       /* the tab that pressed the button wrote the row */
+  lastBeat = Date.now();
+  try { paintTimer(); startClock(); } catch (e) { /* not up yet */ }
+};
+
+async function pushTimer(beat) {
+  if (!localTimer) {
+    if (beat) return;             /* nothing of ours to beat for */
+    await sb.from("live_timers").delete().eq("user_id", UID);
+    timerLive = false;
+    announceTimer();
+    return;
+  }
+  const row = {
+    user_id: UID, label: localTimer.label, subject_id: localTimer.subject_id, area_id: localTimer.area_id,
+    started_at: localTimer.started_at, acc_ms: localTimer.acc_ms, running: localTimer.running,
+    updated_at: new Date().toISOString()
+  };
+
+  /* A press of a button, or a beat with nothing on the table yet to mend. */
+  if (!beat || !timerLive) {
+    const { error } = await sb.from("live_timers").upsert(row);
+    if (!error) timerLive = true;
+    if (!beat) announceTimer();
+    return;
+  }
+
+  const { data, error } = await sb.from("live_timers")
+    .update(row).eq("user_id", UID).select("user_id");
+  /* An error is the network talking, not a verdict — keep the timer and try
+     again on the next beat. Nothing back, with no error, is a real answer:
+     the row has gone, so this session was finished somewhere else. */
+  if (!error && Array.isArray(data) && !data.length) {
+    localTimer = null;
+    timerLive = false;
+    paintTimer();
+    toast("That session was finished in another tab");
   }
 }
 $("tm-start").addEventListener("click", async () => {
@@ -904,7 +995,14 @@ function paintLive(force) {
   const all = mine.concat(rows);
   const msOf = t => t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0);
 
-  const sig = all.map(t => t.user_id + "/" + (t.running ? 1 : 0) + "/" + (t.label || "")).join("|");
+  /* started_at and acc_ms belong in here. They are what the clock is actually
+     derived from, so leaving them out let a changed row be swapped in through
+     the cheap in-place path with no rebuild — the number changed and nothing
+     else did, which is precisely the glitch people were reporting. They only
+     move when somebody starts, pauses or resumes, never on a heartbeat, so
+     this costs no extra rebuilds. */
+  const sig = all.map(t => [t.user_id, t.running ? 1 : 0, t.label || "",
+                            t.started_at, t.acc_ms].join("~")).join("|");
   const rebuild = force === true || sig !== liveSig;
   liveSig = sig;
 

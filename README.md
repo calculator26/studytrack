@@ -270,6 +270,10 @@ Pick what you are working on and press start. It records real elapsed time, surv
 the tab, and appears on everyone else's **Studying right now** strip the moment it starts.
 When you finish, you are asked what you got done before it saves.
 
+Have the app open in more than one tab, or on a laptop and a phone at once, and they all
+show the same clock: whichever one you press a button in tells the others straight away.
+Finish a session in one and the rest let go of it rather than putting it back on the board.
+
 ### Profiles
 Click anyone — on the podium, in the leaderboard, or next to their name in the activity
 feed — and you get their whole profile: hours, streak, goal-hit rate, best day, hours by
