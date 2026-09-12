@@ -31,7 +31,7 @@ window.HSC_CATALOGUE = (function () {
 
   /* Practice area appended to every subject that sits a written paper.
      Nearly everyone ends up making this themselves, so it may as well be there. */
-  const PRACTICE = "Past papers — timed";
+  const PRACTICE = "Past papers";
 
   const S = [
 
@@ -245,13 +245,15 @@ window.HSC_CATALOGUE = (function () {
             "Case study",
             "Part II — History Project"] },
 
+  /* Rewritten for the Geography 11-12 (2022) syllabus. The old course —
+     Ecosystems at Risk, Urban Places, People and Economic Activity and the
+     Senior Geography Project — is gone; SGP no longer exists at all. */
   { name: "Geography", cat: "hsie", units: 2,
     exams: [ { paper: "Geography", date: "2026-11-02", start: "1.50 pm", end: "5.00 pm" } ],
-    areas: ["Ecosystems at Risk",
-            "Urban Places",
-            "People and Economic Activity",
-            "Senior Geography Project",
-            "Fieldwork and skills"] },
+    areas: ["Global Sustainability",
+            "Rural and Urban Places",
+            "Ecosystems and Global Biodiversity",
+            "Geographical skills and tools"] },
 
   /* --------------------------------------------------------------- RELIGION */
   { name: "Studies of Religion I", cat: "religion", units: 1,
