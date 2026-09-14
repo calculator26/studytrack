@@ -7,7 +7,7 @@
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
   const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [],
               notification_prefs: [], push_subscriptions: [], notification_log: [],
-              nudges: [] };
+              nudges: [], messages: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
@@ -80,6 +80,24 @@
       }
     }
   });
+  /* Enough chat to see the grouping, the hour pills and a long message wrap. */
+  (function seedChat() {
+    const mins = n => new Date(Date.now() - n * 60000).toISOString();
+    const said = [
+      [uid(3), 190, "has anyone started the Eliot essay yet"],
+      [uid(2), 188, "yeah I did a plan last night, the Module B one is brutal"],
+      [uid(2), 187, "happy to share my quote table if anyone wants it"],
+      [uid(3), 150, "yes please"],
+      [uid(4), 96,  "does anyone know if the Standard 2 paper has the formula sheet"],
+      [ME,     64,  "it does, it's on the back page"],
+      [uid(3), 33,  "just did two hours on Hag-Seed and my brain is soup"],
+      [uid(2), 12,  "same. taking a break then doing one more"],
+      [uid(4), 4,   "good luck everyone"]
+    ];
+    said.forEach(([u, ago, body], i) =>
+      T.messages.push({ id: uid(1200 + i), user_id: u, body, created_at: mins(ago) }));
+  })();
+
   /* ?dirty=1 seeds one entry per integrity rule so the admin console's
      detection can actually be exercised locally. Off by default. */
   if (/dirty=1/.test(location.search)) {
@@ -146,6 +164,7 @@
       eq(col, val) { filters.push([col, val]); return api; },
       in(col, vals) { filters.push([col, vals, "in"]); return api; },
       gt(col, val)  { filters.push([col, val, "gt"]);  return api; },
+      lt(col, val)  { filters.push([col, val, "lt"]);  return api; },
       gte(col, val) { filters.push([col, val, "gte"]); return api; },
       is(col, val) { filters.push([col, val, "is"]); return api; },
       single() { const r = apply(); return Promise.resolve({ data: r[0] || null, error: null }); },
@@ -202,6 +221,7 @@
       let out = (T[table] || []).filter(r => filters.every(([c, v, op]) =>
         op === "in"  ? v.includes(r[c]) :
         op === "gt"  ? String(r[c]) >  String(v) :
+        op === "lt"  ? String(r[c]) <  String(v) :
         op === "gte" ? String(r[c]) >= String(v) :
         r[c] === v));
       if (orExpr) {
@@ -351,6 +371,22 @@
             });
             return Promise.resolve({ error: null, data: Object.keys(out).map(k => ({
               user_id: k.split("|")[0], label: k.split("|")[1], minutes: out[k] })) });
+          }
+          if (name === "send_message") {
+            const txt = String((args && args.body) || "").trim();
+            const me = T.profiles.find(p => p.id === ME);
+            if (!txt) return Promise.resolve({ data: { ok: false, why: "Nothing to send" }, error: null });
+            if (txt.length > 500)
+              return Promise.resolve({ data: { ok: false, why: "That is longer than 500 characters" }, error: null });
+            if (me && me.chat_muted)
+              return Promise.resolve({ data: { ok: false, why: "An administrator has muted you in chat" }, error: null });
+            const recent = T.messages.filter(m => m.user_id === ME &&
+              Date.now() - new Date(m.created_at).getTime() < 60000).length;
+            if (recent >= 10)
+              return Promise.resolve({ data: { ok: false, why: "Slow down a moment — ten a minute is the limit" }, error: null });
+            const id = uid(1300 + T.messages.length);
+            T.messages.push({ id, user_id: ME, body: txt, created_at: new Date().toISOString() });
+            return Promise.resolve({ data: { ok: true, id }, error: null });
           }
           if (name === "is_admin") return Promise.resolve({ data: !/admin=0/.test(location.search), error: null });
           if (name === "admin_delete_user") {

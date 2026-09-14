@@ -351,6 +351,31 @@ re-reading anything; a top-up read once a minute tidies up behind it.
 The practical effect, measured on the real database: a routine update went from about
 **284 KB to 2.4 KB**, and a cold start from 284 KB to about 47 KB.
 
+### Chat
+A fifth tab, and one room for the whole year group. Open it and you are in it — there is
+nothing to join and nothing to choose. A dot appears on the tab when somebody has said
+something since you last looked.
+
+Beside each name is **the hours that person has logged today**, and the colour steps up
+with it: green past one hour, deeper green past three, teal past five, gold past eight,
+with a ring round the avatar at the top. Nobody is ever shown a zero — an empty morning
+simply has no badge, so a quiet room looks clean rather than accusing. The number comes
+from data the app already holds, so the whole badge costs nothing to show.
+
+You can delete your own messages. Enter sends, Shift+Enter starts a new line, and 500
+characters is the limit. Ten messages a minute is the limit too, enforced by the database
+rather than the browser.
+
+**Moderation** lives in the admin console under **Chat**: the last 200 messages with
+search and a member filter, delete one or delete a selection, and a mute that stops
+someone posting until you lift it. Deletions and mutes are written to the audit log like
+every other removal.
+
+**On cost.** Opening the tab fetches the newest 50 and nothing else; older ones only if
+you ask for them. New messages arrive over the socket already carrying the row, so
+nothing re-reads anything. A message row holds only who, what and when — the name, the
+colour and the hours are all resolved from what your browser already has.
+
 ### Filtering the leaderboard
 Above the podium are two pickers. **Subject** narrows the whole crew page to one subject —
 podium, table, both charts and the head-to-head all follow it — and **Ranked by** changes

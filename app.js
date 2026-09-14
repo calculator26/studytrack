@@ -746,6 +746,11 @@ function subscribeRealtime() {
   try {
     sb.channel("crew")
       .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, onCrewSession)
+      /* Chat is subscribed from the start even though nothing is fetched until
+         you open the tab — that is what puts the dot on it when somebody
+         speaks, and a socket message costs nothing to receive. */
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, onChatInsert)
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, onChatDelete)
       .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    },
           () => { crewReloadProfiles = true; refreshSoon(); })
@@ -954,6 +959,15 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("cl
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
   $("p-" + b.dataset.p).classList.add("on"); hideTT(); window.scrollTo(0, 0);
   paintNowPill();          /* appear or disappear straight away, not a second later */
+  /* Chat costs nothing until somebody actually looks at it. */
+  if (b.dataset.p === "chat") {
+    initChat();
+    /* Paint after the load resolves — which is immediately once it has loaded
+       once. Anything that arrived over the socket while you were on another
+       tab is already in CHAT.rows and needs putting on the screen. */
+    loadChat().then(() => { paintChat(); CHAT.unread = 0; paintChatDot(); chatScrollBottom(true); });
+    CHAT.unread = 0; paintChatDot();
+  }
 }));
 
 /* the pill's own controls just drive the real timer buttons */
@@ -3238,6 +3252,235 @@ if ($("s-calcopy")) {
     const tok = window.crypto && crypto.randomUUID ? crypto.randomUUID() : null;
     if (!tok) { toast("This browser cannot generate a new link"); return; }
     if (await savePrefs({ feed_token: tok })) toast("New link issued");
+  });
+}
+
+/* =========================================================================
+   CHAT
+   -------------------------------------------------------------------------
+   One room for the whole year group, and three rules that keep it from
+   costing anything:
+
+     · the newest fifty on open, never the whole history, and older ones
+       only if you ask — paged on created_at rather than an offset, so page
+       forty costs what page one costs;
+     · a new message arrives over the socket carrying the row, so it is
+       appended where it lands. Nothing re-reads anything;
+     · names, colours and hours are already in this client — profiles and
+       the daily rollup — so the badge beside somebody's name is a lookup,
+       not a query. The whole ornament is free.
+
+   The hours shown are today's, which is what makes the room change through
+   the day. Nobody is shown a zero: an empty morning simply has no pill.
+   ========================================================================= */
+const CHAT_PAGE = 50;
+let CHAT = { loaded: false, rows: [], oldest: null, unread: 0, atBottom: true, busy: false };
+
+/* Today's hours, in bands. Four steps and a plain state — few enough to read
+   at a glance without a legend, which is the only reason it earns its place. */
+const CHAT_TIERS = [
+  { at: 8, cls: "t4" },
+  { at: 5, cls: "t3" },
+  { at: 3, cls: "t2" },
+  { at: 1, cls: "t1" }
+];
+function chatTier(uid) {
+  const h = hoursFor(uid, todayISO());
+  for (const t of CHAT_TIERS) if (h >= t.at) return { cls: t.cls, hours: h };
+  return { cls: null, hours: h };
+}
+
+function chatTimeLabel(iso) {
+  const d = new Date(iso), now = new Date();
+  const hhmm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return hhmm;
+  return fmtD(isoOf(d)) + " " + hhmm;
+}
+
+function msgHTML(m, prev) {
+  const p = profileOf(m.user_id);
+  const t = chatTier(m.user_id);
+  /* consecutive messages from one person within five minutes share a header */
+  const cont = prev && prev.user_id === m.user_id &&
+               Math.abs(new Date(m.created_at) - new Date(prev.created_at)) < 5 * 60e3;
+  const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
+  return `<div class="msg${cont ? " cont" : ""}${m.user_id === UID ? " mine" : ""}" data-msg="${esc(m.id)}">
+    ${avatarHTML(p, "sm").replace('class="av sm"', `class="av sm${t.cls === "t4" ? " t4ring" : ""}"`)}
+    <div class="msgbody">
+      <div class="msghead">
+        <span class="msgwho person" data-profile="${esc(m.user_id)}"
+          style="color:${esc(p.colour || "var(--ink)")}">${esc(p.display_name)}</span>
+        ${t.cls ? `<span class="hrpill ${t.cls}" title="${f1(t.hours)} hours logged today">${f1(t.hours)}h</span>` : ""}
+        <span class="msgtime">${esc(chatTimeLabel(m.created_at))}</span>
+        ${canDelete ? `<button class="msgdel" data-msgdel="${esc(m.id)}" title="Delete this message">delete</button>` : ""}
+      </div>
+      <div class="msgtext">${esc(m.body)}</div>
+    </div>
+  </div>`;
+}
+
+function paintChat() {
+  const log = $("chatlog");
+  if (!log) return;
+  if (!CHAT.rows.length) {
+    log.innerHTML = `<div class="chatempty">${CHAT.loaded
+      ? "Nothing here yet. Say the first thing."
+      : "Loading…"}</div>`;
+  } else {
+    log.innerHTML = CHAT.rows.map((m, i) => msgHTML(m, CHAT.rows[i - 1])).join("");
+  }
+  const older = $("chat-older");
+  if (older) older.hidden = !CHAT.loaded || CHAT.rows.length < CHAT_PAGE;
+  const key = $("chat-key");
+  if (key) key.textContent = "The number beside a name is hours logged today";
+  wireChatRows();
+}
+
+function wireChatRows() {
+  $("chatlog").querySelectorAll("[data-msgdel]").forEach(b => b.addEventListener("click", async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const id = b.dataset.msgdel;
+    const { error } = await sb.from("messages").delete().eq("id", id);
+    if (error) { b.disabled = false; toast("Could not delete — " + error.message, 4600); return; }
+    chatDrop(id);
+  }));
+  $("chatlog").querySelectorAll("[data-profile]").forEach(el =>
+    el.addEventListener("click", () => openProfile(el.dataset.profile)));
+}
+
+function chatDrop(id) {
+  const i = CHAT.rows.findIndex(m => m.id === id);
+  if (i >= 0) { CHAT.rows.splice(i, 1); paintChat(); }
+}
+
+function chatScrollBottom(force) {
+  const log = $("chatlog");
+  if (!log) return;
+  if (force || CHAT.atBottom) { log.scrollTop = log.scrollHeight; CHAT.unread = 0; paintChatDot(); }
+}
+
+function paintChatDot() {
+  const dot = $("chatdot");
+  if (dot) dot.hidden = CHAT.unread === 0;
+  const jump = $("chat-jump");
+  if (jump) jump.hidden = !(CHAT.unread > 0 && chatIsOpen());
+}
+const chatIsOpen = () => $("p-chat") && $("p-chat").classList.contains("on");
+
+/* The newest page, asked for once — when you first open the tab. */
+async function loadChat() {
+  if (CHAT.loaded || CHAT.busy || !sb || !UID) return;
+  CHAT.busy = true;
+  try {
+    const { data, error } = await sb.from("messages").select("*")
+      .order("created_at", { ascending: false }).limit(CHAT_PAGE);
+    if (error) return;
+    CHAT.rows = (data || []).slice().reverse();
+    CHAT.oldest = CHAT.rows.length ? CHAT.rows[0].created_at : null;
+    CHAT.loaded = true;
+    paintChat();
+    chatScrollBottom(true);
+  } finally { CHAT.busy = false; }
+}
+
+/* Older ones, a page at a time, keyed on the oldest we hold rather than an
+   offset — so the fortieth page costs what the first one did. */
+async function loadOlderChat() {
+  if (CHAT.busy || !CHAT.oldest) return;
+  CHAT.busy = true;
+  const btn = $("chat-older");
+  if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+  try {
+    const { data, error } = await sb.from("messages").select("*")
+      .lt("created_at", CHAT.oldest)
+      .order("created_at", { ascending: false }).limit(CHAT_PAGE);
+    if (error) return;
+    const older = (data || []).slice().reverse();
+    const log = $("chatlog");
+    const was = log ? log.scrollHeight : 0;
+    if (!older.length) { if (btn) { btn.hidden = true; } return; }
+    CHAT.rows = older.concat(CHAT.rows);
+    CHAT.oldest = CHAT.rows[0].created_at;
+    paintChat();
+    if (log) log.scrollTop = log.scrollHeight - was;   /* stay where you were reading */
+    if (btn && older.length < CHAT_PAGE) btn.hidden = true;
+  } finally {
+    CHAT.busy = false;
+    if (btn) { btn.disabled = false; btn.textContent = "Load older messages"; }
+  }
+}
+
+/* Arriving over the socket, already carrying the row. */
+function onChatInsert(payload) {
+  const m = payload && payload.new;
+  if (!m || !m.id) return;
+  if (CHAT.rows.some(x => x.id === m.id)) return;      /* our own echo */
+  CHAT.rows.push(m);
+  if (CHAT.rows.length > 300) CHAT.rows.splice(0, CHAT.rows.length - 300);
+  if (chatIsOpen()) {
+    paintChat();
+    if (CHAT.atBottom) chatScrollBottom(true);
+    else { CHAT.unread++; paintChatDot(); }
+  } else if (m.user_id !== UID) {
+    CHAT.unread++; paintChatDot();
+  }
+}
+function onChatDelete(payload) {
+  const id = payload && payload.old && payload.old.id;
+  if (id) chatDrop(id);
+}
+
+async function sendChat() {
+  const box = $("chat-input"), btn = $("chat-send"), note = $("chat-note");
+  const text = (box.value || "").trim();
+  if (!text) return;
+  btn.disabled = true;
+  note.hidden = true;
+  const { data, error } = await sb.rpc("send_message", { body: text });
+  btn.disabled = false;
+  if (error) { note.textContent = "Could not send — " + error.message; note.hidden = false; return; }
+  if (data && data.ok === false) { note.textContent = data.why || "Could not send"; note.hidden = false; return; }
+  box.value = "";
+  paintChatCount();
+  autoGrowChat();
+  /* realtime will bring the row back; this is just so it feels immediate */
+  if (data && data.id && !CHAT.rows.some(x => x.id === data.id)) {
+    CHAT.rows.push({ id: data.id, user_id: UID, body: text, created_at: new Date().toISOString() });
+    paintChat();
+  }
+  chatScrollBottom(true);
+}
+
+function paintChatCount() {
+  const box = $("chat-input"), c = $("chat-count");
+  if (!box || !c) return;
+  const n = (box.value || "").length;
+  c.textContent = n > 400 ? (500 - n) + " left" : "";
+  c.classList.toggle("near", n > 460);
+}
+function autoGrowChat() {
+  const box = $("chat-input");
+  if (!box) return;
+  box.style.height = "auto";
+  box.style.height = Math.min(140, box.scrollHeight) + "px";
+}
+
+function initChat() {
+  const box = $("chat-input");
+  if (!box || box.dataset.wired) return;
+  box.dataset.wired = "1";
+  box.addEventListener("input", () => { paintChatCount(); autoGrowChat(); });
+  box.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+  $("chat-send").addEventListener("click", sendChat);
+  $("chat-older").addEventListener("click", loadOlderChat);
+  $("chat-jump").addEventListener("click", () => chatScrollBottom(true));
+  $("chatlog").addEventListener("scroll", () => {
+    const log = $("chatlog");
+    CHAT.atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    if (CHAT.atBottom && CHAT.unread) { CHAT.unread = 0; paintChatDot(); }
   });
 }
 

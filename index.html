@@ -160,6 +160,7 @@
     <nav class="tabs" role="tablist">
       <button role="tab" aria-selected="true"  data-p="home">Today</button>
       <button role="tab" aria-selected="false" data-p="crew">Crew</button>
+      <button role="tab" aria-selected="false" data-p="chat">Chat<i class="tabdot" id="chatdot" hidden></i></button>
       <button role="tab" aria-selected="false" data-p="me">My stats</button>
       <button role="tab" aria-selected="false" data-p="setup">Setup</button>
     </nav>
@@ -322,6 +323,29 @@
   </section>
 
   <!-- ---------- ME ---------- -->
+  <!-- ---------- CHAT ---------- -->
+  <section class="panel" id="p-chat">
+    <div class="card">
+      <header>
+        <div><h2>Chat</h2><div class="sub" id="chat-sub">The whole year group, one room</div></div>
+        <div class="controls"><span class="chatkey" id="chat-key"></span></div>
+      </header>
+      <div class="chatwrap">
+        <div class="chatolder"><button class="btn ghost sm" id="chat-older" hidden>Load older messages</button></div>
+        <div class="chatlog" id="chatlog" aria-live="polite"></div>
+        <div class="chatnew"><button class="btn sm" id="chat-jump" hidden>New messages ↓</button></div>
+        <div class="chatbox">
+          <textarea id="chat-input" rows="1" maxlength="500" placeholder="Say something to the year group…"></textarea>
+          <div class="chatsend">
+            <span class="chatcount" id="chat-count"></span>
+            <button class="btn go" id="chat-send">Send</button>
+          </div>
+        </div>
+        <div class="chatnote" id="chat-note" hidden></div>
+      </div>
+    </div>
+  </section>
+
   <section class="panel" id="p-me">
     <div class="grid g4 mb16">
       <div class="kpi"><div class="v" id="m-total">0.0</div><div class="k">Total hours logged</div><div class="d" id="m-total-d">—</div></div>

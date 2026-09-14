@@ -29,6 +29,7 @@ let IS_ADMIN = false;
 const ADM = {
   open:false,
   tab:"overview",
+  chat:null,                  /* the moderation queue, loaded with the console */
   q:"",                       /* session search */
   who:"",                     /* session owner filter */
   from:"", to:"",             /* session date filter */
@@ -192,7 +193,7 @@ async function openAdmin() {
   $("adm").hidden = false;
   document.body.style.overflow = "hidden";
   renderAdmin();                      /* frame first, so it does not sit blank */
-  await admLoadSessions();
+  await Promise.all([admLoadSessions(), admLoadChat()]);
   if (ADM.open) renderAdmin();
 }
 function closeAdmin() {
@@ -214,9 +215,108 @@ const ADM_TABS = [
   ["overview",  "◎", "Overview"],
   ["members",   "☗", "Members"],
   ["sessions",  "▤", "Sessions"],
+  ["chat",      "✽", "Chat"],
   ["integrity", "⚑", "Integrity"],
   ["audit",     "⎘", "Audit log"]
 ];
+
+/* ---------------------------------------------------------------------------
+   CHAT MODERATION
+
+   Four hundred people in one room needs a way to take something down quickly
+   and a way to stop whoever keeps putting it up. Both are here: delete one or
+   many, and mute a member so send_message() turns them away. Removals go to
+   the audit log like every other removal in this console.
+
+   Loads the last two hundred, which is a moderation queue rather than an
+   archive — the room's own history is paged in the app.
+   --------------------------------------------------------------------------- */
+const ADM_CHAT_PAGE = 200;
+async function admLoadChat() {
+  const { data, error } = await sb.from("messages").select("*")
+    .order("created_at", { ascending: false }).limit(ADM_CHAT_PAGE);
+  if (error) { toast("Could not load chat — " + error.message, 4600); return; }
+  ADM.chat = data || [];
+}
+
+function admChatView() {
+  const rows = (ADM.chat || []).filter(m => {
+    if (ADM.who && m.user_id !== ADM.who) return false;
+    if (!ADM.q) return true;
+    const p = profileOf(m.user_id);
+    const hay = (m.body + " " + (p.display_name || "")).toLowerCase();
+    return hay.indexOf(ADM.q.toLowerCase()) > -1;
+  });
+  const selCount = ADM.sel.size;
+  const muted = DB.profiles.filter(p => p.chat_muted);
+
+  return `<div class="adm-panel">
+    <div class="adm-panelhead">
+      <div><h3>Chat</h3><div class="adm-sub">The last ${ADM_CHAT_PAGE} messages, newest first.
+        Deleting is immediate and cannot be undone.</div></div>
+      <div class="adm-tools">
+        <input id="adm-q" class="adm-in" placeholder="Search messages or names" value="${esc(ADM.q)}">
+        <select id="adm-who" class="adm-in">
+          <option value="">Everyone</option>
+          ${DB.profiles.map(p => `<option value="${esc(p.id)}"${ADM.who === p.id ? " selected" : ""}>${esc(p.display_name)}</option>`).join("")}
+        </select>
+        <button class="adm-btn" id="adm-clear">Clear</button>
+      </div>
+    </div>
+
+    ${muted.length ? `<div class="adm-bar">Muted: ${muted.map(p =>
+      `<button class="adm-btn sm" data-admunmute="${esc(p.id)}" title="Let them post again">${esc(p.display_name)} ✕</button>`).join(" ")}</div>` : ""}
+
+    ${selCount ? `<div class="adm-bar">
+      <strong>${selCount}</strong> selected
+      <button class="adm-btn danger" id="adm-chatdelsel">Delete selected</button>
+      <button class="adm-btn" id="adm-chatclearsel">Clear selection</button>
+    </div>` : ""}
+
+    <div class="adm-tablewrap"><table class="adm-table"><thead><tr>
+      <th class="l" style="width:34px"><input type="checkbox" class="adm-ck" id="adm-selall"
+        ${selCount && selCount === rows.length ? "checked" : ""}></th>
+      <th class="l">When</th><th class="l">Member</th><th class="l">Message</th><th></th>
+    </tr></thead>
+    <tbody>${rows.length ? rows.map(m => `<tr class="${ADM.sel.has(m.id) ? "sel" : ""}">
+      <td class="l"><input type="checkbox" class="adm-ck" data-admsel="${esc(m.id)}"
+        ${ADM.sel.has(m.id) ? "checked" : ""}></td>
+      <td class="l adm-mono">${esc(new Date(m.created_at).toLocaleString())}</td>
+      <td class="l">${admWho(m.user_id)}</td>
+      <td class="l"><div class="adm-note" title="${esc(m.body)}">${esc(m.body)}</div></td>
+      <td><div class="adm-act">
+        <button class="adm-btn sm" data-admmute="${esc(m.user_id)}">${
+          (profileOf(m.user_id) || {}).chat_muted ? "Unmute" : "Mute"}</button>
+        <button class="adm-btn sm danger" data-admchatdel="${esc(m.id)}">Delete</button>
+      </div></td>
+    </tr>`).join("") : `<tr><td colspan="5"><div class="adm-empty">Nothing to moderate.</div></td></tr>`}
+    </tbody></table></div></div>`;
+}
+
+async function admDeleteMessages(ids) {
+  const rows = (ADM.chat || []).filter(m => ids.includes(m.id));
+  const { error } = await sb.from("messages").delete().in("id", ids);
+  if (error) { toast("Could not delete — " + error.message, 4600); return; }
+  for (const m of rows) {
+    await admLog("chat.delete", m.user_id, profileOf(m.user_id).display_name,
+      m.body.slice(0, 120), m);
+  }
+  ADM.chat = (ADM.chat || []).filter(m => !ids.includes(m.id));
+  ADM.sel.clear();
+  renderAdmin();
+  toast(ids.length === 1 ? "Message deleted" : ids.length + " messages deleted");
+}
+
+async function admSetMuted(uid, on) {
+  const { error } = await sb.from("profiles").update({ chat_muted: on }).eq("id", uid);
+  if (error) { toast("Could not change that — " + error.message, 4600); return; }
+  await admLog(on ? "chat.mute" : "chat.unmute", uid, profileOf(uid).display_name,
+    on ? "muted in chat" : "unmuted in chat", null);
+  const p = DB.profiles.find(x => x.id === uid);
+  if (p) p.chat_muted = on;
+  renderAdmin();
+  toast(on ? "Muted" : "Unmuted");
+}
 
 function renderAdmin() {
   if (!ADM.open) return;
@@ -227,6 +327,7 @@ function renderAdmin() {
     ADM_TABS.map(([id, ic, label]) => {
       const n = id === "members" ? DB.profiles.length
               : id === "sessions" ? admAll().length
+              : id === "chat" ? ((ADM.chat && ADM.chat.length) || "")
               : id === "integrity" ? flags.length
               : id === "audit" ? (ADM.audit.length || "") : "";
       return `<button class="adm-nav" data-admtab="${id}" aria-current="${ADM.tab === id}">
@@ -245,6 +346,7 @@ function renderAdmin() {
   if (ADM.tab === "overview")  body.innerHTML = admOverview(flags);
   if (ADM.tab === "members")   body.innerHTML = admMembers();
   if (ADM.tab === "sessions")  body.innerHTML = admSessionsView();
+  if (ADM.tab === "chat")      body.innerHTML = admChatView();
   if (ADM.tab === "integrity") body.innerHTML = admIntegrity(flags);
   if (ADM.tab === "audit")     body.innerHTML = admAudit();
 
@@ -585,9 +687,30 @@ function admWire() {
   const all = $("adm-selall");
   if (all) all.onchange = () => {
     ADM.sel.clear();
-    if (all.checked) admFilteredSessions().slice(0, 400).forEach(s => ADM.sel.add(s.id));
+    if (all.checked) {
+      /* the same checkbox serves both tables, so it selects whichever is showing */
+      const rows = ADM.tab === "chat" ? (ADM.chat || []) : admFilteredSessions();
+      rows.slice(0, 400).forEach(r => ADM.sel.add(r.id));
+    }
     renderAdmin();
   };
+
+  /* ---- chat moderation ---- */
+  $$("[data-admchatdel]").forEach(b => b.onclick = () => admDeleteMessages([b.dataset.admchatdel]));
+  $$("[data-admmute]").forEach(b => b.onclick = () => {
+    const uid = b.dataset.admmute;
+    admSetMuted(uid, !(profileOf(uid) || {}).chat_muted);
+  });
+  $$("[data-admunmute]").forEach(b => b.onclick = () => admSetMuted(b.dataset.admunmute, false));
+  const cdel = $("adm-chatdelsel");
+  if (cdel) cdel.onclick = () => {
+    const ids = [...ADM.sel];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} message${ids.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    admDeleteMessages(ids);
+  };
+  const cclr = $("adm-chatclearsel");
+  if (cclr) cclr.onclick = () => { ADM.sel.clear(); renderAdmin(); };
   const none = $("adm-selnone"); if (none) none.onclick = () => { ADM.sel.clear(); renderAdmin(); };
   const kill = $("adm-selkill"); if (kill) kill.onclick = () => admDeleteSelected();
 

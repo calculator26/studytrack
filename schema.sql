@@ -825,3 +825,95 @@ grant  execute on function public.crew_daily(date, boolean)          to authenti
 grant  execute on function public.crew_daily_by_subject(date, text)  to authenticated;
 grant  execute on function public.crew_subjects()                    to authenticated;
 grant  execute on function public.subject_totals(uuid[], date)       to authenticated;
+
+-- ============================================================
+--  CHAT
+-- ------------------------------------------------------------
+--  One room for the whole year group. Rows are deliberately
+--  bare: no display name, no colour, no subject. Every client
+--  already holds the profiles table and the daily rollup, so
+--  the name, the colour and the hours beside it all resolve
+--  locally for nothing. A message is who, what and when.
+-- ============================================================
+create table if not exists public.messages (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users on delete cascade,
+  body       text not null check (length(btrim(body)) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+
+-- Nothing reads this table without an ordering and a limit, and paging is
+-- keyed on created_at rather than an offset, so page forty costs what page
+-- one costs. This is the only index that matters.
+create index if not exists messages_created_idx on public.messages (created_at desc);
+create index if not exists messages_user_idx    on public.messages (user_id);
+
+alter table public.profiles add column if not exists chat_muted boolean not null default false;
+
+alter table public.messages enable row level security;
+drop policy if exists "read all"   on public.messages;
+drop policy if exists "delete own" on public.messages;
+
+create policy "read all" on public.messages
+  for select to authenticated using (true);
+
+-- Your own, or anybody's if you run the console.
+create policy "delete own" on public.messages
+  for delete to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+
+-- No insert policy and no update policy on purpose: everything goes through
+-- send_message() below, so the rate limit and the mute cannot be stepped over
+-- by anyone holding the anon key — which is public by design.
+revoke insert, update on public.messages from anon, authenticated;
+
+create or replace function public.send_message(body text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  me     uuid := auth.uid();
+  txt    text := btrim(body);
+  recent int;
+  muted  boolean;
+  new_id uuid;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'why', 'You are not signed in');
+  end if;
+  if length(txt) = 0 then
+    return jsonb_build_object('ok', false, 'why', 'Nothing to send');
+  end if;
+  if length(txt) > 500 then
+    return jsonb_build_object('ok', false, 'why', 'That is longer than 500 characters');
+  end if;
+
+  select coalesce(p.chat_muted, false) into muted from public.profiles p where p.id = me;
+  if muted then
+    return jsonb_build_object('ok', false, 'why', 'An administrator has muted you in chat');
+  end if;
+
+  -- Four hundred people in one room: a flood is the one thing that would cost
+  -- real money, so it is stopped here rather than in the browser.
+  select count(*) into recent
+    from public.messages
+   where user_id = me and created_at > now() - interval '60 seconds';
+  if recent >= 10 then
+    return jsonb_build_object('ok', false, 'why', 'Slow down a moment — ten a minute is the limit');
+  end if;
+
+  insert into public.messages (user_id, body) values (me, txt) returning id into new_id;
+  return jsonb_build_object('ok', true, 'id', new_id);
+end $fn$;
+
+revoke execute on function public.send_message(text) from public, anon;
+grant  execute on function public.send_message(text) to authenticated;
+
+-- So a new message reaches everyone's open tab without anybody re-reading.
+do $$
+begin
+  begin execute 'alter publication supabase_realtime add table public.messages';
+  exception when others then null; end;
+end $$;
