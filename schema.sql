@@ -720,3 +720,108 @@ begin
   begin execute 'alter publication supabase_realtime add table public.nudges';
   exception when others then null; end;
 end $$;
+
+-- ============================================================
+--  CREW ROLLUPS
+-- ------------------------------------------------------------
+--  Every crew-wide statistic in the app — hours, streaks, the
+--  charts, the sparklines, goal-hit rates — comes from one fact:
+--  how many minutes a person did on a day. Sending the raw
+--  sessions to every client so it could work that out meant
+--  every browser downloaded the whole table on every read. At
+--  eight people that was wasteful; at four hundred it is
+--  megabytes a read before anyone has logged anything.
+--  These hand back the rollup instead.
+-- ============================================================
+create index if not exists sessions_created_idx on public.sessions (created_at desc);
+create index if not exists sessions_subject_idx on public.sessions (subject_id);
+
+-- One row per person: days as {"2026-09-14": [minutes, sessions]} for days on
+-- or after `since`, plus all-time totals and the first day they ever logged
+-- (which is what bounds streak walking). only_active drops people with nothing
+-- in the window, for the small top-up read the app makes every minute.
+drop function if exists public.crew_daily(date);
+create or replace function public.crew_daily(since date, only_active boolean default false)
+returns table (user_id uuid, days jsonb, first_day date,
+               total_minutes bigint, total_sessions bigint)
+language sql stable
+as $$
+  with per_day as (
+    select s.user_id, s.day, sum(s.minutes)::int as mins, count(*)::int as n
+    from public.sessions s
+    group by s.user_id, s.day
+  ),
+  rolled as (
+    select p.user_id,
+           coalesce(jsonb_object_agg(p.day::text, jsonb_build_array(p.mins, p.n))
+                    filter (where p.day >= since), '{}'::jsonb) as days,
+           min(p.day) as first_day,
+           sum(p.mins)::bigint as total_minutes,
+           sum(p.n)::bigint    as total_sessions
+    from per_day p
+    group by p.user_id
+  )
+  select * from rolled
+  where not only_active or days <> '{}'::jsonb;
+$$;
+
+-- The same, narrowed to one subject. Subjects are per-person rows, so they are
+-- matched on the normalised name exactly as the app does it: trimmed, inner
+-- whitespace collapsed, lower-cased.
+create or replace function public.crew_daily_by_subject(since date, subject_key text)
+returns table (user_id uuid, days jsonb, first_day date,
+               total_minutes bigint, total_sessions bigint)
+language sql stable
+as $$
+  with per_day as (
+    select s.user_id, s.day, sum(s.minutes)::int as mins, count(*)::int as n
+    from public.sessions s
+    join public.subjects sub on sub.id = s.subject_id
+    where lower(btrim(regexp_replace(sub.name, '\s+', ' ', 'g'))) = subject_key
+    group by s.user_id, s.day
+  )
+  select p.user_id,
+         coalesce(jsonb_object_agg(p.day::text, jsonb_build_array(p.mins, p.n))
+                  filter (where p.day >= since), '{}'::jsonb),
+         min(p.day), sum(p.mins)::bigint, sum(p.n)::bigint
+  from per_day p
+  group by p.user_id;
+$$;
+
+-- Every distinct subject in the crew and who takes it, so the leaderboard's
+-- picker no longer needs everybody's subject rows to count them.
+create or replace function public.crew_subjects()
+returns table (key text, label text, takers uuid[])
+language sql stable
+as $$
+  select lower(btrim(regexp_replace(name, '\s+', ' ', 'g'))) as key,
+         mode() within group (order by btrim(name)) as label,
+         array_agg(distinct user_id) as takers
+  from public.subjects
+  group by 1;
+$$;
+
+-- Hours by subject for a named handful of people. The head-to-head panel is
+-- the only thing that needs it, and only for the two on screen.
+create or replace function public.subject_totals(uids uuid[], since date)
+returns table (user_id uuid, label text, minutes bigint)
+language sql stable
+as $$
+  select s.user_id, btrim(sub.name), sum(s.minutes)::bigint
+  from public.sessions s
+  join public.subjects sub on sub.id = s.subject_id
+  where s.user_id = any(uids) and s.day >= since
+  group by 1, 2;
+$$;
+
+-- Signed-in members only. These read across the whole crew, which is what the
+-- app has always allowed authenticated readers to do, but there is no reason
+-- for an anonymous caller to have them.
+revoke execute on function public.crew_daily(date, boolean)         from public, anon;
+revoke execute on function public.crew_daily_by_subject(date, text)  from public, anon;
+revoke execute on function public.crew_subjects()                    from public, anon;
+revoke execute on function public.subject_totals(uuid[], date)       from public, anon;
+grant  execute on function public.crew_daily(date, boolean)          to authenticated;
+grant  execute on function public.crew_daily_by_subject(date, text)  to authenticated;
+grant  execute on function public.crew_subjects()                    to authenticated;
+grant  execute on function public.subject_totals(uuid[], date)       to authenticated;

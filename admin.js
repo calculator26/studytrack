@@ -63,7 +63,7 @@ function admWho(id) {
   const p = profileOf(id);
   return `<span class="adm-who">${admAvatar(p)}<span class="nm">${esc(p.display_name)}</span></span>`;
 }
-const admSessions = uid => DB.sessions.filter(s => s.user_id === uid);
+const admSessions = uid => admAll().filter(s => s.user_id === uid);
 const admHours = list => list.reduce((a, s) => a + s.minutes / 60, 0);
 function admLastActive(uid) {
   const days = admSessions(uid).map(s => s.day).sort();
@@ -121,7 +121,7 @@ function admFlags() {
   const byDay = {};       /* uid|day -> minutes */
   const seen  = {};       /* uid|day|subject|minutes -> first id */
 
-  DB.sessions.forEach(s => {
+  admAll().forEach(s => {
     const p = profileOf(s.user_id);
     const push = (rule, detail) => out.push({ rule, detail, session:s, user_id:s.user_id });
 
@@ -142,7 +142,7 @@ function admFlags() {
   Object.keys(byDay).forEach(k => {
     if (byDay[k] <= 960) return;
     const [uid, day] = k.split("|");
-    const worst = DB.sessions
+    const worst = admAll()
       .filter(s => s.user_id === uid && s.day === day)
       .sort((a, b) => b.minutes - a.minutes)[0];
     if (worst) out.push({ rule:"impossible", user_id:uid, session:worst,
@@ -167,12 +167,33 @@ function admFlagPill(rule) {
 }
 
 /* ================================================================== SHELL */
-function openAdmin() {
+/* The console is the one place that genuinely needs everybody's sessions: it
+   exists to find and fix other people's rows. The app itself stopped carrying
+   them — four hundred people's sessions in every browser is what this release
+   is about — so the console fetches them when it opens, and works from its own
+   copy. Every reference below goes through admAll() rather than the app's.  */
+const admAll = () => DB.allSessions || [];
+async function admLoadSessions() {
+  const { data, error } = await sb.from("sessions")
+    .select("*, subjects(name, colour), areas(name)")
+    .order("day", { ascending: false });
+  if (error) { toast("Could not load sessions — " + error.message, 4600); return; }
+  DB.allSessions = (data || []).map(r => Object.assign({}, r, {
+    subject_name:   r.subjects ? r.subjects.name   : null,
+    subject_colour: r.subjects ? r.subjects.colour : null,
+    area_name:      r.areas    ? r.areas.name      : null,
+    subjects: undefined, areas: undefined
+  }));
+}
+
+async function openAdmin() {
   if (!IS_ADMIN) { toast("The console is for administrators"); return; }
   ADM.open = true;
   $("adm").hidden = false;
   document.body.style.overflow = "hidden";
-  renderAdmin();
+  renderAdmin();                      /* frame first, so it does not sit blank */
+  await admLoadSessions();
+  if (ADM.open) renderAdmin();
 }
 function closeAdmin() {
   ADM.open = false;
@@ -205,7 +226,7 @@ function renderAdmin() {
     `<div class="adm-navlabel">Console</div>` +
     ADM_TABS.map(([id, ic, label]) => {
       const n = id === "members" ? DB.profiles.length
-              : id === "sessions" ? DB.sessions.length
+              : id === "sessions" ? admAll().length
               : id === "integrity" ? flags.length
               : id === "audit" ? (ADM.audit.length || "") : "";
       return `<button class="adm-nav" data-admtab="${id}" aria-current="${ADM.tab === id}">
@@ -233,10 +254,10 @@ function renderAdmin() {
 /* =============================================================== OVERVIEW */
 function admOverview(flags) {
   const today = todayISO();
-  const totalH = admHours(DB.sessions);
-  const todayH = DB.sessions.filter(s => s.day === today).reduce((a, s) => a + s.minutes / 60, 0);
+  const totalH = admHours(admAll());
+  const todayH = admAll().filter(s => s.day === today).reduce((a, s) => a + s.minutes / 60, 0);
   const wk = []; for (let i = 13; i >= 0; i--) wk.push(addDays(today, -i));
-  const perDay = wk.map(d => DB.sessions.filter(s => s.day === d).reduce((a, s) => a + s.minutes / 60, 0));
+  const perDay = wk.map(d => admAll().filter(s => s.day === d).reduce((a, s) => a + s.minutes / 60, 0));
   const live = (DB.timers || []).filter(t => t.running).length;
   const crit = flags.filter(f => ADM_RULES[f.rule].level === "critical").length;
   const notOnboarded = DB.profiles.filter(p => !p.onboarded).length;
@@ -251,10 +272,10 @@ function admOverview(flags) {
   <div class="adm-tiles">
     <div class="adm-tile"><div class="v">${DB.profiles.length}</div><div class="k">Members</div>
       <div class="d">${notOnboarded ? notOnboarded + " mid-setup" : "all set up"}</div></div>
-    <div class="adm-tile"><div class="v">${DB.sessions.length}</div><div class="k">Sessions logged</div>
+    <div class="adm-tile"><div class="v">${admAll().length}</div><div class="k">Sessions logged</div>
       <div class="d">${f1(totalH)} hours all up</div></div>
     <div class="adm-tile"><div class="v">${f1(todayH)}</div><div class="k">Hours logged today</div>
-      <div class="d">${DB.sessions.filter(s => s.day === today).length} sessions</div></div>
+      <div class="d">${admAll().filter(s => s.day === today).length} sessions</div></div>
     <div class="adm-tile"><div class="v">${live}</div><div class="k">Timers running now</div>
       <div class="d">${live ? "live on the crew strip" : "nobody studying"}</div></div>
     <div class="adm-tile ${crit ? "alert" : ""}"><div class="v">${flags.length}</div><div class="k">Flagged entries</div>
@@ -274,7 +295,7 @@ function admOverview(flags) {
     <div class="adm-scroll"><table class="adm-t">
       <thead><tr><th class="l">Member</th><th class="l">Worked on</th><th class="l">Day</th>
         <th>Hours</th><th class="l">Note</th></tr></thead>
-      <tbody>${DB.sessions.slice()
+      <tbody>${admAll().slice()
         .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
         .slice(0, 10).map(s => `<tr>
           <td class="l">${admWho(s.user_id)}</td>
@@ -377,7 +398,7 @@ function admMembers() {
 /* ================================================================ SESSIONS */
 function admFilteredSessions() {
   const q = ADM.q.toLowerCase();
-  return DB.sessions.filter(s => {
+  return admAll().filter(s => {
     if (ADM.who && s.user_id !== ADM.who) return false;
     if (ADM.from && s.day < ADM.from) return false;
     if (ADM.to && s.day > ADM.to) return false;
@@ -578,7 +599,7 @@ function admWire() {
 }
 
 async function admDeleteSession(id) {
-  const s = DB.sessions.find(x => x.id === id);
+  const s = admAll().find(x => x.id === id);
   if (!s) return;
   const p = profileOf(s.user_id);
   if (!confirm(`Delete ${p.display_name}'s ${f1(s.minutes / 60)} hour session on ${fmtLong(s.day)}?\n\n` +
@@ -596,7 +617,7 @@ async function admDeleteSession(id) {
 async function admDeleteSelected() {
   const ids = Array.from(ADM.sel);
   if (!ids.length) return;
-  const rows = DB.sessions.filter(s => ids.includes(s.id));
+  const rows = admAll().filter(s => ids.includes(s.id));
   const people = Array.from(new Set(rows.map(s => profileOf(s.user_id).display_name)));
   if (!confirm(`Delete ${ids.length} sessions (${f1(admHours(rows))} hours) belonging to ` +
     `${people.join(", ")}?\n\nThis cannot be undone.`)) return;

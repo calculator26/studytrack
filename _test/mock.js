@@ -132,14 +132,21 @@
     }
     let rows = T[table] ? T[table].slice() : [];
     const filters = [];
-    let sort = null, cap = null;
+    let sort = null, cap = null, embed = false, orExpr = "";
     const api = {
-      select() { return api; },
+      /* The app asks for "*, subjects(name, colour), areas(name)" on the feed,
+         so the two names travel with the row instead of this client holding
+         everybody's subject tables. Mimicked here rather than ignored. */
+      select(cols) { embed = typeof cols === "string" && cols.indexOf("(") > -1; return api; },
+      /* PostgREST's or(), used to fetch your own goals plus the window */
+      or(expr) { orExpr = String(expr || ""); return api; },
       /* honoured rather than ignored, so local ordering matches production */
       order(col, opts) { sort = { col, asc: !opts || opts.ascending !== false }; return api; },
       limit(n) { cap = n; return api; },
       eq(col, val) { filters.push([col, val]); return api; },
       in(col, vals) { filters.push([col, vals, "in"]); return api; },
+      gt(col, val)  { filters.push([col, val, "gt"]);  return api; },
+      gte(col, val) { filters.push([col, val, "gte"]); return api; },
       is(col, val) { filters.push([col, val, "is"]); return api; },
       single() { const r = apply(); return Promise.resolve({ data: r[0] || null, error: null }); },
       insert(payload) {
@@ -193,7 +200,16 @@
     };
     function apply() {
       let out = (T[table] || []).filter(r => filters.every(([c, v, op]) =>
-        op === "in" ? v.includes(r[c]) : r[c] === v));
+        op === "in"  ? v.includes(r[c]) :
+        op === "gt"  ? String(r[c]) >  String(v) :
+        op === "gte" ? String(r[c]) >= String(v) :
+        r[c] === v));
+      if (orExpr) {
+        /* only the one shape the app uses: user_id.eq.<id>,day.gte.<date> */
+        const parts = orExpr.split(",").map(x => x.split("."));
+        out = out.filter(r => parts.some(([col, op, val]) =>
+          op === "eq" ? String(r[col]) === val : op === "gte" ? String(r[col]) >= val : false));
+      }
       if (sort) {
         const { col, asc } = sort;
         out = out.slice().sort((a, b) => {
@@ -204,7 +220,16 @@
           return (x < y ? -1 : 1) * (asc ? 1 : -1);
         });
       }
-      return cap != null ? out.slice(0, cap) : out;
+      out = cap != null ? out.slice(0, cap) : out;
+      if (embed) out = out.map(r => {
+        const sub = T.subjects.find(x => x.id === r.subject_id);
+        const ar  = T.areas.find(x => x.id === r.area_id);
+        return Object.assign({}, r, {
+          subjects: sub ? { name: sub.name, colour: sub.colour } : null,
+          areas:    ar  ? { name: ar.name } : null
+        });
+      });
+      return out;
     }
     return api;
   }
@@ -274,6 +299,58 @@
             T.nudges.push({ id: uid(950 + T.nudges.length), from_user: ME, to_user: target,
               seen_at: null, created_at: new Date().toISOString() });
             return Promise.resolve({ data: { ok: true }, error: null });
+          }
+          /* The rollups the app now reads instead of the whole sessions table.
+             Same shape as the SQL: days is {"2026-09-14":[minutes,sessions]}. */
+          if (name === "crew_daily" || name === "crew_daily_by_subject") {
+            const since = String((args && args.since) || "0000-01-01");
+            const key = args && args.subject_key;
+            const nameOf = id => { const x = T.subjects.find(v => v.id === id); return x ? x.name : null; };
+            const norm = n => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
+            const per = {};
+            T.sessions.forEach(r => {
+              if (key) { const n = nameOf(r.subject_id); if (!n || norm(n) !== key) return; }
+              const u = (per[r.user_id] = per[r.user_id] || { days: {}, first: null, m: 0, n: 0 });
+              if (!u.first || r.day < u.first) u.first = r.day;
+              u.m += r.minutes; u.n += 1;
+              if (r.day >= since) {
+                const c = u.days[r.day] || [0, 0];
+                u.days[r.day] = [c[0] + r.minutes, c[1] + 1];
+              }
+            });
+            const onlyActive = !!(args && args.only_active);
+            return Promise.resolve({ error: null, data: Object.keys(per)
+              .filter(u => !onlyActive || Object.keys(per[u].days).length)
+              .map(u => ({ user_id: u, days: per[u].days, first_day: per[u].first,
+                total_minutes: per[u].m, total_sessions: per[u].n })) });
+          }
+          if (name === "crew_subjects") {
+            const norm = n => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
+            const g = {};
+            T.subjects.forEach(r => {
+              const k = norm(r.name); if (!k) return;
+              const e = (g[k] = g[k] || { key: k, spell: {}, takers: {} });
+              const sp = String(r.name).trim();
+              e.spell[sp] = (e.spell[sp] || 0) + 1;
+              e.takers[r.user_id] = 1;
+            });
+            return Promise.resolve({ error: null, data: Object.keys(g).map(k => ({
+              key: k,
+              label: Object.keys(g[k].spell).sort((a, b) => g[k].spell[b] - g[k].spell[a] || a.localeCompare(b))[0],
+              takers: Object.keys(g[k].takers) })) });
+          }
+          if (name === "subject_totals") {
+            const uids = (args && args.uids) || [], since = String((args && args.since) || "0000-01-01");
+            const out = {};
+            T.sessions.forEach(r => {
+              if (uids.indexOf(r.user_id) === -1 || r.day < since) return;
+              const sub = T.subjects.find(v => v.id === r.subject_id);
+              const label = sub ? String(sub.name).trim() : "Other";
+              const k = r.user_id + "|" + label;
+              out[k] = (out[k] || 0) + r.minutes;
+            });
+            return Promise.resolve({ error: null, data: Object.keys(out).map(k => ({
+              user_id: k.split("|")[0], label: k.split("|")[1], minutes: out[k] })) });
           }
           if (name === "is_admin") return Promise.resolve({ data: !/admin=0/.test(location.search), error: null });
           if (name === "admin_delete_user") {

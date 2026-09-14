@@ -121,7 +121,87 @@ function avatarHTML(p, cls) {
 
 /* ---------------- state ---------------- */
 let UID = null, ME = null;
-const DB = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], timers: [] };
+/* ---------------------------------------------------------------------------
+   What this client actually holds.
+
+   It used to hold the whole database: everybody's sessions, everybody's
+   subjects, everybody's areas, re-read in full every few seconds. At eight
+   people that was merely wasteful. At four hundred it is about three
+   megabytes a read before anyone has logged anything, which no amount of
+   tuning survives.
+
+   So: your own rows in full, because you are the only person who can edit
+   them — and for everyone else, the rollup the statistics are actually made
+   of. Every crew-wide number in this app (hours, streaks, the charts, the
+   sparklines, goal-hit rates) comes from one fact, how many minutes a person
+   did on a day, and that is what `daily` carries.
+   --------------------------------------------------------------------------- */
+const DB = {
+  profiles: [],          /* everyone — names, colours and goal settings */
+  subjects: [],          /* mine */
+  areas: [],             /* mine */
+  sessions: [],          /* mine */
+  goals: [],             /* mine, plus everyone's inside the window */
+  timers: [],            /* everyone, and tiny */
+  daily: new Map(),      /* user_id -> { days: {"2026-09-14":[minutes,sessions]}, first_day, ... } */
+  crewSubjects: [],      /* [{ key, label, takers:[user_id] }] for the leaderboard picker */
+  feed: [],              /* the 40 most recent sessions crew-wide, labels included */
+  allSessions: null      /* only ever filled for the admin console */
+};
+
+/* How far back the rollup reaches. Long enough for any streak anyone will
+   have before the HSC, short enough that it stays small. */
+const CREW_WINDOW_DAYS = 180;
+const crewSince = () => addDays(todayISO(), -CREW_WINDOW_DAYS);
+
+/* The one lookup everything else is built on. */
+function dayCell(uid, day) {
+  const e = DB.daily.get(uid);
+  const v = e && e.days && e.days[day];
+  return v || [0, 0];
+}
+const minutesOn  = (uid, day) => dayCell(uid, day)[0];
+const sessionsOn = (uid, day) => dayCell(uid, day)[1];
+
+/* Rows come back from the rpc as an array; this is the shape the app reads. */
+function absorbDaily(rows, merge) {
+  if (!merge) DB.daily = new Map();
+  (rows || []).forEach(r => {
+    const cur = DB.daily.get(r.user_id);
+    if (cur && merge) {
+      Object.assign(cur.days, r.days || {});
+      cur.first_day     = r.first_day || cur.first_day;
+      cur.total_minutes = Number(r.total_minutes || 0);
+      cur.total_sessions = Number(r.total_sessions || 0);
+    } else {
+      DB.daily.set(r.user_id, {
+        days: r.days || {},
+        first_day: r.first_day || null,
+        total_minutes: Number(r.total_minutes || 0),
+        total_sessions: Number(r.total_sessions || 0)
+      });
+    }
+  });
+}
+
+/* Your own edits show up at once rather than waiting for the next read, and
+   the read that follows only confirms them. */
+function patchDaily(uid, day, minutes, sessions) {
+  let e = DB.daily.get(uid);
+  if (!e) { e = { days: {}, first_day: day, total_minutes: 0, total_sessions: 0 }; DB.daily.set(uid, e); }
+  const cur = e.days[day] || [0, 0];
+  const next = [Math.max(0, cur[0] + minutes), Math.max(0, cur[1] + sessions)];
+  if (next[0] === 0 && next[1] === 0) delete e.days[day]; else e.days[day] = next;
+  e.total_minutes  = Math.max(0, e.total_minutes + minutes);
+  e.total_sessions = Math.max(0, e.total_sessions + sessions);
+  if (!e.first_day || day < e.first_day) e.first_day = day;
+}
+
+const crewTotals = () => {
+  let m = 0, n = 0;
+  DB.daily.forEach(e => { m += e.total_minutes; n += e.total_sessions; });
+  return { hours: m / 60, sessions: n };
+};
 let CUR = todayISO();
 let RANGE = 7;
 let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
@@ -144,10 +224,16 @@ function timerWriteStart() { timerWrites++; timerTouched = Date.now(); }
 function timerWriteEnd()   { timerWrites = Math.max(0, timerWrites - 1); timerTouched = Date.now(); }
 
 const profileOf = id => DB.profiles.find(p => p.id === id) || {id, display_name:"Unknown", colour:"#7B8D98"};
-const mySubjects = uid => DB.subjects.filter(s => s.user_id === uid);
-const myAreas    = uid => DB.areas.filter(a => a.user_id === uid);
-const areaById   = id => DB.areas.find(a => a.id === id);
-const subjById   = id => DB.subjects.find(s => s.id === id);
+/* Whoever's profile is open, fetched when you click them. This client keeps
+   its own subjects and areas and nobody else's, so a visitor's rows live here
+   for as long as their profile is on screen and the lookups below fall
+   through to them. */
+let GUEST = { id: null, subjects: [], areas: [], sessions: [] };
+
+const mySubjects = uid => uid === UID ? DB.subjects : (GUEST.id === uid ? GUEST.subjects : []);
+const myAreas    = uid => uid === UID ? DB.areas    : (GUEST.id === uid ? GUEST.areas    : []);
+const areaById   = id => DB.areas.find(a => a.id === id)    || GUEST.areas.find(a => a.id === id);
+const subjById   = id => DB.subjects.find(s => s.id === id) || GUEST.subjects.find(s => s.id === id);
 
 function goalFor(uid, day) {
   const o = DB.goals.find(g => g.user_id === uid && g.day === day);
@@ -160,9 +246,7 @@ function goalFor(uid, day) {
   }
   return Number(p.default_goal || 0);
 }
-const hoursFor = (uid, day) => DB.sessions
-  .filter(s => s.user_id === uid && s.day === day)
-  .reduce((a, s) => a + s.minutes / 60, 0);
+const hoursFor = (uid, day) => minutesOn(uid, day) / 60;
 
 function ratioFor(uid, day) {
   const g = goalFor(uid, day), h = hoursFor(uid, day);
@@ -192,8 +276,8 @@ function longestStreakFor(uid) {
   return best;
 }
 function firstDayFor(uid) {
-  const ds = DB.sessions.filter(s => s.user_id === uid).map(s => s.day).sort();
-  return ds[0] || null;
+  const e = DB.daily.get(uid);
+  return (e && e.first_day) || null;
 }
 function allDaysFor(uid) {
   const f = firstDayFor(uid); if (!f) return [];
@@ -204,8 +288,13 @@ function allDaysFor(uid) {
 function rangeDays() {
   const t = todayISO();
   if (RANGE === 0) {
-    const all = DB.sessions.map(s => s.day).sort();
-    const start = all[0] || t;
+    /* "All time" reaches back to the first day anybody logged, or to the edge
+       of the rollup window, whichever is nearer. */
+    let start = null;
+    DB.daily.forEach(e => { if (e.first_day && (!start || e.first_day < start)) start = e.first_day; });
+    const edge = crewSince();
+    if (!start) start = t;
+    else if (start < edge) start = edge;
     const out = []; let d = start;
     while (d <= t && out.length < 500) { out.push(d); d = addDays(d, 1); }
     return out.length ? out : [t];
@@ -453,48 +542,128 @@ function adoptOrphanTimer(readAt) {
   try { paintTimer(); startClock(); } catch (e) { /* page not built yet */ }
 }
 
+/* The activity feed needs other people's subject and area names, which this
+   client no longer keeps. Forty rows, with the two names came along for the
+   ride, is far cheaper than everybody's subject tables. */
+const FEED_COLUMNS = "*, subjects(name, colour), areas(name)";
+const feedRow = r => Object.assign({}, r, {
+  subject_name:   r.subjects ? r.subjects.name   : null,
+  subject_colour: r.subjects ? r.subjects.colour : null,
+  area_name:      r.areas    ? r.areas.name      : null,
+  subjects: undefined, areas: undefined
+});
+
+function normaliseProfiles() {
+  DB.profiles.forEach(p => {
+    if (typeof p.weekday_goals === "string") {
+      try { p.weekday_goals = JSON.parse(p.weekday_goals); } catch (e) { p.weekday_goals = null; }
+    }
+  });
+}
+
+/* The whole picture. Runs when you sign in and after you change something of
+   your own — a handful of times a visit, not every few seconds. */
 async function loadAll() {
   const ticket = timersTicket(), readAt = Date.now();
-  const [pr, su, ar, se, go, ti] = await Promise.all([
+  const since = crewSince();
+  const [pr, su, ar, se, go, ti, cd, cs, fe] = await Promise.all([
     sb.from("profiles").select("*"),
-    sb.from("subjects").select("*").order("position"),
-    sb.from("areas").select("*").order("position"),
-    sb.from("sessions").select("*").order("day", { ascending: false }).limit(20000),
-    sb.from("goals").select("*"),
-    sb.from("live_timers").select("*")
+    sb.from("subjects").select("*").eq("user_id", UID).order("position"),
+    sb.from("areas").select("*").eq("user_id", UID).order("position"),
+    sb.from("sessions").select("*").eq("user_id", UID).order("day", { ascending: false }),
+    /* everyone's overrides inside the window, and all of your own so your
+       own longest streak stays right however far back it goes */
+    sb.from("goals").select("*").or("user_id.eq." + UID + ",day.gte." + since),
+    sb.from("live_timers").select("*"),
+    sb.rpc("crew_daily", { since }),
+    sb.rpc("crew_subjects"),
+    sb.from("sessions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(40)
   ]);
   /* Set off before the last write landed, so it cannot know about it. Throwing
      it away costs one more read; believing it un-deletes things. */
   if (readAt <= dataTouched) return false;
   DB.profiles = pr.data || []; DB.subjects = su.data || []; DB.areas = ar.data || [];
   DB.sessions = se.data || []; DB.goals = go.data || [];
+  absorbDaily(cd.data, false);
+  DB.crewSubjects = (cs.data || []).map(r => ({ key: r.key, label: r.label, takers: r.takers || [] }));
+  DB.feed = (fe.data || []).map(feedRow);
   applyTimers(ti.data, ticket, readAt);
-  DB.profiles.forEach(p => {
-    if (typeof p.weekday_goals === "string") { try { p.weekday_goals = JSON.parse(p.weekday_goals); } catch (e) { p.weekday_goals = null; } }
-  });
+  normaliseProfiles();
+  return true;
+}
+
+/* What the automatic path reads instead.
+
+   Nothing that happened while you were looking at the page can change a day
+   other than today — you cannot log into last Tuesday from here — so the
+   rollup only has to be asked about the last couple of days, which is a few
+   kilobytes rather than the lot. Profiles are left alone: they change when
+   somebody edits their name, and realtime says so when they do. */
+let crewReloadProfiles = false;
+async function loadCrew() {
+  const ticket = timersTicket(), readAt = Date.now();
+  const since = addDays(todayISO(), -1);
+  /* only_active: somebody who has not logged anything in the last two days has
+     nothing to merge, and four hundred rows saying so is most of what this
+     read would otherwise cost. */
+  const newest = DB.feed.length ? DB.feed[0].created_at : null;
+  const feedJob = newest
+    ? sb.from("sessions").select(FEED_COLUMNS).gt("created_at", newest)
+        .order("created_at", { ascending: false }).limit(40)
+    : sb.from("sessions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(40);
+
+  const jobs = [
+    sb.rpc("crew_daily", { since, only_active: true }),
+    sb.from("live_timers").select("*"),
+    feedJob
+  ];
+  if (crewReloadProfiles) jobs.push(sb.from("profiles").select("*"));
+  const [cd, ti, fe, pr] = await Promise.all(jobs);
+  if (readAt <= dataTouched) return false;
+  absorbDaily(cd.data, true);            /* merged, so older days are kept */
+  if (LB_SUBJECT) { SUBJECT_DAILY.key = null; await loadSubjectDaily(LB_SUBJECT); }
+  /* Only what is new since last time, put on the front. A session somebody
+     deleted elsewhere can linger here until the next full read; it is a list
+     of what happened, and the rules that matter are enforced in the database. */
+  const fresh = (fe.data || []).map(feedRow);
+  DB.feed = newest ? fresh.concat(DB.feed).slice(0, 40) : fresh;
+  if (pr && pr.data) { DB.profiles = pr.data; normaliseProfiles(); crewReloadProfiles = false; }
+  applyTimers(ti.data, ticket, readAt);
   return true;
 }
 /* A refresh asked for while one is already running used to be dropped on the
    floor — which is how a delete could finish, ask for the repaint that would
    have shown it gone, and get nothing. Now it is remembered and run after,
    and a read discarded as stale asks again by the same route. */
-let refreshing = false, refreshQueued = false;
-async function refresh(rerender) {
-  if (refreshing) { refreshQueued = true; return; }
+let refreshing = false, refreshQueued = false, refreshWantsAll = false;
+async function runRefresh(rerender, full) {
+  if (refreshing) { refreshQueued = true; refreshWantsAll = refreshWantsAll || full; return; }
   refreshing = true;
+  refreshWantsAll = full;
   try {
     let tries = 0;
     do {
       refreshQueued = false;
-      if (await loadAll()) {
+      const wantAll = refreshWantsAll;
+      refreshWantsAll = false;
+      if (await (wantAll ? loadAll() : loadCrew())) {
         ME = DB.profiles.find(p => p.id === UID) || ME;
         if (rerender !== false) renderAll();
       } else {
         refreshQueued = true;            /* stale read — go round again */
+        refreshWantsAll = refreshWantsAll || wantAll;
       }
     } while (refreshQueued && ++tries < 5);
-  } finally { refreshing = false; refreshQueued = false; }
+  } finally { refreshing = false; refreshQueued = false; refreshWantsAll = false; }
 }
+
+/* After something of yours changed: read the lot. */
+const refresh = rerender => runRefresh(rerender, true);
+
+/* The automatic path — a timer firing, somebody else logging a session, a tab
+   coming back to the front. This is the one that runs hundreds of times an
+   evening across the year group, so it reads kilobytes, not megabytes. */
+const refreshCrew = () => runRefresh(undefined, false);
 /* live_timers is a handful of rows, so it is cheap to ask for it often. This is
    deliberately NOT a full refresh: it swaps in the timers and repaints the two
    live areas, leaving the rest of the page — and anything you are typing — alone. */
@@ -522,7 +691,12 @@ async function pollTimers() {
    So: bursts collapse into one read, and a tab nobody is looking at does no
    work at all. It catches up the moment you look at it again.
    --------------------------------------------------------------------------- */
-const REFRESH_GAP = 8000;    /* never re-read everything more often than this */
+/* The reconciling read. It used to be the thing that made the page live, so it
+   had to be quick; now realtime moves the numbers and this only tidies up
+   behind it — the feed, other people's edits, anything a dropped socket
+   missed. A minute is plenty, and at four hundred people the difference
+   between eight seconds and sixty is most of the bandwidth bill. */
+const REFRESH_GAP = 60000;
 const TIMERS_GAP  = 5000;
 let refreshHandle = null, refreshAt = 0;
 let timersHandle  = null, timersAt  = 0;
@@ -533,7 +707,7 @@ function refreshSoon() {
   if (refreshHandle) return;                       /* one is already queued */
   refreshHandle = setTimeout(() => {
     refreshHandle = null; refreshAt = Date.now(); missedWhileHidden = false;
-    refresh();
+    refreshCrew();
   }, Math.max(0, REFRESH_GAP - (Date.now() - refreshAt)));
 }
 
@@ -546,12 +720,35 @@ function pollTimersSoon() {
   }, Math.max(0, TIMERS_GAP - (Date.now() - timersAt)));
 }
 
+/* Somebody else logged a session.
+
+   This used to send every connected client off to re-read, which is the shape
+   that does not survive four hundred people: one person pressing save turns
+   into four hundred reads. But an insert arrives carrying the whole row, and
+   the rollup only wants the minutes and the day — so the numbers move at once,
+   for nothing, and the read becomes a slow reconcile rather than a reflex.
+
+   Edits and deletions come through without the old row attached, so those
+   still ask; they are a fraction of the traffic. */
+function onCrewSession(payload) {
+  const row = payload && (payload.new || payload.old);
+  const kind = payload && payload.eventType;
+  if (!row || row.user_id === UID) return;     /* your own are applied locally already */
+  if (kind === "INSERT" && row.day && row.minutes) {
+    patchDaily(row.user_id, row.day, Number(row.minutes), 1);
+    try { renderAll(); } catch (e) { /* not up yet */ }
+    return;
+  }
+  refreshSoon();
+}
+
 function subscribeRealtime() {
   try {
     sb.channel("crew")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, refreshSoon)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, onCrewSession)
       .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    }, refreshSoon)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    },
+          () => { crewReloadProfiles = true; refreshSoon(); })
       .subscribe();
 
     /* Nudges are addressed to one person, so each client listens only for
@@ -821,14 +1018,20 @@ function setPair(sid, aid, subject_id, area_id, owner) {
   if (subject_id) $(sid).value = subject_id;
   paintAreaSelect(sid, aid, area_id || "", owner);
 }
+/* Feed rows arrive with their subject and area names attached, because they
+   belong to people whose subject tables this client no longer holds. Rows of
+   your own carry no such names and are looked up live, so renaming a subject
+   still shows up straight away. */
 function labelOf(s) {
-  if (s.area_id) { const a = areaById(s.area_id); if (a) return a.name; }
+  if (s.area_id)    { const a = areaById(s.area_id);    if (a) return a.name; }
   if (s.subject_id) { const x = subjById(s.subject_id); if (x) return x.name; }
+  if (s.area_name)    return s.area_name;
+  if (s.subject_name) return s.subject_name;
   return "Study";
 }
 function colourOf(s) {
   const sub = s.subject_id ? subjById(s.subject_id) : null;
-  return (sub && sub.colour) || "#7B8D98";
+  return (sub && sub.colour) || s.subject_colour || "#7B8D98";
 }
 
 /* =========================================================================
@@ -1108,10 +1311,11 @@ function renderAll() {
   renderShell(); renderHome(); renderCrew(); renderMe(); renderSetup();
   try { paintNudgeBar(); } catch (e) { console.error(e); }
   try { paintReminders(); } catch (e) { console.error(e); }
+  const tot = crewTotals();
   $("footnote").textContent =
     `${DB.profiles.length} member${DB.profiles.length === 1 ? "" : "s"} · ` +
-    `${DB.sessions.length} sessions logged between everyone · ` +
-    `${f1(DB.sessions.reduce((a, s) => a + s.minutes / 60, 0))} hours in total.`;
+    `${tot.sessions} sessions logged between everyone · ` +
+    `${f1(tot.hours)} hours in total.`;
 }
 function renderShell() {
   $("crewname").textContent = "Study Track";
@@ -1120,7 +1324,7 @@ function renderShell() {
   if (crew && crew.toLowerCase() !== "study track") { chip.textContent = crew; chip.hidden = false; }
   else chip.hidden = true;
   $("meblock").dataset.profile = UID;
-  const total = DB.sessions.reduce((a, s) => a + s.minutes / 60, 0);
+  const total = crewTotals().hours;
   $("crewsub").textContent = `${DB.profiles.length} ${DB.profiles.length === 1 ? "member" : "members"} · ${f1(total)} hours logged together`;
   $("me-av").outerHTML = avatarHTML(ME, "lg").replace('class="av lg"', 'class="av lg" id="me-av"');
   $("me-name").textContent = ME.display_name;
@@ -1310,8 +1514,16 @@ function entryHTML(s, withWho) {
    waiting for the next full read to come back — which is a second or two if
    one was already in the air. The read that follows only confirms it. */
 function dropSessionLocally(id) {
-  const i = DB.sessions.findIndex(s => s.id === id);
-  if (i >= 0) DB.sessions.splice(i, 1);
+  /* It might be one of yours, or one you are looking at on somebody's profile,
+     or only known from the feed — take it out of whichever holds it. */
+  const row = DB.sessions.find(s => s.id === id)
+           || GUEST.sessions.find(s => s.id === id)
+           || DB.feed.find(s => s.id === id);
+  const cut = (arr) => { const i = arr.findIndex(s => s.id === id); if (i >= 0) arr.splice(i, 1); };
+  cut(DB.sessions); cut(GUEST.sessions); cut(DB.feed);
+  /* and out of the rollup, so the ring, the totals and the board drop it now
+     rather than a second later when the read comes back */
+  if (row) patchDaily(row.user_id, row.day, -Number(row.minutes || 0), -1);
 }
 
 function wireEntryActions(scope) {
@@ -1467,32 +1679,19 @@ function nameSim(a, b) {
   return (side(A, B) + side(B, A)) / 2;
 }
 
-/* subject id -> normalised name, built in one pass. Worth it: the alternative
-   is a linear find through every subject in the crew for every session. */
-function subjectKeyMap() {
-  const m = new Map();
-  DB.subjects.forEach(s => m.set(s.id, subjKey(s.name)));
-  return m;
-}
-
 /* Every distinct subject anyone takes, with who takes it and how it is spelt. */
 function subjectGroups() {
-  const g = new Map();
-  DB.subjects.forEach(s => {
-    const k = subjKey(s.name);
-    if (!k) return;
-    let e = g.get(k);
-    if (!e) { e = { key: k, loose: subjLoose(s.name), takers: new Set(), spellings: new Map() }; g.set(k, e); }
-    e.takers.add(s.user_id);
-    const spelt = String(s.name).trim();
-    e.spellings.set(spelt, (e.spellings.get(spelt) || 0) + 1);
-  });
-  const out = [...g.values()];
-  out.forEach(e => {
-    /* label it with whichever spelling the most people actually use */
-    e.label = [...e.spellings.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
-    e.inCatalogue = !!CAT.byName(e.label);
-  });
+  /* The crew's subject names and who takes them arrive already grouped, from
+     crew_subjects() — the database does the counting so this client does not
+     have to hold four hundred people's subject rows to do it. The label it
+     picks is the spelling the most people use, same rule as before. */
+  const out = (DB.crewSubjects || []).map(r => ({
+    key: r.key,
+    label: r.label,
+    loose: subjLoose(r.label),
+    takers: new Set(r.takers || [])
+  }));
+  out.forEach(e => { e.inCatalogue = !!CAT.byName(e.label); });
   /* differing only by spacing or punctuation is almost certainly one subject
      typed two ways, and worth saying out loud */
   out.forEach(e => e.nearMisses = out.filter(o => o !== e && o.loose === e.loose));
@@ -1543,11 +1742,15 @@ function leaderboard(rangeOverride, opts) {
   const days = rangeOverride ? (() => { const o = []; for (let i = rangeOverride - 1; i >= 0; i--) o.push(addDays(todayISO(), -i)); return o; })() : rangeDays();
   const set = new Set(days);
 
-  let keyOf = null, takers = null;
+  /* Under a subject filter the numbers come from a rollup of that subject
+     alone, fetched when the picker changes; the whole-crew rollup otherwise. */
+  const src = subject ? (SUBJECT_DAILY.key === subject ? SUBJECT_DAILY.map : new Map()) : DB.daily;
+  const cell = (uid, day) => { const e = src.get(uid); const v = e && e.days[day]; return v || [0, 0]; };
+
+  let takers = null;
   if (subject) {
-    keyOf = subjectKeyMap();
-    takers = new Set();
-    DB.subjects.forEach(s => { if (subjKey(s.name) === subject) takers.add(s.user_id); });
+    const g = (DB.crewSubjects || []).find(x => x.key === subject);
+    takers = new Set(g ? g.takers : []);
   }
   /* Everybody who takes the subject is on the board, including anyone who has
      not logged to it in this range. Dropping them would turn "first of six"
@@ -1555,21 +1758,43 @@ function leaderboard(rangeOverride, opts) {
   const people = takers ? DB.profiles.filter(p => takers.has(p.id)) : DB.profiles;
 
   return people.map(p => {
-    const ss = DB.sessions.filter(s => s.user_id === p.id && set.has(s.day) &&
-      (!subject || (s.subject_id && keyOf.get(s.subject_id) === subject)));
-    const hours = ss.reduce((a, s) => a + s.minutes / 60, 0);
-    const perDay = {}; days.forEach(d => perDay[d] = 0);
-    ss.forEach(s => perDay[s.day] += s.minutes / 60);
+    const perDay = {};
+    let hours = 0, sessions = 0;
+    days.forEach(d => {
+      const c = cell(p.id, d);
+      perDay[d] = c[0] / 60;
+      hours += c[0] / 60;
+      sessions += c[1];
+    });
     const active = days.filter(d => perDay[d] > 0).length;
     const withGoal = days.filter(d => goalFor(p.id, d) > 0);
     const hit = withGoal.filter(d => perDay[d] >= goalFor(p.id, d)).length;
-    return { id: p.id, p, hours, sessions: ss.length, days,
+    return { id: p.id, p, hours, sessions, days,
       perDay, active, best: Math.max(0, ...days.map(d => perDay[d])),
       goalHit: subject ? null : (withGoal.length ? hit / withGoal.length : null),
       streak: subject ? null : streakFor(p.id) };
   }).sort((a, b) => LB_METRICS[metric].get(b) - LB_METRICS[metric].get(a) ||
                     b.hours - a.hours ||
                     a.p.display_name.localeCompare(b.p.display_name));
+}
+
+/* One subject's rollup, held for as long as that subject is the one on screen.
+   Asked for only when the picker changes, not on every repaint. */
+const SUBJECT_DAILY = { key: null, map: new Map() };
+async function loadSubjectDaily(key) {
+  if (!key) { SUBJECT_DAILY.key = null; SUBJECT_DAILY.map = new Map(); return; }
+  if (SUBJECT_DAILY.key === key) return;
+  try {
+    const { data, error } = await sb.rpc("crew_daily_by_subject",
+      { since: crewSince(), subject_key: key });
+    if (error) return;
+    const m = new Map();
+    (data || []).forEach(r => m.set(r.user_id, {
+      days: r.days || {}, first_day: r.first_day || null,
+      total_minutes: Number(r.total_minutes || 0), total_sessions: Number(r.total_sessions || 0)
+    }));
+    SUBJECT_DAILY.key = key; SUBJECT_DAILY.map = m;
+  } catch (e) { /* leave the board empty rather than wrong */ }
 }
 
 /* What the board is showing. Deliberately not remembered between visits: it
@@ -1608,7 +1833,11 @@ function paintLbControls(groups) {
 
   if (!sub.dataset.wired) {
     sub.dataset.wired = "1";
-    sub.addEventListener("change", () => { LB_SUBJECT = sub.value || null; renderCrew(); });
+    sub.addEventListener("change", async () => {
+      LB_SUBJECT = sub.value || null;
+      await loadSubjectDaily(LB_SUBJECT);
+      renderCrew();
+    });
     met.addEventListener("change", () => { LB_METRIC = met.value; renderCrew(); });
   }
 }
@@ -1677,14 +1906,16 @@ function renderCrew() {
 
   /* table */
   const last7 = (() => { const o = []; for (let i = 6; i >= 0; i--) o.push(addDays(todayISO(), -i)); return o; })();
-  /* one pass for every sparkline, rather than a scan per person per day */
-  const keyOf = LB_SUBJECT ? subjectKeyMap() : null;
-  const sparkSet = new Set(last7), sparkH = {};
-  DB.sessions.forEach(s => {
-    if (!sparkSet.has(s.day)) return;
-    if (LB_SUBJECT && !(s.subject_id && keyOf.get(s.subject_id) === LB_SUBJECT)) return;
-    (sparkH[s.user_id] = sparkH[s.user_id] || {});
-    sparkH[s.user_id][s.day] = (sparkH[s.user_id][s.day] || 0) + s.minutes / 60;
+  /* sparklines come straight off whichever rollup the board is reading */
+  const sparkSrc = LB_SUBJECT
+    ? (SUBJECT_DAILY.key === LB_SUBJECT ? SUBJECT_DAILY.map : new Map())
+    : DB.daily;
+  const sparkH = {};
+  board.forEach(r => {
+    const e = sparkSrc.get(r.id);
+    const row = {};
+    last7.forEach(d => { const c = (e && e.days[d]) || [0, 0]; row[d] = c[0] / 60; });
+    sparkH[r.id] = row;
   });
 
   $("lbtbl").querySelector("tbody").innerHTML = board.map((r, i) => {
@@ -1727,7 +1958,7 @@ function renderCrew() {
   drawH2H();
 
   /* feed */
-  const feed = DB.sessions.slice().sort((a, b) => (b.created_at || "") < (a.created_at || "") ? -1 : 1).slice(0, 40);
+  const feed = DB.feed;          /* already the 40 newest, crew-wide, from the server */
   $("feed").innerHTML = feed.length
     ? feed.map(s => `<div style="padding:0 16px">${entryHTML(s, true)}</div>`).join("")
     : `<div class="empty" style="margin:18px">Nothing logged yet by anyone.</div>`;
@@ -1807,30 +2038,53 @@ function drawStack(board, days) {
   });
 }
 
+/* The by-subject split for whichever two people are being compared. */
+const H2H_SUBJECTS = { sig: null, by: {} };
+async function loadH2HSubjects(a, b, since) {
+  const sig = a + "|" + b + "|" + since;
+  if (H2H_SUBJECTS.sig === sig) return false;
+  try {
+    const { data, error } = await sb.rpc("subject_totals", { uids: [a, b], since });
+    if (error) return false;
+    const by = {};
+    (data || []).forEach(r => {
+      (by[r.user_id] = by[r.user_id] || {})[r.label || "Other"] = Number(r.minutes || 0) / 60;
+    });
+    H2H_SUBJECTS.sig = sig; H2H_SUBJECTS.by = by;
+    return true;
+  } catch (e) { return false; }
+}
+
 function drawH2H() {
   const a = $("h2h-a").value, b = $("h2h-b").value;
   if (!a || !b) { $("h2h").innerHTML = `<div class="empty">Not enough members yet.</div>`; return; }
   const days = rangeDays(), set = new Set(days);
   /* The head to head follows the leaderboard's subject, so the whole crew page
      is answering one question at a time. */
-  const keyOf = LB_SUBJECT ? subjectKeyMap() : null;
+  /* Straight off the rollup — every figure here is a sum over days. The split
+     by subject is the one thing the rollup cannot answer, so it is fetched for
+     these two people alone and cached until the pair or the range changes. */
+  const src = LB_SUBJECT ? (SUBJECT_DAILY.key === LB_SUBJECT ? SUBJECT_DAILY.map : new Map()) : DB.daily;
   const stat = uid => {
-    const ss = DB.sessions.filter(s => s.user_id === uid && set.has(s.day) &&
-      (!LB_SUBJECT || (s.subject_id && keyOf.get(s.subject_id) === LB_SUBJECT)));
-    const hours = ss.reduce((x, s) => x + s.minutes / 60, 0);
-    const per = {}; days.forEach(d => per[d] = 0); ss.forEach(s => per[s.day] += s.minutes / 60);
+    const per = {}; let hours = 0, sessions = 0;
+    days.forEach(d => {
+      const e = src.get(uid); const c = (e && e.days[d]) || [0, 0];
+      per[d] = c[0] / 60; hours += c[0] / 60; sessions += c[1];
+    });
     const withGoal = days.filter(d => goalFor(uid, d) > 0);
     const hit = withGoal.filter(d => per[d] >= goalFor(uid, d)).length;
-    const bySub = {};
-    ss.forEach(s => { const n = s.subject_id ? (subjById(s.subject_id) || {}).name || "Other" : "Other";
-      bySub[n] = (bySub[n] || 0) + s.minutes / 60; });
-    return { p: profileOf(uid), hours, sessions: ss.length, active: days.filter(d => per[d] > 0).length,
+    return { p: profileOf(uid), hours, sessions, active: days.filter(d => per[d] > 0).length,
       best: Math.max(0, ...days.map(d => per[d])),
       /* both of these are facts about whole days, so they say nothing about
          one subject and are left off rather than quietly misread */
       streak: LB_SUBJECT ? null : streakFor(uid),
-      goalHit: LB_SUBJECT ? null : (withGoal.length ? hit / withGoal.length : null), bySub };
+      goalHit: LB_SUBJECT ? null : (withGoal.length ? hit / withGoal.length : null),
+      bySub: H2H_SUBJECTS.by[uid] || {} };
   };
+  /* Fetch the split if it is not the one we hold, and redraw when it arrives.
+     Everything else on this panel is already right without waiting. */
+  loadH2HSubjects(a, b, days[0] || todayISO()).then(got => { if (got) drawH2H(); });
+
   const A = stat(a), B = stat(b);
   const row = (label, va, vb, fmt) => {
     const f = fmt || (x => f1(x));
@@ -2129,12 +2383,28 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") { $("ov-area
    signed-in member — this just puts it in one place instead of scattered
    across the leaderboard, the feed and the charts.
    ========================================================================= */
-function openProfile(id) {
+async function openProfile(id) {
   const p = profileOf(id);
   const mine = id === UID;
   openProfileId = id;
 
-  const all = DB.sessions.filter(x => x.user_id === id);
+  /* Their rows, fetched when you ask for them rather than carried around for
+     the whole crew the whole time. One person's history is a few tens of
+     kilobytes; four hundred people's was the thing that had to go. */
+  let all;
+  if (mine) {
+    all = DB.sessions.slice();
+  } else {
+    if (GUEST.id !== id) {
+      const [se, su, ar] = await Promise.all([
+        sb.from("sessions").select("*").eq("user_id", id).order("day", { ascending: false }),
+        sb.from("subjects").select("*").eq("user_id", id).order("position"),
+        sb.from("areas").select("*").eq("user_id", id).order("position")
+      ]);
+      GUEST = { id, subjects: su.data || [], areas: ar.data || [], sessions: se.data || [] };
+    }
+    all = GUEST.sessions.slice();
+  }
   const byDay = {};
   all.forEach(x => { byDay[x.day] = (byDay[x.day] || 0) + x.minutes / 60; });
   const days = Object.keys(byDay).sort();
@@ -2988,7 +3258,10 @@ function nudgeBlockedBecause(id) {
   const t = DB.timers.find(x => x.user_id === id);
   if (t && Date.now() - new Date(t.updated_at || 0).getTime() < LIVE_FRESH_MS) return "studying";
   const halfHourAgo = Date.now() - 30 * 60e3;
-  if (DB.sessions.some(s => s.user_id === id &&
+  /* The forty newest sessions crew-wide; anybody who logged in the last half
+     hour is in there. The database enforces the rule properly in nudge_mate()
+     either way — this only decides what the button says before you press it. */
+  if (DB.feed.some(s => s.user_id === id &&
       new Date(s.created_at || 0).getTime() > halfHourAgo)) return "recent";
   return null;
 }

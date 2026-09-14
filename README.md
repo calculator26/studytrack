@@ -335,6 +335,22 @@ level security in `schema.sql`, where every update and delete policy reads
 `user_id = auth.uid() or public.is_admin()`. Force the panel open without being an admin and
 you get a working-looking screen whose every button quietly changes nothing.
 
+### What each browser actually downloads
+Study Track is built for a whole year group, so no client holds the whole database.
+It keeps **your** rows — your subjects, your areas, your sessions — because you are the
+only person who can edit them, and for everyone else it holds the rollup the statistics
+are actually made of: how many minutes each person did on each day. Every crew-wide
+number here (hours, streaks, the charts, the sparklines, goal-hit rates) comes from that
+one fact, so the raw sessions never need to travel.
+
+Someone else's full history is fetched when you open their profile, and put away when
+you close it. The activity feed is the forty newest entries, with their labels attached.
+Live updates arrive over the socket carrying the row, so the numbers move without anyone
+re-reading anything; a top-up read once a minute tidies up behind it.
+
+The practical effect, measured on the real database: a routine update went from about
+**284 KB to 2.4 KB**, and a cold start from 284 KB to about 47 KB.
+
 ### Filtering the leaderboard
 Above the podium are two pickers. **Subject** narrows the whole crew page to one subject —
 podium, table, both charts and the head-to-head all follow it — and **Ranked by** changes
