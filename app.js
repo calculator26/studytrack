@@ -1602,6 +1602,40 @@ const KEY_DATES = () => [
 const daysUntil = iso =>
   Math.round((parseD(iso).getTime() - parseD(todayISO()).getTime()) / 864e5);
 
+/* ---------------------------------------------------------------------------
+   The class-time warning.
+
+   It is up while school is on and gone from 3:15pm, and once it has gone it
+   does not come back that day — every render after the bell leaves it hidden,
+   so there is nothing to dismiss and nothing that flickers back.
+
+   The tab is often left open across the bell, so as well as checking the
+   clock on every render we set one timer for the exact moment and let it
+   pull the sign down while you are looking at it.
+   --------------------------------------------------------------------------- */
+const CLASSWARN_END_H = 15, CLASSWARN_END_M = 15;   /* 3:15pm, the wearer's own clock */
+let classWarnTimer = null;
+
+function paintClassWarn() {
+  const box = $("classwarn");
+  if (!box) return;
+
+  const now = new Date();
+  const bell = new Date(now);
+  bell.setHours(CLASSWARN_END_H, CLASSWARN_END_M, 0, 0);
+  const left = bell.getTime() - now.getTime();
+
+  if (classWarnTimer) { clearTimeout(classWarnTimer); classWarnTimer = null; }
+
+  if (left <= 0) { box.hidden = true; return; }     /* past the bell: stays down */
+  box.hidden = false;
+  classWarnTimer = setTimeout(() => {
+    classWarnTimer = null;
+    const b = $("classwarn");
+    if (b) b.hidden = true;
+  }, left);
+}
+
 function paintCountdown() {
   const box = $("countdown");
   if (!box) return;
@@ -1631,6 +1665,7 @@ function paintCountdown() {
 }
 
 function renderHome() {
+  paintClassWarn();
   paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
   $("h-date").value = CUR;

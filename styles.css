@@ -860,6 +860,60 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 .authseg button[aria-selected="true"]{background:var(--surface);color:var(--ink);
   box-shadow:var(--sh-1)}
 
+/* ---- class-time warning -----------------------------------------------
+   Deliberately the loudest thing on Today, and deliberately temporary. The
+   hazard tape, the shaking signs and the shouting are the point: this is a
+   notice you are meant to read once rather than live with, which is why it
+   takes itself off the page at 3:15pm and stays off.
+   ------------------------------------------------------------------------ */
+.classwarn{
+  position:relative; overflow:hidden;
+  display:flex; align-items:center; gap:18px;
+  padding:22px 24px;
+  border:3px solid #7E1109; border-radius:var(--r);
+  background:linear-gradient(135deg,#C81C15 0%,#E8402A 55%,#FF5F3F 100%);
+  color:#fff;
+  box-shadow:0 14px 34px -14px rgba(176,43,24,.8), inset 0 1px 0 rgba(255,255,255,.22);
+}
+/* hazard tape, top and bottom */
+.classwarn::before,.classwarn::after{
+  content:""; position:absolute; left:0; right:0; height:8px;
+  background:repeating-linear-gradient(135deg,#FFD23F 0 13px,#1A1A1A 13px 26px);
+}
+.classwarn::before{top:0}
+.classwarn::after{bottom:0}
+.cw-sign{
+  flex:0 0 auto; font-size:46px; line-height:1;
+  filter:drop-shadow(0 2px 5px rgba(0,0,0,.35));
+  animation:cwshake 1.1s var(--ease) infinite;
+}
+.cw-sign-r{animation-delay:.55s}
+.cw-text{flex:1 1 auto; text-align:center; padding:6px 0}
+.cw-head{
+  font-size:clamp(19px,3.2vw,32px); font-weight:800; line-height:1.12;
+  letter-spacing:-.021em; text-shadow:0 2px 0 rgba(0,0,0,.2);
+}
+.cw-shout{
+  margin-top:3px;
+  font-size:clamp(23px,4.4vw,44px); font-weight:800; line-height:1.05;
+  text-transform:uppercase; letter-spacing:.01em;
+  color:#FFE28A; text-shadow:0 3px 0 rgba(0,0,0,.28);
+}
+.cw-fine{
+  margin-top:9px; font-size:11.5px; font-weight:650;
+  text-transform:uppercase; letter-spacing:.07em; color:rgba(255,255,255,.85);
+}
+@keyframes cwshake{
+  0%,100%{transform:rotate(-9deg) scale(1)}
+  50%    {transform:rotate(9deg)  scale(1.09)}
+}
+@media (max-width:640px){
+  .classwarn{gap:11px;padding:20px 14px}
+  .cw-sign{font-size:30px}
+  .cw-sign-r{display:none}
+  .cw-fine{letter-spacing:.04em}
+}
+
 /* ---- countdown -------------------------------------------------------- */
 .countdown{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
 .cdcard{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--surface);
