@@ -208,8 +208,10 @@ const crewTotals = () => {
   return { hours: m / 60, sessions: n };
 };
 let CUR = todayISO();
-/* The Peloton page opens on today: the race people are actually in right now. */
-let RANGE = 1;
+/* The Peloton page opens on the last seven days. A single day swings too hard
+   on who happened to have a free period — the week is the truer picture of who
+   is actually putting the work in. Today is still one tap away. */
+let RANGE = 7;
 let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
 /* Whether our live_timers row is known to be on the table. A heartbeat may only
    conclude that a session was finished elsewhere if the row was there to begin
