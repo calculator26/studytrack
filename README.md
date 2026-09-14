@@ -101,6 +101,23 @@ The mark, the group name, and a live count of **who is on the track right now** 
 running a timer shows up as a bubble, you included, with a pulsing dot and their elapsed time
 on hover. Click a bubble to open that person's profile.
 
+### Everyone gets their own colour
+Your colour is how you are told apart — it is the avatar behind your initials, your line
+on the charts and your name in chat. The picker used to open on the same green for
+everybody, and most people sensibly left it there: ninety-one of the first hundred and
+twenty-six ended up sharing a colour with somebody.
+
+A new arrival is now handed one nobody is using. Hues are stepped by the golden angle so
+consecutive ones land far apart, and each is solved for a contrast ratio against white
+between 4.6 and 9.6 to one, which is what keeps white initials on the avatar and the same
+colour as a name on a white card both readable. Change it whenever you like — and if you
+land on somebody else's, Setup says whose, with a **Give me a free one** button beside it.
+
+Worth being honest about the limit: a few hundred *distinct* colours is easy, a few
+hundred *tellable-apart* colours is not. Up to roughly a hundred and fifty they are
+comfortably different; past that the initials on the avatar are doing most of the work,
+which is why they are there.
+
 ### Signing up
 **Sign in** and **Create account** sit side by side at the top of the first screen, so
 somebody arriving from a link is not hunting for a small line of text at the bottom.

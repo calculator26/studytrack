@@ -11,7 +11,7 @@ create table if not exists public.profiles (
   id             uuid primary key references auth.users on delete cascade,
   display_name   text not null default 'New member',
   avatar_url     text,
-  colour         text not null default '#2FCFA6',
+  colour         text not null default '#2f7dd0',   -- replaced below, once the generator exists
   default_goal   numeric not null default 3,
   weekday_goals  jsonb,                       -- [mon,tue,wed,thu,fri,sat,sun] hours, or null
   onboarded      boolean not null default false,
@@ -719,6 +719,42 @@ begin
   begin execute 'alter publication supabase_realtime add table public.nudges';
   exception when others then null; end;
 end $$;
+
+-- ============================================================
+--  A COLOUR EACH
+-- ------------------------------------------------------------
+--  The column default used to be one fixed green, which is how
+--  ninety-one of the first hundred and twenty-six people came to
+--  share a colour: every profile was created with it and the
+--  picker then opened on it. Onboarding now offers a colour
+--  nobody is using, and the default itself is drawn at random
+--  from the same generated set, so even somebody who signs up
+--  and never finishes gets one of their own.
+--
+--  The set is hues stepped by the golden angle, each solved for a
+--  contrast ratio against white between 4.6 and 9.6 to 1 — the
+--  colour is both the background behind white initials and the
+--  text of a name on a white card, and that one number keeps
+--  both readable.
+-- ============================================================
+create or replace function public.default_profile_colour()
+returns text language sql volatile as $$
+  select (array[
+    '#a71946','#805928','#19846c','#3a5509','#9636aa','#236f2a','#198656','#712a5d',
+    '#192be3','#0f6339','#d72f75','#2a6ea9','#125d78','#c33158','#23738b','#a5195b',
+    '#1a8727','#a63477','#c12ad6','#8b542c','#cd27b7','#b92e95','#a1338e','#1855a2',
+    '#0f4f89','#b22daf','#d93647','#aa365a','#a01874','#9d4732','#d8316a','#4e5109',
+    '#0a5847','#353c8e','#694ac6','#1a52b1','#236b6d','#963816','#0a565c','#2a7a1e',
+    '#831199','#6d450c','#354b1c','#5e580e','#326e23','#32629e','#2a580a','#15640f',
+    '#226c5e','#8c1080','#1a8736','#843cbf','#6766e2','#0a5939','#5918d4','#3f58c2',
+    '#1e7942','#861cb8','#48471b','#536921'
+  ])[1 + floor(random() * 60)::int];
+$$;
+
+-- applied here rather than in the create above, so this file still runs top to
+-- bottom on an empty database: the column cannot default to a function that
+-- has not been declared yet.
+alter table public.profiles alter column colour set default public.default_profile_colour();
 
 -- ============================================================
 --  PRIVATE MODE

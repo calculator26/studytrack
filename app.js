@@ -13,6 +13,70 @@ const APP_NAME = "Knox Study Track";
 const isGenericName = n => ["knox study track", "study track"].indexOf(String(n || "").trim().toLowerCase()) > -1;
 const PALETTE = ["#3E7CA6","#C0564C","#3FA98A","#C9A227","#7A6BB5","#D98C3F","#2B6177","#B0577E"];
 
+/* ---------------------------------------------------------------------------
+   A colour of your own.
+
+   The picker used to open on the same green for everyone, and most people
+   quite reasonably left it there — ninety-one of the first hundred and
+   twenty-six ended up sharing a colour with somebody, which makes the charts
+   and the live strip much harder to read than they need to be.
+
+   So a new arrival is handed one nobody has yet. Hues are stepped by the
+   golden angle so consecutive ones land far apart, and each is solved for a
+   contrast ratio against white between about 4.6 and 9.6 to one — the colour
+   is both the background behind white initials and the text of a name on a
+   white card, and that one number keeps them both readable.
+
+   Nobody is stuck with it: the picker is still there and still does whatever
+   you tell it.
+   --------------------------------------------------------------------------- */
+function hslToRgb(h, sat, light) {
+  h = ((h % 360) + 360) % 360 / 360;
+  if (sat === 0) return [light, light, light];
+  const q = light < .5 ? light * (1 + sat) : light + sat - light * sat, p2 = 2 * light - q;
+  const f = t => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p2 + (q - p2) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p2 + (q - p2) * (2/3 - t) * 6;
+    return p2;
+  };
+  return [f(h + 1/3), f(h), f(h - 1/3)];
+}
+const rgbToHex = c => "#" + c.map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
+const srgb = v => v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4);
+/* the WCAG ratio between this colour and white, which is the one number that
+   decides whether white initials on it can be read */
+const contrastOnWhite = c =>
+  1.05 / (.2126 * srgb(c[0]) + .7152 * srgb(c[1]) + .0722 * srgb(c[2]) + .05);
+
+const COLOUR_SATS    = [.68, .52, .80, .60, .74, .46];
+const COLOUR_TARGETS = [4.6, 6.2, 8.4, 5.4, 7.3, 9.6];
+function colourAt(i) {
+  const sat = COLOUR_SATS[i % COLOUR_SATS.length], target = COLOUR_TARGETS[i % COLOUR_TARGETS.length];
+  let lo = .08, hi = .72, rgb = null;
+  for (let k = 0; k < 24; k++) {            /* solve lightness for that ratio */
+    const mid = (lo + hi) / 2;
+    rgb = hslToRgb(i * 137.508, sat, mid);
+    if (contrastOnWhite(rgb) > target) lo = mid; else hi = mid;
+  }
+  return rgbToHex(rgb);
+}
+const normColour = c => String(c || "").trim().toLowerCase();
+/* the first generated colour nobody is using */
+function freeProfileColour() {
+  const taken = new Set(DB.profiles.map(p => normColour(p.colour)));
+  for (let i = 0; i < 3000; i++) {
+    const c = colourAt(i);
+    if (!taken.has(c)) return c;
+  }
+  return PALETTE[0];
+}
+/* who else is on this colour, so Setup can mention it rather than let two
+   people quietly look identical */
+const colourClash = c =>
+  DB.profiles.filter(p => p.id !== UID && normColour(p.colour) === normColour(c));
+
 let sb = null;
 try {
   if (window.supabase && CFG.SUPABASE_URL && !/YOUR-PROJECT/.test(CFG.SUPABASE_URL)) {
@@ -805,7 +869,10 @@ let obSubjects = [], obAvatarFile = null, obStep = 1;
 function startOnboarding() {
   show("onb");
   $("ob-name").value = ME.display_name || "";
-  $("ob-colour").value = ME.colour || "#2FCFA6";
+  /* Their row was created with the column default, which is the same for
+     everybody, so treat anything still shared as "not chosen yet". */
+  const mine = normColour(ME.colour);
+  $("ob-colour").value = (mine && !colourClash(mine).length) ? mine : freeProfileColour();
   $("ob-avpreview").textContent = initials(ME.display_name);
   $("ob-avpreview").style.background = ME.colour || "#2FCFA6";
   /* The picker button and the by-hand form are both in the markup now, so they
@@ -2440,6 +2507,21 @@ async function savePrivacy() {
   toast(patch.hide_hours ? "Your hours are hidden from the year group" : "Your hours are visible again");
 }
 
+/* Two people on the same colour is the thing this is all trying to avoid, so
+   say so at the moment it happens rather than leaving them to wonder why they
+   look alike on the charts. */
+function paintColourClash() {
+  const note = $("s-colournote");
+  if (!note) return;
+  const others = colourClash($("s-colour").value);
+  if (!others.length) { note.hidden = true; return; }
+  const names = others.slice(0, 3).map(p => p.display_name).join(", ");
+  const more = others.length > 3 ? ` and ${others.length - 3} more` : "";
+  note.innerHTML = `<b>${esc(names)}</b>${more} already ${others.length === 1 ? "has" : "have"} ` +
+    `that colour. You will be hard to tell apart on the charts.`;
+  note.hidden = false;
+}
+
 function renderSetup() {
   paintPrivacy();
   if (!$("s-hidehours").dataset.wired) {
@@ -2448,7 +2530,16 @@ function renderSetup() {
     $("s-hideothers").addEventListener("change", savePrivacy);
   }
   $("s-name").value = ME.display_name || "";
-  $("s-colour").value = ME.colour || "#2FCFA6";
+  $("s-colour").value = ME.colour || freeProfileColour();
+  paintColourClash();
+  if (!$("s-colour").dataset.wired) {
+    $("s-colour").dataset.wired = "1";
+    $("s-colour").addEventListener("input", paintColourClash);
+    $("s-colourpick").addEventListener("click", () => {
+      $("s-colour").value = freeProfileColour();
+      paintColourClash();
+    });
+  }
   $("s-avpreview").outerHTML = avatarHTML(ME, "xl").replace('class="av xl"', 'class="av xl" id="s-avpreview"');
   $("s-default").value = ME.default_goal != null ? ME.default_goal : 3;
   const wk = Array.isArray(ME.weekday_goals) && ME.weekday_goals.length === 7 ? ME.weekday_goals : [3,3,3,3,3,5,5];
