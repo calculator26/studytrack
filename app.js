@@ -208,7 +208,8 @@ const crewTotals = () => {
   return { hours: m / 60, sessions: n };
 };
 let CUR = todayISO();
-let RANGE = 7;
+/* The Peloton page opens on today: the race people are actually in right now. */
+let RANGE = 1;
 let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
 /* Whether our live_timers row is known to be on the table. A heartbeat may only
    conclude that a session was finished elsewhere if the row was there to begin
@@ -997,6 +998,10 @@ $("rangechips").querySelectorAll("[data-r]").forEach(b => b.addEventListener("cl
   $("rangechips").querySelectorAll("[data-r]").forEach(x => x.setAttribute("aria-pressed", "false"));
   b.setAttribute("aria-pressed", "true"); RANGE = +b.dataset.r; renderCrew();
 }));
+/* The pressed chip follows RANGE rather than the markup, so a browser still
+   holding a cached index.html never shows one range highlighted over another. */
+$("rangechips").querySelectorAll("[data-r]").forEach(x =>
+  x.setAttribute("aria-pressed", String(+x.dataset.r === RANGE)));
 
 /* =========================================================================
    SELECTS  (subject / area pickers built from the signed-in user's own data)

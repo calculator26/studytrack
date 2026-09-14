@@ -431,7 +431,8 @@ are left blank under a subject filter: they count whole days across everything y
 so they answer a different question from the one the board is asking.
 
 Neither picker is remembered between visits. The Peloton page always opens on everybody,
-ranked on hours.
+ranked on hours, over today — the race people are actually in right now. The day-range chips
+switch to 7 days, 30 days or all time.
 
 **A wrinkle worth knowing.** Subjects belong to each person, so your Physics and mine are
 two separate rows, and the only thing tying them together is the name. Spacing and
