@@ -431,6 +431,23 @@ search and a member filter, delete one or delete a selection, and a mute that st
 someone posting until you lift it. Deletions and mutes are written to the audit log like
 every other removal.
 
+**Pictures.** The button beside the box attaches one; you can also drag one in or paste
+one straight from the clipboard. A photo off a phone is three or four megabytes, so it is
+redrawn at a sensible size in the browser before it is uploaded — a typical camera shot
+comes out around a fiftieth of what it was, which is the difference between this being
+free and this costing money. Tap a picture to see it full size.
+
+They live in a **private** bucket, not a public one: links are signed and last an hour, so
+a URL copied out of the chat stops working, and deleting a message really does take its
+picture away. An administrator deleting a message deletes the file with it.
+
+**Mentions.** Type `@` and pick somebody from the list. They get the same banner a nudge
+gives — it waits its turn if a nudge is already showing, and stays until dismissed. Your
+own name is highlighted more strongly than anybody else's so you can find it in a busy
+room. What is stored is the list of people, not the text, so a mention cannot be faked by
+typing somebody's name and is not lost if they change it — and deleting the name out of
+the box before sending takes them off it.
+
 **On cost.** Opening the tab fetches the newest 50 and nothing else; older ones only if
 you ask for them. New messages arrive over the socket already carrying the row, so
 nothing re-reads anything. A message row holds only who, what and when — the name, the

@@ -937,6 +937,48 @@ create table if not exists public.messages (
 -- keyed on created_at rather than an offset, so page forty costs what page
 -- one costs. This is the only index that matters.
 create index if not exists messages_created_idx on public.messages (created_at desc);
+
+-- A message may carry a picture and may name people.
+alter table public.messages add column if not exists image_path text;
+alter table public.messages add column if not exists mentions uuid[] not null default '{}';
+create index if not exists messages_mentions_idx on public.messages using gin (mentions);
+
+-- The body may be empty when there is a picture, but not both.
+alter table public.messages drop constraint if exists messages_body_check;
+alter table public.messages add constraint messages_body_check
+  check (length(btrim(body)) <= 500
+         and (length(btrim(body)) > 0 or image_path is not null));
+
+-- ------------------------------------------------------------
+--  Pictures live in their own bucket, and it is NOT public,
+--  unlike avatars. A public bucket means any URL copied out of
+--  here keeps working for anybody, forever, even after the
+--  message is deleted — which is not what four hundred people
+--  posting photos in a school chat should get by default.
+--  Members read them through short-lived signed links instead,
+--  so a link that escapes stops working, and deleting the file
+--  really does take it away.
+-- ------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('chat', 'chat', false, 3145728,
+        array['image/jpeg','image/png','image/webp','image/gif'])
+on conflict (id) do update
+  set public = false, file_size_limit = 3145728,
+      allowed_mime_types = array['image/jpeg','image/png','image/webp','image/gif'];
+
+drop policy if exists "chat images readable"   on storage.objects;
+drop policy if exists "chat images upload own" on storage.objects;
+drop policy if exists "chat images delete own" on storage.objects;
+
+create policy "chat images readable" on storage.objects
+  for select to authenticated using (bucket_id = 'chat');
+create policy "chat images upload own" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'chat' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "chat images delete own" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'chat'
+         and ((storage.foldername(name))[1] = auth.uid()::text or public.is_admin()));
 create index if not exists messages_user_idx    on public.messages (user_id);
 
 alter table public.profiles add column if not exists chat_muted boolean not null default false;
@@ -958,7 +1000,14 @@ create policy "delete own" on public.messages
 -- by anyone holding the anon key — which is public by design.
 revoke insert, update on public.messages from anon, authenticated;
 
-create or replace function public.send_message(body text)
+-- A message may be words, a picture, or both, and may name people. The list of
+-- ids is stored rather than worked out later by re-reading the text, so a
+-- mention cannot be faked by typing somebody's name and cannot be lost when
+-- they change it.
+create or replace function public.send_message(
+  body text,
+  image_path text default null,
+  mentions uuid[] default '{}')
 returns jsonb
 language plpgsql
 security definer
@@ -967,6 +1016,8 @@ as $fn$
 declare
   me     uuid := auth.uid();
   txt    text := btrim(body);
+  img    text := nullif(btrim(coalesce(image_path, '')), '');
+  who    uuid[];
   recent int;
   muted  boolean;
   new_id uuid;
@@ -974,11 +1025,18 @@ begin
   if me is null then
     return jsonb_build_object('ok', false, 'why', 'You are not signed in');
   end if;
-  if length(txt) = 0 then
+  if txt = '' and img is null then
     return jsonb_build_object('ok', false, 'why', 'Nothing to send');
   end if;
   if length(txt) > 500 then
     return jsonb_build_object('ok', false, 'why', 'That is longer than 500 characters');
+  end if;
+
+  -- A picture has to be one this person just put in their own folder. Without
+  -- this the column would take any string at all, and a message could point at
+  -- somebody else's file or at some other site entirely.
+  if img is not null and split_part(img, '/', 1) <> me::text then
+    return jsonb_build_object('ok', false, 'why', 'That picture is not yours to post');
   end if;
 
   select coalesce(p.chat_muted, false) into muted from public.profiles p where p.id = me;
@@ -995,12 +1053,21 @@ begin
     return jsonb_build_object('ok', false, 'why', 'Slow down a moment — ten a minute is the limit');
   end if;
 
-  insert into public.messages (user_id, body) values (me, txt) returning id into new_id;
+  -- Only real members, never yourself, and never the same person twice.
+  select coalesce(array_agg(distinct p.id), '{}')
+    into who
+    from public.profiles p
+   where p.id = any(mentions) and p.id <> me;
+
+  insert into public.messages (user_id, body, image_path, mentions)
+  values (me, txt, img, who)
+  returning id into new_id;
+
   return jsonb_build_object('ok', true, 'id', new_id);
 end $fn$;
 
-revoke execute on function public.send_message(text) from public, anon;
-grant  execute on function public.send_message(text) to authenticated;
+revoke execute on function public.send_message(text, text, uuid[]) from public, anon;
+grant  execute on function public.send_message(text, text, uuid[]) to authenticated;
 
 -- So a new message reaches everyone's open tab without anybody re-reading.
 do $$

@@ -298,7 +298,9 @@ function admChatView() {
         ${ADM.sel.has(m.id) ? "checked" : ""}></td>
       <td class="l adm-mono">${esc(new Date(m.created_at).toLocaleString())}</td>
       <td class="l">${admWho(m.user_id)}</td>
-      <td class="l"><div class="adm-note" title="${esc(m.body)}">${esc(m.body)}</div></td>
+      <td class="l"><div class="adm-note" title="${esc(m.body)}">${
+        m.image_path ? `<span class="adm-flag mute"><i class="fi">▤</i>picture</span> ` : ""}${
+        esc(m.body) || `<span style="color:var(--a-ink-soft)">no text</span>`}</div></td>
       <td><div class="adm-act">
         <button class="adm-btn sm" data-admmute="${esc(m.user_id)}">${
           (profileOf(m.user_id) || {}).chat_muted ? "Unmute" : "Mute"}</button>
@@ -312,6 +314,14 @@ async function admDeleteMessages(ids) {
   const rows = (ADM.chat || []).filter(m => ids.includes(m.id));
   const { error } = await sb.from("messages").delete().in("id", ids);
   if (error) { toast("Could not delete — " + error.message, 4600); return; }
+  /* Take the picture with it. The bucket is private and the links are signed
+     and short-lived, but a file nobody deleted is still a file sitting there —
+     removing the message has to mean removing the thing it showed. */
+  const files = rows.map(m => m.image_path).filter(Boolean);
+  if (files.length) {
+    const { error: fe } = await sb.storage.from("chat").remove(files);
+    if (fe) toast("Message removed, but its picture could not be: " + fe.message, 5200);
+  }
   for (const m of rows) {
     await admLog("chat.delete", m.user_id, profileOf(m.user_id).display_name,
       m.body.slice(0, 120), m);

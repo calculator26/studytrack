@@ -95,10 +95,12 @@
       [ME,     64,  "it does, it's on the back page"],
       [uid(3), 33,  "just did two hours on Hag-Seed and my brain is soup"],
       [uid(2), 12,  "same. taking a break then doing one more"],
-      [uid(4), 4,   "good luck everyone"]
+      [uid(4), 4,   "good luck everyone"],
+      [uid(2), 2,   "@Lewis Christie did you get question 14 out", [ME]]
     ];
-    said.forEach(([u, ago, body], i) =>
-      T.messages.push({ id: uid(1200 + i), user_id: u, body, created_at: mins(ago) }));
+    said.forEach(([u, ago, body, at], i) =>
+      T.messages.push({ id: uid(1200 + i), user_id: u, body, mentions: at || [],
+                        image_path: null, created_at: mins(ago) }));
   })();
 
   /* ?dirty=1 seeds one entry per integrity rule so the admin console's
@@ -392,7 +394,8 @@
           if (name === "send_message") {
             const txt = String((args && args.body) || "").trim();
             const me = T.profiles.find(p => p.id === ME);
-            if (!txt) return Promise.resolve({ data: { ok: false, why: "Nothing to send" }, error: null });
+            if (!txt && !(args && args.image_path))
+              return Promise.resolve({ data: { ok: false, why: "Nothing to send" }, error: null });
             if (txt.length > 500)
               return Promise.resolve({ data: { ok: false, why: "That is longer than 500 characters" }, error: null });
             if (me && me.chat_muted)
@@ -401,8 +404,14 @@
               Date.now() - new Date(m.created_at).getTime() < 60000).length;
             if (recent >= 10)
               return Promise.resolve({ data: { ok: false, why: "Slow down a moment — ten a minute is the limit" }, error: null });
+            const img = (args && args.image_path) ? String(args.image_path).trim() : null;
+            if (img && img.split("/")[0] !== ME)
+              return Promise.resolve({ data: { ok: false, why: "That picture is not yours to post" }, error: null });
+            const said = ((args && args.mentions) || [])
+              .filter(x => x !== ME && T.profiles.some(p => p.id === x));
             const id = uid(1300 + T.messages.length);
-            T.messages.push({ id, user_id: ME, body: txt, created_at: new Date().toISOString() });
+            T.messages.push({ id, user_id: ME, body: txt, image_path: img || null,
+              mentions: said, created_at: new Date().toISOString() });
             return Promise.resolve({ data: { ok: true, id }, error: null });
           }
           if (name === "admin_emails") {
@@ -422,8 +431,30 @@
           }
           return Promise.resolve({ data: null, error: { message: "no such function" } });
         },
-        storage: { from: () => ({ upload: () => Promise.resolve({ error: null }),
-          getPublicUrl: () => ({ data: { publicUrl: "" } }) }) },
+        /* Enough of Storage to exercise pictures locally. Files are kept as blob
+           URLs in memory — no bucket, but the same call shapes, including the
+           signed links the real private bucket needs. */
+        storage: { from: (bucket) => ({
+          upload: (path, file) => {
+            T._files = T._files || {};
+            try { T._files[path] = URL.createObjectURL(file); } catch (e) { T._files[path] = ""; }
+            return Promise.resolve({ data: { path }, error: null });
+          },
+          remove: (paths) => {
+            T._files = T._files || {};
+            (paths || []).forEach(p => { delete T._files[p]; });
+            return Promise.resolve({ data: null, error: null });
+          },
+          createSignedUrls: (paths, secs) => Promise.resolve({
+            error: null,
+            /* returned as-is: a blob: URL with anything appended stops being a
+               valid blob reference, and the real signed link carries its
+               signature in the query string anyway */
+            data: (paths || []).map(p => ({ path: p,
+              signedUrl: (T._files && T._files[p]) || null }))
+          }),
+          getPublicUrl: () => ({ data: { publicUrl: "" } })
+        }) },
         channel: () => ({ on() { return this; }, subscribe() { return this; } })
       };
     }

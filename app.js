@@ -3482,10 +3482,10 @@ function paintNudgeBar() {
   if (!bar) return;
   const s = nudgeState();
 
-  /* One prompt at a time. If a mate has actually nudged you, that says the
-     same thing with a person attached, and two stacked bars with the same
-     button is just noise — the Today ring still shows where you stand. */
-  if (POKES.length) { bar.className = "hide"; bar.innerHTML = ""; return; }
+  /* One prompt at a time. If a mate has actually nudged you, or said your name
+     in chat, that says the same thing with a person attached, and two stacked
+     bars is just noise — the Today ring still shows where you stand. */
+  if (POKES.length || MENTIONS.length) { bar.className = "hide"; bar.innerHTML = ""; return; }
 
   if (!s || nudgeDismissed()) { bar.className = "hide"; bar.innerHTML = ""; return; }
 
@@ -3614,7 +3614,273 @@ if ($("s-calcopy")) {
    the day. Nobody is shown a zero: an empty morning simply has no pill.
    ========================================================================= */
 const CHAT_PAGE = 50;
+
+/* ---------------------------------------------------------------------------
+   PICTURES
+
+   A photo straight off a phone is three or four megabytes. Four hundred people
+   posting those, and everybody else loading them, is the one thing in this app
+   that could genuinely cost money — so the picture is redrawn at a sane size in
+   the browser before it ever leaves it. A typical camera photo comes out around
+   two hundred kilobytes, which is a twentieth of what it was.
+
+   The bucket is private. Links are signed, last an hour, and are asked for in
+   one batch per page of messages rather than one at a time — so a URL copied
+   out of here stops working, and deleting the file really does take it away.
+   --------------------------------------------------------------------------- */
+const IMG_MAX_EDGE = 1600;
+const IMG_QUALITY  = 0.82;
+const IMG_MAX_BYTES = 3 * 1024 * 1024;
+
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    /* An animated gif would lose its animation on a canvas, so it is passed
+       through untouched — the size limit still applies to it. */
+    if (file.type === "image/gif") return resolve(file);
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, IMG_MAX_EDGE / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      cv.toBlob(b => b ? resolve(new File([b], "photo.jpg", { type: "image/jpeg" }))
+                       : reject(new Error("could not read that image")),
+                "image/jpeg", IMG_QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("that file is not an image")); };
+    img.src = url;
+  });
+}
+
+/* Signed links, cached until they are nearly expired. */
+const SIGNED = new Map();
+async function signImages(paths) {
+  const now = Date.now();
+  const want = [...new Set(paths.filter(Boolean))]
+    .filter(p => { const e = SIGNED.get(p); return !e || e.until - now < 5 * 60e3; });
+  if (!want.length) return;
+  try {
+    const { data, error } = await sb.storage.from("chat").createSignedUrls(want, 3600);
+    if (error) return;
+    (data || []).forEach(r => {
+      if (r.signedUrl) SIGNED.set(r.path, { url: r.signedUrl, until: now + 55 * 60e3 });
+    });
+  } catch (e) { /* the picture simply will not draw; the message still reads */ }
+}
+const signedFor = path => { const e = SIGNED.get(path); return e ? e.url : null; };
+
+/* What is attached to the message being written, if anything. */
+let chatDraftImage = null;   /* { path, name, bytes, preview } */
+
+async function attachImage(file) {
+  const btn = $("chat-attach");
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { chatNote("That is not an image."); return; }
+  btn.disabled = true;
+  try {
+    const shrunk = await shrinkImage(file);
+    if (shrunk.size > IMG_MAX_BYTES) {
+      chatNote("That picture is still over 3 MB after shrinking. Try a smaller one.");
+      return;
+    }
+    const path = `${UID}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const { error } = await sb.storage.from("chat").upload(path, shrunk, {
+      contentType: shrunk.type, upsert: false
+    });
+    if (error) { chatNote("Could not upload that — " + error.message); return; }
+    chatDraftImage = { path, name: file.name, bytes: shrunk.size,
+                       preview: URL.createObjectURL(shrunk) };
+    paintChatPreview();
+  } catch (e) {
+    chatNote(e.message || "Could not read that image.");
+  } finally {
+    btn.disabled = false;
+    $("chat-file").value = "";
+  }
+}
+
+async function dropDraftImage() {
+  const img = chatDraftImage;
+  chatDraftImage = null;
+  paintChatPreview();
+  /* it was uploaded the moment it was picked, so take it away again */
+  if (img) { URL.revokeObjectURL(img.preview);
+    try { await sb.storage.from("chat").remove([img.path]); } catch (e) {} }
+}
+
+function paintChatPreview() {
+  const box = $("chat-preview");
+  if (!box) return;
+  if (!chatDraftImage) { box.hidden = true; box.innerHTML = ""; return; }
+  const kb = Math.round(chatDraftImage.bytes / 1024);
+  box.innerHTML = `<img src="${esc(chatDraftImage.preview)}" alt="">
+    <div class="cp-meta"><div class="cp-name">${esc(chatDraftImage.name)}</div>
+      <div>${kb} KB, ready to send</div></div>
+    <button class="btn ghost sm" id="cp-drop" type="button">Remove</button>`;
+  box.hidden = false;
+  $("cp-drop").addEventListener("click", dropDraftImage);
+}
+
+function chatNote(text) {
+  const n = $("chat-note");
+  if (!n) return;
+  n.textContent = text;
+  n.hidden = !text;
+}
+
+/* ---------------------------------------------------------------------------
+   MENTIONS
+
+   Display names have spaces in them, so "@Sam Whitfield" cannot be picked out
+   of free text reliably — where does the name stop? So the person is chosen
+   from a list as you type and their id is remembered alongside the text. What
+   gets stored is the list of ids, not a guess made later by re-reading the
+   message, which means a mention cannot be faked by typing somebody's name and
+   cannot be lost by them changing it.
+
+   At send time each remembered name is checked to still be in the box, so
+   deleting "@Sam" also takes Sam off the message.
+   --------------------------------------------------------------------------- */
+let mentionDraft = [];       /* [{ id, name }] offered so far */
+let mentionOpen  = false, mentionIdx = 0, mentionMatches = [], mentionAt = -1;
+
+const mentionable = () => DB.profiles
+  .filter(p => p.id !== UID)
+  .sort((a, b) => a.display_name.localeCompare(b.display_name));
+
+/* The "@" being typed right now, if the caret is inside one. */
+function mentionQuery() {
+  const box = $("chat-input");
+  const upto = box.value.slice(0, box.selectionStart);
+  const at = upto.lastIndexOf("@");
+  if (at === -1) return null;
+  if (at > 0 && !/[\s(]/.test(upto[at - 1])) return null;   /* mid-word @ is an email */
+  const q = upto.slice(at + 1);
+  if (q.length > 24 || /\n/.test(q)) return null;
+  return { at, q };
+}
+
+function paintMentionBox() {
+  const box = $("mentionbox");
+  if (!box) return;
+  if (!mentionOpen || !mentionMatches.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="mh">Mention somebody</div>` + mentionMatches.map((p, i) =>
+    `<button type="button" role="option" data-mention="${esc(p.id)}"
+       aria-selected="${i === mentionIdx}">${avatarHTML(p, "sm")}<span>${esc(p.display_name)}</span></button>`
+  ).join("");
+  box.hidden = false;
+  box.querySelectorAll("[data-mention]").forEach(b =>
+    b.addEventListener("mousedown", e => { e.preventDefault(); insertMention(b.dataset.mention); }));
+}
+
+function refreshMentionBox() {
+  const m = mentionQuery();
+  if (!m) { mentionOpen = false; paintMentionBox(); return; }
+  const q = m.q.toLowerCase();
+  mentionMatches = mentionable()
+    .filter(p => !q || p.display_name.toLowerCase().includes(q))
+    .slice(0, 6);
+  mentionAt = m.at;
+  mentionOpen = mentionMatches.length > 0;
+  mentionIdx = 0;
+  paintMentionBox();
+}
+
+function insertMention(id) {
+  const p = profileOf(id);
+  const box = $("chat-input");
+  const m = mentionQuery();
+  if (!p || !m) return;
+  const before = box.value.slice(0, m.at);
+  const after  = box.value.slice(box.selectionStart);
+  const token  = "@" + p.display_name + " ";
+  box.value = before + token + after;
+  const caret = (before + token).length;
+  box.setSelectionRange(caret, caret);
+  if (!mentionDraft.some(x => x.id === id)) mentionDraft.push({ id, name: p.display_name });
+  mentionOpen = false;
+  paintMentionBox();
+  paintChatCount();
+  autoGrowChat();
+  box.focus();
+}
+
+/* Only the ones whose name is still in the box actually go on the message. */
+const mentionsInText = text =>
+  mentionDraft.filter(m => text.includes("@" + m.name)).map(m => m.id);
+
+/* Wrapping the names after escaping, never before — the text is somebody
+   else's and must not be able to bring markup with it. */
+function withMentions(escaped, ids) {
+  (ids || []).forEach(id => {
+    const p = profileOf(id);
+    if (!p || !p.display_name) return;
+    const name = esc("@" + p.display_name);
+    const cls = id === UID ? "mention me" : "mention";
+    escaped = escaped.split(name).join(`<span class="${cls}">${name}</span>`);
+  });
+  return escaped;
+}
+
+/* ---------------------------------------------------------------------------
+   Being mentioned. The same shape as a nudge, because it is the same kind of
+   thing — somebody asking for your attention — and the client is already
+   listening to every message for the unread dot, so this needs no new
+   subscription and no new table.
+   --------------------------------------------------------------------------- */
+function paintMentionBar() {
+  const bar = $("mentionbar");
+  if (!bar) return;
+  /* A nudge is about whether you are working at all, which is the bigger
+     thing, so it keeps the top spot and this waits its turn. */
+  if (!MENTIONS.length || POKES.length) { bar.className = "hide"; bar.innerHTML = ""; reconcileBars(); return; }
+  const newest = MENTIONS[MENTIONS.length - 1];
+  const who = profileOf(newest.user_id).display_name;
+  const many = MENTIONS.length > 1;
+  bar.className = "";
+  bar.innerHTML =
+    `<span class="pb-icon" aria-hidden="true">💬</span>
+     <div class="pb-text">
+       <strong>${esc(who)} mentioned you in chat</strong>
+       <span>${esc(many ? MENTIONS.length + " mentions waiting · " : "")}${
+         esc((newest.body || "").slice(0, 90) || "sent you a picture")}</span>
+     </div>
+     <button class="btn sm" id="mb-go">Open chat</button>
+     <button class="x" id="mb-hide" title="Dismiss" aria-label="Dismiss">×</button>`;
+  reconcileBars();
+  $("mb-hide").addEventListener("click", clearMentions);
+  $("mb-go").addEventListener("click", () => {
+    clearMentions();
+    const tab = document.querySelector('nav.tabs button[data-p="chat"]');
+    if (tab) tab.click();
+  });
+}
+function clearMentions() { MENTIONS = []; paintMentionBar(); }
+function noteMention(m) {
+  if (MENTIONS.some(x => x.id === m.id)) return;
+  MENTIONS.push(m);
+  paintMentionBar();
+}
+
+/* Tapping a picture opens it properly. */
+function openImageView(url) {
+  const ov = document.createElement("div");
+  ov.className = "imgview";
+  ov.innerHTML = `<button class="x" aria-label="Close">&times;</button><img src="${esc(url)}" alt="">`;
+  const shut = () => ov.remove();
+  ov.addEventListener("click", e => { if (e.target === ov || e.target.classList.contains("x")) shut(); });
+  document.addEventListener("keydown", function esc2(e) {
+    if (e.key === "Escape") { shut(); document.removeEventListener("keydown", esc2); }
+  });
+  document.body.appendChild(ov);
+}
 let CHAT = { loaded: false, rows: [], oldest: null, unread: 0, atBottom: true, busy: false };
+/* Mentions waiting to be seen. paintNudgeBar reads this to decide whether to
+   stand aside, the same way it reads POKES. */
+let MENTIONS = [];
 
 /* Today's hours, in bands. Four steps and a plain state — few enough to read
    at a glance without a legend, which is the only reason it earns its place. */
@@ -3657,7 +3923,11 @@ function msgHTML(m, prev) {
         <span class="msgtime">${esc(chatTimeLabel(m.created_at))}</span>
         ${canDelete ? `<button class="msgdel" data-msgdel="${esc(m.id)}" title="Delete this message">delete</button>` : ""}
       </div>
-      <div class="msgtext">${esc(m.body)}</div>
+      ${m.body ? `<div class="msgtext">${withMentions(esc(m.body), m.mentions)}</div>` : ""}
+      ${m.image_path ? (signedFor(m.image_path)
+        ? `<img class="msgimg" src="${esc(signedFor(m.image_path))}" alt="Picture from ${esc(p.display_name)}"
+             loading="lazy" data-full="${esc(m.image_path)}">`
+        : `<div class="msgimg pending" style="width:160px;height:110px"></div>`) : ""}
     </div>
   </div>`;
 }
@@ -3665,6 +3935,10 @@ function msgHTML(m, prev) {
 function paintChat() {
   const log = $("chatlog");
   if (!log) return;
+  /* Any picture without a link yet draws as a grey box; this fetches them in
+     one go and repaints, rather than a round trip per image. */
+  const unsigned = CHAT.rows.map(m => m.image_path).filter(x => x && !signedFor(x));
+  if (unsigned.length) signImages(unsigned).then(() => { if (chatIsOpen()) paintChat(); });
   if (!CHAT.rows.length) {
     log.innerHTML = `<div class="chatempty">${CHAT.loaded
       ? "Nothing here yet. Say the first thing."
@@ -3690,6 +3964,16 @@ function wireChatRows() {
   }));
   $("chatlog").querySelectorAll("[data-profile]").forEach(el =>
     el.addEventListener("click", () => openProfile(el.dataset.profile)));
+  $("chatlog").querySelectorAll("[data-full]").forEach(el => {
+    el.addEventListener("click", () => {
+      const u = signedFor(el.dataset.full);
+      if (u) openImageView(u);
+    });
+    /* A picture finishes decoding after the text is laid out and adds its own
+       height, so anybody who was reading the newest message would be left
+       looking at the one above it. */
+    if (!el.complete) el.addEventListener("load", () => chatScrollBottom(false), { once: true });
+  });
 }
 
 function chatDrop(id) {
@@ -3697,10 +3981,14 @@ function chatDrop(id) {
   if (i >= 0) { CHAT.rows.splice(i, 1); paintChat(); }
 }
 
-function chatScrollBottom(force) {
+function chatScrollBottom(force, smooth) {
   const log = $("chatlog");
   if (!log) return;
-  if (force || CHAT.atBottom) { log.scrollTop = log.scrollHeight; CHAT.unread = 0; paintChatDot(); }
+  if (!(force || CHAT.atBottom)) return;
+  if (smooth) log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
+  else log.scrollTop = log.scrollHeight;
+  CHAT.unread = 0;
+  paintChatDot();
 }
 
 function paintChatDot() {
@@ -3759,6 +4047,10 @@ function onChatInsert(payload) {
   const m = payload && payload.new;
   if (!m || !m.id) return;
   if (CHAT.rows.some(x => x.id === m.id)) return;      /* our own echo */
+  /* The socket is already carrying every message for the unread dot, so being
+     mentioned costs no extra subscription — just a look at the list. */
+  if (m.user_id !== UID && Array.isArray(m.mentions) && m.mentions.indexOf(UID) > -1) noteMention(m);
+  if (m.image_path) signImages([m.image_path]).then(() => { if (chatIsOpen()) paintChat(); });
   CHAT.rows.push(m);
   if (CHAT.rows.length > 300) CHAT.rows.splice(0, CHAT.rows.length - 300);
   if (chatIsOpen()) {
@@ -3777,19 +4069,27 @@ function onChatDelete(payload) {
 async function sendChat() {
   const box = $("chat-input"), btn = $("chat-send"), note = $("chat-note");
   const text = (box.value || "").trim();
-  if (!text) return;
+  const img = chatDraftImage;
+  if (!text && !img) return;
   btn.disabled = true;
   note.hidden = true;
-  const { data, error } = await sb.rpc("send_message", { body: text });
+  const said = mentionsInText(text);
+  const { data, error } = await sb.rpc("send_message", {
+    body: text, image_path: img ? img.path : null, mentions: said
+  });
   btn.disabled = false;
   if (error) { note.textContent = "Could not send — " + error.message; note.hidden = false; return; }
   if (data && data.ok === false) { note.textContent = data.why || "Could not send"; note.hidden = false; return; }
   box.value = "";
+  mentionDraft = [];
+  if (img) { URL.revokeObjectURL(img.preview); chatDraftImage = null; paintChatPreview(); }
   paintChatCount();
   autoGrowChat();
   /* realtime will bring the row back; this is just so it feels immediate */
   if (data && data.id && !CHAT.rows.some(x => x.id === data.id)) {
-    CHAT.rows.push({ id: data.id, user_id: UID, body: text, created_at: new Date().toISOString() });
+    CHAT.rows.push({ id: data.id, user_id: UID, body: text, created_at: new Date().toISOString(),
+                     image_path: img ? img.path : null, mentions: said });
+    if (img) signImages([img.path]).then(() => { if (chatIsOpen()) paintChat(); });
     paintChat();
   }
   chatScrollBottom(true);
@@ -3813,13 +4113,41 @@ function initChat() {
   const box = $("chat-input");
   if (!box || box.dataset.wired) return;
   box.dataset.wired = "1";
-  box.addEventListener("input", () => { paintChatCount(); autoGrowChat(); });
+  box.addEventListener("input", () => { paintChatCount(); autoGrowChat(); refreshMentionBox(); });
+  box.addEventListener("blur", () => { mentionOpen = false; paintMentionBox(); });
   box.addEventListener("keydown", e => {
+    /* while the mention list is up it owns the arrows, tab and enter */
+    if (mentionOpen && mentionMatches.length) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        mentionIdx = (mentionIdx + (e.key === "ArrowDown" ? 1 : -1) + mentionMatches.length) % mentionMatches.length;
+        paintMentionBox();
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault(); insertMention(mentionMatches[mentionIdx].id); return;
+      }
+      if (e.key === "Escape") { e.preventDefault(); mentionOpen = false; paintMentionBox(); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
   });
   $("chat-send").addEventListener("click", sendChat);
+  $("chat-attach").addEventListener("click", () => $("chat-file").click());
+  $("chat-file").addEventListener("change", e => attachImage(e.target.files[0]));
+  /* dropping a picture on the box, and pasting one out of the clipboard */
+  const field = $("chatlog").closest(".chatwrap");
+  field.addEventListener("dragover", e => { e.preventDefault(); });
+  field.addEventListener("drop", e => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && /^image\//.test(f.type)) { e.preventDefault(); attachImage(f); }
+  });
+  box.addEventListener("paste", e => {
+    const it = [...(e.clipboardData ? e.clipboardData.items : [])]
+      .find(i => i.type && /^image\//.test(i.type));
+    if (it) { e.preventDefault(); attachImage(it.getAsFile()); }
+  });
   $("chat-older").addEventListener("click", loadOlderChat);
-  $("chat-jump").addEventListener("click", () => chatScrollBottom(true));
+  $("chat-jump").addEventListener("click", () => chatScrollBottom(true, true));
   $("chatlog").addEventListener("scroll", () => {
     const log = $("chatlog");
     CHAT.atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
@@ -3929,6 +4257,7 @@ async function dismissPokes() {
    settled again once it arrives rather than only at render time. */
 function reconcileBars() {
   try { paintNudgeBar(); } catch (e) { /* not wired up yet */ }
+  try { paintMentionBar(); } catch (e) { /* not wired up yet */ }
 }
 
 function paintPokeBar() {

@@ -792,8 +792,13 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 
 .chatwrap{display:flex;flex-direction:column;min-height:0}
 .chatolder{padding:10px 16px 0;text-align:center}
+/* Deliberately not smooth: this element is jumped to the bottom on open and on
+   every new message, and animating that means scrolling through fifty messages
+   each time — and an animation that gets interrupted by the next repaint never
+   arrives at all. The one place smooth belongs is the "new messages" button,
+   which asks for it explicitly. */
 .chatlog{padding:8px 16px 4px;overflow-y:auto;height:min(58vh,560px);
-  display:flex;flex-direction:column;gap:2px;scroll-behavior:smooth}
+  display:flex;flex-direction:column;gap:2px}
 .chatnew{position:relative;height:0;text-align:center}
 .chatnew .btn{position:relative;top:-14px;box-shadow:var(--sh-2)}
 
@@ -942,3 +947,43 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 /* the address under a name in the console */
 .adm-mail{display:block;font-size:10.5px;font-weight:400;color:var(--a-ink-soft,#7A8290);
   letter-spacing:0;margin-top:1px}
+
+/* ---- pictures and mentions in chat ------------------------------------ */
+.chatbox{align-items:flex-end}
+.chatfield{position:relative;flex:1;min-width:0}
+.chatfield textarea{width:100%}
+.chatattach{border:1px solid var(--rule);background:var(--surface);color:var(--ink-mid);
+  border-radius:var(--r-xs);width:38px;height:38px;display:grid;place-items:center;
+  cursor:pointer;flex:none;transition:border-color var(--fast),color var(--fast)}
+.chatattach:hover{border-color:var(--ink-mid);color:var(--ink)}
+.chatattach[disabled]{opacity:.45;cursor:default}
+
+.chatpreview{display:flex;align-items:center;gap:12px;margin:0 16px;padding:10px 12px;
+  border:1px solid var(--rule-soft);border-radius:var(--r-xs);background:var(--surface-2)}
+.chatpreview img{width:52px;height:52px;object-fit:cover;border-radius:var(--r-xs);flex:none}
+.chatpreview .cp-meta{font-size:12px;color:var(--ink-mid);min-width:0;flex:1}
+.chatpreview .cp-name{font-weight:600;color:var(--ink);word-break:break-all}
+
+.msgimg{margin-top:5px;max-width:min(320px,100%);border-radius:var(--r-xs);
+  border:1px solid var(--rule-soft);display:block;cursor:zoom-in;background:var(--surface-2)}
+.msgimg.pending{filter:grayscale(1) opacity(.5)}
+
+.mention{background:var(--accent-wash);color:var(--accent-ink);font-weight:650;
+  border-radius:3px;padding:0 3px}
+.mention.me{background:var(--accent);color:#fff}
+
+.mentionbox{position:absolute;bottom:calc(100% + 6px);left:0;right:0;z-index:40;
+  max-height:210px;overflow:auto;background:var(--surface);border:1px solid var(--rule);
+  border-radius:var(--r-xs);box-shadow:var(--sh-3);padding:4px}
+.mentionbox button{display:flex;align-items:center;gap:9px;width:100%;border:0;background:none;
+  padding:7px 9px;border-radius:var(--r-xs);cursor:pointer;font:inherit;font-size:13px;
+  color:var(--ink);text-align:left}
+.mentionbox button:hover,.mentionbox button[aria-selected="true"]{background:var(--surface-3)}
+.mentionbox .mh{font-size:11px;color:var(--ink-soft);padding:6px 9px 3px}
+
+/* the full-size view when a picture is tapped */
+.imgview{position:fixed;inset:0;z-index:120;background:rgba(9,13,20,.88);display:grid;
+  place-items:center;padding:24px}
+.imgview img{max-width:100%;max-height:100%;border-radius:var(--r-xs);box-shadow:var(--sh-4)}
+.imgview .x{position:absolute;top:16px;right:20px;font-size:30px;line-height:1;color:#fff;
+  background:none;border:0;cursor:pointer}

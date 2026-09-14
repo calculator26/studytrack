@@ -185,6 +185,9 @@
 
   <!-- Someone in the crew prodded you. Sticks around until dismissed. -->
   <div id="pokebar" class="hide"></div>
+  <!-- Somebody said your name in chat. Same shape as a nudge, because it is
+       the same kind of thing: a person asking for your attention. -->
+  <div id="mentionbar" class="hide"></div>
 
   <!-- A nudge that needs no permission, because it is just the page. Where
        notifications are blocked by policy this is the only channel left. -->
@@ -369,8 +372,23 @@
         <div class="chatolder"><button class="btn ghost sm" id="chat-older" hidden>Load older messages</button></div>
         <div class="chatlog" id="chatlog" aria-live="polite"></div>
         <div class="chatnew"><button class="btn sm" id="chat-jump" hidden>New messages ↓</button></div>
+        <div class="chatpreview" id="chat-preview" hidden></div>
         <div class="chatbox">
-          <textarea id="chat-input" rows="1" maxlength="500" placeholder="Say something to the year group…"></textarea>
+          <button class="chatattach" id="chat-attach" type="button"
+            title="Add a picture" aria-label="Add a picture">
+            <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <circle cx="8.5" cy="10" r="1.6" fill="currentColor"/>
+              <path d="M4.5 17.5 9.5 12.5 13 16l3-2.5 3.5 4" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <input type="file" id="chat-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+          <div class="chatfield">
+            <div class="mentionbox" id="mentionbox" hidden role="listbox" aria-label="Mention somebody"></div>
+            <textarea id="chat-input" rows="1" maxlength="500"
+              placeholder="Say something to the year group… use @ to mention"></textarea>
+          </div>
           <div class="chatsend">
             <span class="chatcount" id="chat-count"></span>
             <button class="btn go" id="chat-send">Send</button>
