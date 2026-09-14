@@ -772,3 +772,13 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
   #pokebar{flex-wrap:wrap;gap:10px}
   #pokebar .pb-text{flex-basis:100%;order:-1}
 }
+
+/* ---- leaderboard filters ---------------------------------------------- */
+#lbfilters{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);
+  gap:12px;align-items:end;margin-bottom:14px}
+#lbfilters select{width:100%}
+.lbnote{margin:-4px 0 14px;padding:9px 11px;border-radius:3px;
+  background:var(--surface-2);border:1px solid var(--rule-soft);
+  font-size:12px;line-height:1.5;color:var(--ink-mid)}
+.lbnote b{color:var(--ink);font-weight:600}
+@media (max-width:620px){#lbfilters{grid-template-columns:1fr}}

@@ -325,6 +325,29 @@ level security in `schema.sql`, where every update and delete policy reads
 `user_id = auth.uid() or public.is_admin()`. Force the panel open without being an admin and
 you get a working-looking screen whose every button quietly changes nothing.
 
+### Filtering the leaderboard
+Above the podium are two pickers. **Subject** narrows the whole crew page to one subject —
+podium, table, both charts and the head-to-head all follow it — and **Ranked by** changes
+what the order actually means: hours, sessions, longest day, goal-hit rate or current streak.
+The day-range chips keep working alongside both.
+
+Everyone who takes the subject is on the board, including anyone who has not logged to it
+in the range, so "first of six" never quietly becomes "first of two". Goal hit and streak
+are left blank under a subject filter: they count whole days across everything you study,
+so they answer a different question from the one the board is asking.
+
+Neither picker is remembered between visits. The crew page always opens on the whole crew,
+ranked on hours.
+
+**A wrinkle worth knowing.** Subjects belong to each person, so your Physics and mine are
+two separate rows, and the only thing tying them together is the name. Spacing and
+capitals are folded together, so `english advanced` and `English Advanced` are one board.
+Anything beyond that cannot be guessed, so it is shown instead of hidden: the picker lists
+how many people take each subject and marks names that are not in the catalogue as
+`custom`, and picking one tells you if it has a near-twin — *"Also spelt Enterprise
+Computing. by one person, who is ranked separately."* Rename either one to put everybody
+on the same board.
+
 ### Comparison
 The Crew tab has a podium and a full leaderboard over Today / 7 days / 30 days / all time,
 with hours, sessions, average per day, longest day, goal-hit rate, streak and a seven-day

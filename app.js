@@ -1262,11 +1262,96 @@ $("e-save").addEventListener("click", async () => {
 /* =========================================================================
    RENDER — crew
    ========================================================================= */
-function leaderboard(rangeOverride) {
+/* =========================================================================
+   RANKING THE LEADERBOARD
+
+   Subjects are per-person rows — your Physics and my Physics are two
+   different rows with two different ids — so the only thing that can tie
+   them together across the crew is the name. Normalising trims and folds
+   case, which catches most of it. What it cannot catch is shown rather
+   than quietly dropped: a one-person "Maths Ext 1" sitting next to a
+   five-person "Mathematics Extension 1" in the picker is the cue to go
+   and rename one of them. Silently ranking somebody out of a board they
+   belong on would be the worse failure by far.
+   ========================================================================= */
+const subjKey   = n => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
+const subjLoose = n => subjKey(n).replace(/[^a-z0-9]/g, "");
+
+/* subject id -> normalised name, built in one pass. Worth it: the alternative
+   is a linear find through every subject in the crew for every session. */
+function subjectKeyMap() {
+  const m = new Map();
+  DB.subjects.forEach(s => m.set(s.id, subjKey(s.name)));
+  return m;
+}
+
+/* Every distinct subject anyone takes, with who takes it and how it is spelt. */
+function subjectGroups() {
+  const g = new Map();
+  DB.subjects.forEach(s => {
+    const k = subjKey(s.name);
+    if (!k) return;
+    let e = g.get(k);
+    if (!e) { e = { key: k, loose: subjLoose(s.name), takers: new Set(), spellings: new Map() }; g.set(k, e); }
+    e.takers.add(s.user_id);
+    const spelt = String(s.name).trim();
+    e.spellings.set(spelt, (e.spellings.get(spelt) || 0) + 1);
+  });
+  const out = [...g.values()];
+  out.forEach(e => {
+    /* label it with whichever spelling the most people actually use */
+    e.label = [...e.spellings.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+    e.inCatalogue = !!CAT.byName(e.label);
+  });
+  /* differing only by spacing or punctuation is almost certainly one subject
+     typed two ways, and worth saying out loud */
+  out.forEach(e => e.nearMisses = out.filter(o => o !== e && o.loose === e.loose));
+  return out.sort((a, b) => b.takers.size - a.takers.size || a.label.localeCompare(b.label));
+}
+
+/* How the board can be ranked. goalHit and streak are whole-day facts about a
+   person, not about one subject, so they are offered only on the full board —
+   ranking Physics hours while showing an all-subject streak beside them would
+   just be two different questions sharing a row. */
+const LB_METRICS = {
+  hours:    { label: "Hours",          unit: " h", big: r => f1(r.hours),    get: r => r.hours },
+  sessions: { label: "Sessions",       unit: "",   big: r => String(r.sessions), get: r => r.sessions },
+  best:     { label: "Longest day",    unit: " h", big: r => f1(r.best),     get: r => r.best },
+  goalHit:  { label: "Goal hit rate",  unit: "%",  big: r => r.goalHit === null ? "—" : f0(r.goalHit * 100),
+              get: r => r.goalHit === null ? -1 : r.goalHit, wholeCrew: true },
+  streak:   { label: "Current streak", unit: " d", big: r => String(r.streak || 0),
+              get: r => r.streak || 0, wholeCrew: true }
+};
+/* Average per day is deliberately absent: everyone is divided by the same
+   number of days, so it would rank identically to hours. */
+
+function lbMetricFor(metric, subject) {
+  const m = LB_METRICS[metric];
+  if (!m || (subject && m.wholeCrew)) return "hours";
+  return metric;
+}
+
+function leaderboard(rangeOverride, opts) {
+  const o = opts || {};
+  const subject = o.subject || null;
+  const metric = lbMetricFor(o.metric || "hours", subject);
   const days = rangeOverride ? (() => { const o = []; for (let i = rangeOverride - 1; i >= 0; i--) o.push(addDays(todayISO(), -i)); return o; })() : rangeDays();
   const set = new Set(days);
-  return DB.profiles.map(p => {
-    const ss = DB.sessions.filter(s => s.user_id === p.id && set.has(s.day));
+
+  let keyOf = null, takers = null;
+  if (subject) {
+    keyOf = subjectKeyMap();
+    takers = new Set();
+    DB.subjects.forEach(s => { if (subjKey(s.name) === subject) takers.add(s.user_id); });
+  }
+  /* Everybody who takes the subject is on the board, including anyone who has
+     not logged to it in this range. Dropping them would turn "first of six"
+     into "first of two" without saying so. */
+  const people = takers ? DB.profiles.filter(p => takers.has(p.id)) : DB.profiles;
+
+  return people.map(p => {
+    const ss = DB.sessions.filter(s => s.user_id === p.id && set.has(s.day) &&
+      (!subject || (s.subject_id && keyOf.get(s.subject_id) === subject)));
     const hours = ss.reduce((a, s) => a + s.minutes / 60, 0);
     const perDay = {}; days.forEach(d => perDay[d] = 0);
     ss.forEach(s => perDay[s.day] += s.minutes / 60);
@@ -1275,17 +1360,90 @@ function leaderboard(rangeOverride) {
     const hit = withGoal.filter(d => perDay[d] >= goalFor(p.id, d)).length;
     return { id: p.id, p, hours, sessions: ss.length, days,
       perDay, active, best: Math.max(0, ...days.map(d => perDay[d])),
-      goalHit: withGoal.length ? hit / withGoal.length : null,
-      streak: streakFor(p.id) };
-  }).sort((a, b) => b.hours - a.hours);
+      goalHit: subject ? null : (withGoal.length ? hit / withGoal.length : null),
+      streak: subject ? null : streakFor(p.id) };
+  }).sort((a, b) => LB_METRICS[metric].get(b) - LB_METRICS[metric].get(a) ||
+                    b.hours - a.hours ||
+                    a.p.display_name.localeCompare(b.p.display_name));
+}
+
+/* What the board is showing. Deliberately not remembered between visits: it
+   opens on the whole crew, ranked on hours, and a filter is something you go
+   and ask for. */
+let LB_SUBJECT = null;
+let LB_METRIC  = "hours";
+
+/* The pickers are rebuilt only when the choices themselves change, never on a
+   routine refresh — otherwise an open dropdown would slam shut every few
+   seconds and take your selection with it. */
+function paintLbControls(groups) {
+  const sub = $("lb-subject"), met = $("lb-metric");
+  if (!sub || !met) return;
+
+  const sig = groups.map(g => g.key + ":" + g.takers.size).join("|");
+  if (sub.dataset.sig !== sig) {
+    sub.dataset.sig = sig;
+    sub.innerHTML = `<option value="">Everyone, all subjects</option>` + groups.map(g =>
+      `<option value="${esc(g.key)}">${esc(g.label)} · ${g.takers.size}${
+        g.inCatalogue ? "" : " · custom"}</option>`).join("");
+    /* a subject can vanish from under us if its last taker drops it */
+    if (LB_SUBJECT && !groups.some(g => g.key === LB_SUBJECT)) LB_SUBJECT = null;
+    sub.value = LB_SUBJECT || "";
+  }
+
+  const metSig = LB_SUBJECT ? "subject" : "crew";
+  if (met.dataset.sig !== metSig) {
+    met.dataset.sig = metSig;
+    met.innerHTML = Object.keys(LB_METRICS)
+      .filter(k => !(LB_SUBJECT && LB_METRICS[k].wholeCrew))
+      .map(k => `<option value="${k}">${esc(LB_METRICS[k].label)}</option>`).join("");
+    LB_METRIC = lbMetricFor(LB_METRIC, LB_SUBJECT);
+    met.value = LB_METRIC;
+  }
+
+  if (!sub.dataset.wired) {
+    sub.dataset.wired = "1";
+    sub.addEventListener("change", () => { LB_SUBJECT = sub.value || null; renderCrew(); });
+    met.addEventListener("change", () => { LB_METRIC = met.value; renderCrew(); });
+  }
+}
+
+/* Says out loud when the subject you picked has a twin nobody has noticed, or
+   is spelt in a way that will never match anyone else's. */
+function paintLbNote(group) {
+  const note = $("lb-note");
+  if (!note) return;
+  const bits = [];
+  if (group) {
+    bits.push(`Goal hit and streak count whole days across every subject, so they are ` +
+              `left blank while one subject is in view.`);
+    (group.nearMisses || []).forEach(n => bits.push(
+      `Also spelt <b>${esc(n.label)}</b> by ${n.takers.size === 1 ? "one person, who is" : n.takers.size + " people, who are"} ` +
+      `ranked separately. Renaming one to match would put everyone on the same board.`));
+    if (!group.inCatalogue) bits.push(
+      `<b>${esc(group.label)}</b> is not a catalogue subject name, so it only matches people who spell it exactly the same way.`);
+  }
+  note.innerHTML = bits.join("<br>");
+  note.hidden = !bits.length;
 }
 
 function renderCrew() {
-  const board = leaderboard();
+  const groups = subjectGroups();
+  paintLbControls(groups);
+  const group = LB_SUBJECT ? groups.find(g => g.key === LB_SUBJECT) || null : null;
+  if (LB_SUBJECT && !group) LB_SUBJECT = null;
+  LB_METRIC = lbMetricFor(LB_METRIC, LB_SUBJECT);
+  paintLbNote(group);
+
+  const board = leaderboard(null, { subject: LB_SUBJECT, metric: LB_METRIC });
   const days = rangeDays();
-  $("lb-sub").textContent = RANGE === 0
+  const M = LB_METRICS[LB_METRIC];
+  const period = RANGE === 0
     ? `All time — ${days.length} days of records`
     : (RANGE === 1 ? "Today only" : `The last ${RANGE} days`);
+  $("lb-sub").textContent = period +
+    (group ? ` · ${group.label} only, ${group.takers.size} ${group.takers.size === 1 ? "person takes" : "take"} it` : "") +
+    (LB_METRIC === "hours" ? "" : ` · ranked on ${M.label.toLowerCase()}`);
 
   /* podium */
   const top = board.slice(0, 3);
@@ -1295,20 +1453,34 @@ function renderCrew() {
     return `<div class="pod p${i + 1} person" data-profile="${r.id}" title="See ${esc(r.p.display_name)}'s full profile">
       <div class="rank">#${i + 1}</div>
       ${avatarHTML(r.p, i === 0 ? "xl" : "lg")}
-      <div class="hrs">${f1(r.hours)}<span style="font-size:13px;font-weight:500;color:var(--ink-soft)"> h</span></div>
+      <div class="hrs">${M.big(r)}<span style="font-size:13px;font-weight:500;color:var(--ink-soft)">${M.unit}</span></div>
       <div class="nm2">${esc(r.p.display_name)}</div>
-      <div class="sub2">${r.sessions} session${r.sessions === 1 ? "" : "s"} · best day ${f1(r.best)} h</div>
+      <div class="sub2">${r.sessions} session${r.sessions === 1 ? "" : "s"} · ${
+        LB_METRIC === "hours" ? `best day ${f1(r.best)} h` : `${f1(r.hours)} h in total`}</div>
     </div>`;
   }).join("");
 
   /* table */
   const last7 = (() => { const o = []; for (let i = 6; i >= 0; i--) o.push(addDays(todayISO(), -i)); return o; })();
+  /* one pass for every sparkline, rather than a scan per person per day */
+  const keyOf = LB_SUBJECT ? subjectKeyMap() : null;
+  const sparkSet = new Set(last7), sparkH = {};
+  DB.sessions.forEach(s => {
+    if (!sparkSet.has(s.day)) return;
+    if (LB_SUBJECT && !(s.subject_id && keyOf.get(s.subject_id) === LB_SUBJECT)) return;
+    (sparkH[s.user_id] = sparkH[s.user_id] || {});
+    sparkH[s.user_id][s.day] = (sparkH[s.user_id][s.day] || 0) + s.minutes / 60;
+  });
+
   $("lbtbl").querySelector("tbody").innerHTML = board.map((r, i) => {
-    const spark = last7.map(d => hoursFor(r.id, d));
+    const spark = last7.map(d => (sparkH[r.id] || {})[d] || 0);
     const mx = Math.max(1, ...spark);
-    const bars = spark.map((v, j) =>
-      `<rect x="${j * 13}" y="${22 - (v / mx) * 22}" width="9" height="${Math.max(1, (v / mx) * 22)}" rx="1.5"
-        fill="${lvlColour(goalFor(r.id, last7[j]) > 0 ? v / goalFor(r.id, last7[j]) : (v > 0 ? 1 : null), v > 0)}"/>`).join("");
+    const bars = spark.map((v, j) => {
+      /* against a whole-day goal only when the whole day is what is counted */
+      const g = LB_SUBJECT ? 0 : goalFor(r.id, last7[j]);
+      return `<rect x="${j * 13}" y="${22 - (v / mx) * 22}" width="9" height="${Math.max(1, (v / mx) * 22)}" rx="1.5"
+        fill="${lvlColour(g > 0 ? v / g : (v > 0 ? 1 : null), v > 0)}"/>`;
+    }).join("");
     const medal = i === 0 ? "var(--gold)" : i === 1 ? "var(--silver)" : i === 2 ? "var(--bronze)" : "var(--ink-soft)";
     return `<tr class="${r.id === UID ? "me" : ""}">
       <td class="l" style="font-weight:700;color:${medal}">${i + 1}</td>
@@ -1318,7 +1490,7 @@ function renderCrew() {
       <td>${f1(r.hours / Math.max(1, days.length))}</td>
       <td>${f1(r.best)}</td>
       <td>${r.goalHit === null ? "—" : `<span class="pill" style="background:${lvlColour(r.goalHit, true)}">${f0(r.goalHit * 100)}%</span>`}</td>
-      <td style="font-weight:600;color:${r.streak > 0 ? "var(--good)" : "var(--ink-soft)"}">${r.streak}</td>
+      <td style="font-weight:600;color:${r.streak > 0 ? "var(--good)" : "var(--ink-soft)"}">${r.streak === null ? "—" : r.streak}</td>
       <td class="l"><svg width="92" height="24" viewBox="0 0 92 24">${bars}</svg></td>
     </tr>`;
   }).join("");
@@ -1424,8 +1596,12 @@ function drawH2H() {
   const a = $("h2h-a").value, b = $("h2h-b").value;
   if (!a || !b) { $("h2h").innerHTML = `<div class="empty">Not enough members yet.</div>`; return; }
   const days = rangeDays(), set = new Set(days);
+  /* The head to head follows the leaderboard's subject, so the whole crew page
+     is answering one question at a time. */
+  const keyOf = LB_SUBJECT ? subjectKeyMap() : null;
   const stat = uid => {
-    const ss = DB.sessions.filter(s => s.user_id === uid && set.has(s.day));
+    const ss = DB.sessions.filter(s => s.user_id === uid && set.has(s.day) &&
+      (!LB_SUBJECT || (s.subject_id && keyOf.get(s.subject_id) === LB_SUBJECT)));
     const hours = ss.reduce((x, s) => x + s.minutes / 60, 0);
     const per = {}; days.forEach(d => per[d] = 0); ss.forEach(s => per[s.day] += s.minutes / 60);
     const withGoal = days.filter(d => goalFor(uid, d) > 0);
@@ -1434,8 +1610,11 @@ function drawH2H() {
     ss.forEach(s => { const n = s.subject_id ? (subjById(s.subject_id) || {}).name || "Other" : "Other";
       bySub[n] = (bySub[n] || 0) + s.minutes / 60; });
     return { p: profileOf(uid), hours, sessions: ss.length, active: days.filter(d => per[d] > 0).length,
-      best: Math.max(0, ...days.map(d => per[d])), streak: streakFor(uid),
-      goalHit: withGoal.length ? hit / withGoal.length : null, bySub };
+      best: Math.max(0, ...days.map(d => per[d])),
+      /* both of these are facts about whole days, so they say nothing about
+         one subject and are left off rather than quietly misread */
+      streak: LB_SUBJECT ? null : streakFor(uid),
+      goalHit: LB_SUBJECT ? null : (withGoal.length ? hit / withGoal.length : null), bySub };
   };
   const A = stat(a), B = stat(b);
   const row = (label, va, vb, fmt) => {
@@ -1461,12 +1640,12 @@ function drawH2H() {
       <div style="font-size:12px;color:var(--ink-soft)">vs</div>
       <div class="who">${avatarHTML(B.p, "lg")}<span class="nm" style="font-size:15px">${esc(B.p.display_name)}</span></div>
     </div>
-    ${row("Hours in range", A.hours, B.hours)}
+    ${row(LB_SUBJECT ? "Hours on this subject" : "Hours in range", A.hours, B.hours)}
     ${row("Sessions", A.sessions, B.sessions, f0)}
     ${row("Days active", A.active, B.active, f0)}
     ${row("Longest day", A.best, B.best)}
-    ${row("Current streak", A.streak, B.streak, f0)}
-    ${row("Goal hit rate", A.goalHit || 0, B.goalHit || 0, x => f0(x * 100) + "%")}
+    ${LB_SUBJECT ? "" : row("Current streak", A.streak, B.streak, f0)}
+    ${LB_SUBJECT ? "" : row("Goal hit rate", A.goalHit || 0, B.goalHit || 0, x => f0(x * 100) + "%")}
     ${subs.length ? `<h3 class="sec" style="margin:18px 0 6px">By subject</h3>` +
       subs.map(s => row(s, A.bySub[s] || 0, B.bySub[s] || 0)).join("") : ""}`;
 }

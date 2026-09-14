@@ -46,6 +46,22 @@
         position: j, target_hours: 10 + j * 4, current_pct: 78 + ((j * 7 + i * 5) % 22) }));
     });
   });
+
+  /* Everyone above is given identical subject names, which is not what real
+     data looks like. These four rename one person's subject each so the
+     leaderboard's subject matching has something to prove:
+       · case and spacing must fold together silently
+       · punctuation-only drift must be spotted and called out
+       · a genuinely different name must stand on its own, and be marked
+         custom rather than silently folded into the catalogue one          */
+  const rename = (who, from, to) => {
+    const row = T.subjects.find(x => x.user_id === who && x.name === from);
+    if (row) row.name = to;
+  };
+  rename(uid(2), "English Advanced", "english advanced");          /* folds */
+  rename(uid(3), "Business Studies", "Business  Studies");         /* folds */
+  rename(uid(4), "Enterprise Computing", "Enterprise Computing.");  /* near miss */
+  rename(uid(4), "Mathematics Standard 2", "Maths Standard 2");     /* stands alone */
   const notes = ["Two body paragraphs under time. Second ran long.",
     "Section II past paper — 33/40. Marketing was the weak one.",
     "Reworked every error from yesterday's paper.", "Quote table done, 14 memorised.", null, null];
