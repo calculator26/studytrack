@@ -11,7 +11,6 @@ create table if not exists public.profiles (
   id             uuid primary key references auth.users on delete cascade,
   display_name   text not null default 'New member',
   avatar_url     text,
-  school         text,
   colour         text not null default '#2FCFA6',
   default_goal   numeric not null default 3,
   weekday_goals  jsonb,                       -- [mon,tue,wed,thu,fri,sat,sun] hours, or null

@@ -464,7 +464,7 @@ function admMembers() {
 
   <div class="adm-card"><div class="adm-scroll"><table class="adm-t">
     <thead><tr>
-      <th class="l">Member</th><th class="l">School</th><th class="l">Joined</th>
+      <th class="l">Member</th><th class="l">Joined</th>
       <th>Sessions</th><th>Hours</th><th>Streak</th><th class="l">Last active</th>
       <th class="l">State</th><th></th>
     </tr></thead>
@@ -474,7 +474,6 @@ function admMembers() {
       const stale = last && last < addDays(todayISO(), -14);
       return `<tr>
         <td class="l">${admWho(p.id)}</td>
-        <td class="l" style="color:var(--a-ink-mid)">${esc(p.school || "—")}</td>
         <td class="l adm-mono">${esc(admJoined(p) || "—")}</td>
         <td>${ss.length}</td>
         <td style="font-weight:650">${f1(admHours(ss))}</td>
@@ -812,7 +811,7 @@ async function admStopTimer(uid) {
   await admAfterWrite();
 }
 
-/* Profile editing reuses the crew's own vocabulary — name, school, colour and
+/* Profile editing reuses the crew's own vocabulary — name, colour and
    the default goal. Anything more (avatars, weekday goals) belongs to the
    person, and there is no moderation reason to reach into it. */
 async function admEditMember(uid) {
@@ -820,14 +819,10 @@ async function admEditMember(uid) {
   const name = prompt(`Display name for this member:`, p.display_name || "");
   if (name === null) return;
   if (!name.trim()) { toast("A display name cannot be empty"); return; }
-  const school = prompt(`School (blank for none):`, p.school || "");
-  if (school === null) return;
-
-  const patch = { display_name: name.trim(), school: school.trim() || null };
+  const patch = { display_name: name.trim() };
   await admLog("member.edit", uid, p.display_name,
-    `name "${p.display_name}" → "${patch.display_name}"` +
-    (p.school !== patch.school ? `, school "${p.school || "—"}" → "${patch.school || "—"}"` : ""),
-    { before: { display_name: p.display_name, school: p.school } });
+    `name "${p.display_name}" → "${patch.display_name}"`,
+    { before: { display_name: p.display_name } });
 
   const { error } = await sb.from("profiles").update(patch).eq("id", uid);
   if (error) { toast("Could not save: " + error.message); return; }

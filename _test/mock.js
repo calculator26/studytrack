@@ -16,10 +16,10 @@
 
   const joined = n => new Date(Date.now() - n * 864e5).toISOString();
   const people = [
-    { id: ME,     display_name: "Lewis Christie", colour: "#2FCFA6", school: "Knox", onboarded: !/onboard=1/.test(location.search), default_goal: 3, weekday_goals: [3,3,3,3,2,5,5] },
-    { id: uid(2), display_name: "Sam Whitfield",  colour: "#C0564C", school: "Knox", onboarded: true, default_goal: 4, weekday_goals: [4,4,4,4,3,6,6] },
-    { id: uid(3), display_name: "Priya Raman",    colour: "#7A6BB5", school: "Abbotsleigh", onboarded: true, default_goal: 5, weekday_goals: [5,5,5,5,4,7,7] },
-    { id: uid(4), display_name: "Tom Beckett",    colour: "#C9A227", school: "Knox", onboarded: true, default_goal: 2, weekday_goals: [2,2,2,2,2,4,4] }
+    { id: ME,     display_name: "Lewis Christie", colour: "#2FCFA6", onboarded: !/onboard=1/.test(location.search), default_goal: 3, weekday_goals: [3,3,3,3,2,5,5] },
+    { id: uid(2), display_name: "Sam Whitfield",  colour: "#C0564C", onboarded: true, default_goal: 4, weekday_goals: [4,4,4,4,3,6,6] },
+    { id: uid(3), display_name: "Priya Raman",    colour: "#7A6BB5", onboarded: true, default_goal: 5, weekday_goals: [5,5,5,5,4,7,7] },
+    { id: uid(4), display_name: "Tom Beckett",    colour: "#C9A227", onboarded: true, default_goal: 2, weekday_goals: [2,2,2,2,2,4,4] }
   ];
   people.forEach((p, i) => p.created_at = joined(30 - i * 2));
   T.profiles = people;

@@ -831,3 +831,31 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 .chatkey{font-size:11.5px;color:var(--ink-soft)}
 .chatempty{text-align:center;color:var(--ink-soft);font-size:13px;padding:28px 10px}
 @media (max-width:620px){.chatlog{height:min(52vh,420px)}}
+
+/* ---- subject picker rows ---------------------------------------------- */
+/* The whole row is the target. Most of this is used on a phone, where a small
+   button on the end of a three-line row is a fiddly thing to hit. */
+.pkrow{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+  padding:10px 12px;border:1px solid var(--rule-soft);border-radius:var(--r-xs);
+  margin-bottom:6px;cursor:pointer;background:var(--surface);
+  transition:border-color var(--fast),background var(--fast)}
+.pkrow:hover{border-color:var(--ink-mid);background:var(--surface-2)}
+.pkrow:focus-visible{outline:2px solid var(--ink-mid);outline-offset:2px}
+.pkrow .pktick{font-size:12px;font-weight:650;color:var(--ink-mid);white-space:nowrap}
+.pkrow.picked{cursor:default;background:var(--good-wash);border-color:transparent}
+.pkrow.picked:hover{border-color:transparent;background:var(--good-wash)}
+.pkrow.picked .pktick{color:var(--good)}
+.pkrow.picked strong{color:var(--ink-mid)}
+.pkfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--rule-soft);
+  font-size:12.5px;color:var(--ink-soft)}
+
+/* ---- sign in / create account ----------------------------------------- */
+.authseg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin-bottom:16px;
+  background:var(--surface-3);border-radius:var(--r-sm)}
+.authseg button{border:0;background:none;padding:9px 10px;border-radius:var(--r-xs);
+  font:inherit;font-size:13px;font-weight:600;color:var(--ink-mid);cursor:pointer;
+  transition:background var(--fast),color var(--fast),box-shadow var(--fast)}
+.authseg button:hover{color:var(--ink)}
+.authseg button[aria-selected="true"]{background:var(--surface);color:var(--ink);
+  box-shadow:var(--sh-1)}

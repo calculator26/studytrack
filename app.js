@@ -322,12 +322,13 @@ function paintAuthMode() {
                                  : "Sign in to see how the crew is going.";
   $("au-go").textContent    = up ? "Create account" : "Sign in";
   $("au-namefield").style.display = up ? "" : "none";
-  $("au-swtext").textContent = up ? "Already have an account?" : "No account yet?";
-  $("au-switch").textContent = up ? "Sign in" : "Create one";
+  $("au-tab-in").setAttribute("aria-selected", String(!up));
+  $("au-tab-up").setAttribute("aria-selected", String(up));
   $("au-pass").setAttribute("autocomplete", up ? "new-password" : "current-password");
 }
 function switchMode(m) { authMode = m; authMsg(); paintAuthMode(); }
-$("au-switch").addEventListener("click", () => switchMode(authMode === "up" ? "in" : "up"));
+document.querySelectorAll("[data-authmode]").forEach(b =>
+  b.addEventListener("click", () => switchMode(b.dataset.authmode)));
 $("au-go").addEventListener("click", doAuth);
 ["au-email","au-pass","au-name"].forEach(id =>
   $(id).addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doAuth(); } }));
@@ -420,7 +421,8 @@ function show(which) {
     show("auth");
     $("au-title").textContent = "Not configured yet";
     $("au-lede").textContent = "Open config.js and put your Supabase project URL and anon key in it.";
-    ["au-email","au-pass","au-go","au-switch"].forEach(id => $(id).style.display = "none");
+    ["au-email","au-pass","au-go"].forEach(id => $(id).style.display = "none");
+    const seg = document.querySelector(".authseg"); if (seg) seg.style.display = "none";
     return;
   }
   paintAuthMode();
@@ -798,14 +800,23 @@ function startOnboarding() {
   $("ob-colour").value = ME.colour || "#2FCFA6";
   $("ob-avpreview").textContent = initials(ME.display_name);
   $("ob-avpreview").style.background = ME.colour || "#2FCFA6";
-  $("ob-quick").innerHTML = `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px">
-      Tap your subjects. Each one arrives with its 2026 exam date and its course sections already in it.</div>
-    <button class="btn" id="ob-openpicker" style="margin-bottom:4px">Choose from the Knox subject list</button>
-    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:7px">Not on the list, or Knox calls it something else? Type it in below instead.</div>`;
-  $("ob-openpicker").addEventListener("click", () => openPicker({
-    taken: () => obSubjects.map(s => s.name),
-    pick: c => { addObSubject(c.name, c.exam_date, c.colour, c.areas.slice()); }
-  }));
+  /* The picker button and the by-hand form are both in the markup now, so they
+     are wired once rather than rebuilt every time onboarding starts. */
+  if (!$("ob-openpicker").dataset.wired) {
+    $("ob-openpicker").dataset.wired = "1";
+    $("ob-openpicker").addEventListener("click", () => openPicker({
+      taken: () => obSubjects.map(s => s.name),
+      pick: c => { addObSubject(c.name, c.exam_date, c.colour, c.areas.slice()); }
+    }));
+    $("ob-manualtoggle").addEventListener("click", () => {
+      const box = $("ob-manual"), open = box.hidden;
+      box.hidden = !open;
+      $("ob-manualtoggle").setAttribute("aria-expanded", String(open));
+      $("ob-manualtoggle").textContent = open
+        ? "Hide the by-hand form" : "Not on the list? Type one in by hand";
+      if (open) $("ob-subname").focus();
+    });
+  }
   const wk = DOW.map((d, i) => `<div><label class="fl" style="text-align:center">${d}</label>
     <input type="number" min="0" max="16" step="0.5" id="obwk${i}" value="${i < 5 ? 3 : 5}" style="text-align:center;padding:7px 4px"></div>`).join("");
   $("ob-wk").innerHTML = wk;
@@ -915,7 +926,6 @@ $("ob-finish").addEventListener("click", async () => {
     const wk = DOW.map((_, i) => Number($("obwk" + i).value));
     await sb.from("profiles").update({
       display_name: $("ob-name").value.trim(),
-      school: $("ob-school").value.trim() || null,
       colour: $("ob-colour").value,
       avatar_url,
       weekday_goals: wk,
@@ -2254,7 +2264,6 @@ function renderMyLog() {
    ========================================================================= */
 function renderSetup() {
   $("s-name").value = ME.display_name || "";
-  $("s-school").value = ME.school || "";
   $("s-colour").value = ME.colour || "#2FCFA6";
   $("s-avpreview").outerHTML = avatarHTML(ME, "xl").replace('class="av xl"', 'class="av xl" id="s-avpreview"');
   $("s-default").value = ME.default_goal != null ? ME.default_goal : 3;
@@ -2301,7 +2310,7 @@ function renderSetup() {
 }
 $("s-saveprofile").addEventListener("click", async () => {
   await sb.from("profiles").update({ display_name: $("s-name").value.trim() || ME.display_name,
-    school: $("s-school").value.trim() || null, colour: $("s-colour").value }).eq("id", UID);
+    colour: $("s-colour").value }).eq("id", UID);
   await refresh(); toast("Profile saved");
 });
 $("s-avfile").addEventListener("change", async e => {
@@ -2444,7 +2453,7 @@ async function openProfile(id) {
       ${avatarHTML(p, "xl")}
       <div class="pfid">
         <h2>${esc(p.display_name)}${mine ? ` <span class="pilltag">you</span>` : ""}</h2>
-        <div class="pfmeta">${p.school ? esc(p.school) + " · " : ""}${
+        <div class="pfmeta">${
           rank >= 0 ? `#${rank + 1} of ${wk.length} this week · ${f1(wkHours)} h` : "no hours this week"}</div>
       </div>
     </div>
@@ -2641,7 +2650,11 @@ function paintPicker() {
       const when = days.length
         ? days.join(" · ") + (s.exams.length > days.length ? " (" + s.exams.length + " papers)" : "")
         : "no written exam";
-      return `<div class="itemrow" style="grid-template-columns:auto 1fr auto;gap:10px;align-items:center">
+      /* The whole row is the target, not just the button on the end of it —
+         this is mostly used on a phone, and a 44-pixel button beside a
+         three-line row is a fiddly thing to hit. */
+      return `<div class="pkrow${already ? " picked" : ""}" ${already ? "" : `data-pkadd="${esc(s.name)}"`}
+        role="button" tabindex="${already ? -1 : 0}" aria-pressed="${already}">
         <span class="swatch" style="background:${esc(s.colour)}"></span>
         <div>
           <strong>${esc(s.name)}</strong>
@@ -2649,17 +2662,34 @@ function paintPicker() {
           <div style="font-size:11.5px;color:var(--ink-soft)">
             ${esc(when)} · ${s.areas.length} section${s.areas.length === 1 ? "" : "s"}${s.note ? " · " + esc(s.note) : ""}</div>
         </div>
-        <button class="btn ${already ? "ghost" : ""} sm" data-pkadd="${esc(s.name)}" ${already ? "disabled" : ""}
-          style="${already ? "opacity:.5" : ""}">${already ? "Added" : "Add"}</button>
+        <span class="pktick">${already ? "✓ Added" : "Add"}</span>
       </div>`;
     }).join("")}`).join("");
 
-  $("pk-list").querySelectorAll("[data-pkadd]").forEach(b => b.addEventListener("click", async () => {
-    const c = CAT.byName(b.dataset.pkadd);
-    if (!c) return;
-    b.disabled = true;
+  const add = async el => {
+    const c = CAT.byName(el.dataset.pkadd);
+    if (!c || el.classList.contains("picked")) return;
+    el.classList.add("picked");                       /* immediate, before the write */
     try { await pkHandlers.pick(c); } finally { paintPicker(); }
-  }));
+  };
+  $("pk-list").querySelectorAll("[data-pkadd]").forEach(el => {
+    el.addEventListener("click", () => add(el));
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); add(el); }
+    });
+  });
+  paintPickerCount(taken.length);
+}
+
+/* How many you have so far, and a way out that is not the little × in the
+   corner — the point being that you are meant to pick several and then leave. */
+function paintPickerCount(n) {
+  const el = $("pk-count");
+  if (!el) return;
+  el.textContent = n === 0 ? "Nothing picked yet"
+    : n + " subject" + (n === 1 ? "" : "s") + " added";
+  const done = $("pk-done");
+  if (done) done.textContent = n ? "Done" : "Close";
 }
 
 $("pk-search").addEventListener("input", paintPicker);

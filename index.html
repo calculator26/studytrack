@@ -32,6 +32,13 @@
         </svg><span>Study Track</span></div>
     <h1 id="au-title">Study Track</h1>
     <p class="lede" id="au-lede">Sign in to see how the crew is going.</p>
+    <!-- Nearly everybody arriving for the first week is creating an account,
+         not signing in, so both are on screen and neither is hidden behind a
+         line of small text at the bottom. -->
+    <div class="authseg" role="tablist" aria-label="Sign in or create an account">
+      <button role="tab" id="au-tab-in" data-authmode="in" aria-selected="true">Sign in</button>
+      <button role="tab" id="au-tab-up" data-authmode="up" aria-selected="false">Create account</button>
+    </div>
     <div id="au-msg"></div>
     <div class="field" id="au-namefield" style="display:none">
       <label class="fl" for="au-name">Your name</label>
@@ -46,10 +53,6 @@
       <input type="password" id="au-pass" autocomplete="current-password">
     </div>
     <button class="btn" id="au-go" style="width:100%;margin-top:6px">Sign in</button>
-    <div class="switch">
-      <span id="au-swtext">No account yet?</span>
-      <button id="au-switch">Create one</button>
-    </div>
   </div>
 </div>
 
@@ -71,10 +74,7 @@
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Optional. Square images look best.</div>
           </div>
         </div>
-        <div class="grid g2">
-          <div><label class="fl" for="ob-name">Display name</label><input type="text" id="ob-name"></div>
-          <div><label class="fl" for="ob-school">School or group (optional)</label><input type="text" id="ob-school"></div>
-        </div>
+        <div><label class="fl" for="ob-name">Display name</label><input type="text" id="ob-name"></div>
         <div style="margin-top:12px;display:flex;gap:14px;align-items:end;flex-wrap:wrap">
           <div><label class="fl" for="ob-colour">Your colour</label><input type="color" id="ob-colour" value="#2FCFA6"></div>
           <div style="font-size:12.5px;color:var(--ink-soft);padding-bottom:9px">Used for your line on the crew charts.</div>
@@ -90,14 +90,28 @@
       <header><div><h2>Add your subjects</h2>
         <div class="sub">Pick them from the Knox list and the exam dates and course sections fill themselves in. Add your own, rename anything, delete what you do not need.</div></div></header>
       <div class="body">
-        <div id="ob-quick" style="margin-bottom:14px"></div>
-        <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end">
-          <div><label class="fl" for="ob-subname">Subject name</label><input type="text" id="ob-subname" placeholder="e.g. Business Studies"></div>
-          <div><label class="fl" for="ob-subexam">Exam date</label><input type="date" id="ob-subexam"></div>
-          <div><label class="fl">&nbsp;</label><input type="color" id="ob-subcolour" value="#3E7CA6"></div>
-          <div><button class="btn" id="ob-addsub">Add</button></div>
-        </div>
+        <!-- The Knox list is the way in, the same as it is in Setup. Typing one
+             in by hand still works, but it is folded away: a hand-typed subject
+             brings no exam dates and no course sections with it, and it will not
+             match anybody else's spelling on the leaderboard either. -->
+        <button class="btn" id="ob-openpicker" style="width:100%;justify-content:center">Choose from the Knox subject list</button>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:8px">
+          Each one arrives with its 2026 HSC exam dates and its course sections already in it. You can rename or delete any of it later.</div>
+
         <div id="ob-sublist" style="margin-top:18px"></div>
+
+        <div style="margin-top:16px;padding-top:13px;border-top:1px solid var(--rule-soft)">
+          <button class="btn ghost sm" id="ob-manualtoggle" aria-expanded="false" aria-controls="ob-manual">
+            Not on the list? Type one in by hand</button>
+          <div id="ob-manual" hidden style="margin-top:12px">
+            <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end">
+              <div><label class="fl" for="ob-subname">Subject name</label><input type="text" id="ob-subname" placeholder="e.g. Business Studies"></div>
+              <div><label class="fl" for="ob-subexam">Exam date</label><input type="date" id="ob-subexam"></div>
+              <div><label class="fl">&nbsp;</label><input type="color" id="ob-subcolour" value="#3E7CA6"></div>
+              <div><button class="btn" id="ob-addsub">Add</button></div>
+            </div>
+          </div>
+        </div>
         <div class="controls" style="margin-top:20px;justify-content:space-between">
           <button class="btn ghost" id="ob-back2">Back</button>
           <button class="btn" id="ob-next2">Next — your goals</button>
@@ -409,10 +423,7 @@
             <div><label class="fl">Change picture</label>
               <input type="file" id="s-avfile" accept="image/*" style="font-size:12.5px"></div>
           </div>
-          <div class="grid g2">
-            <div><label class="fl" for="s-name">Display name</label><input type="text" id="s-name"></div>
-            <div><label class="fl" for="s-school">School or group</label><input type="text" id="s-school"></div>
-          </div>
+          <div><label class="fl" for="s-name">Display name</label><input type="text" id="s-name"></div>
           <div style="margin-top:12px;display:flex;gap:14px;align-items:end">
             <div><label class="fl" for="s-colour">Your colour</label><input type="color" id="s-colour"></div>
             <button class="btn" id="s-saveprofile">Save profile</button>
@@ -600,6 +611,10 @@
       <input type="text" id="pk-search" placeholder="Search — try &quot;ext&quot;, &quot;maths&quot;, &quot;japanese&quot;" style="margin-bottom:10px">
       <div class="controls" id="pk-cats" style="margin-bottom:12px"></div>
       <div id="pk-list" style="max-height:50vh;overflow:auto"></div>
+      <div class="pkfoot">
+        <span id="pk-count">Nothing picked yet</span>
+        <button class="btn" id="pk-done" data-closepicker>Close</button>
+      </div>
       <label style="display:flex;align-items:center;gap:7px;margin-top:12px;font-size:12px;color:var(--ink-soft)">
         <input type="checkbox" id="pk-retired" style="width:auto;margin:0"> Show discontinued courses (no 2026 exam)
       </label>

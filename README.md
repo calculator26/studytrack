@@ -102,9 +102,19 @@ running a timer shows up as a bubble, you included, with a pulsing dot and their
 on hover. Click a bubble to open that person's profile.
 
 ### Signing up
-Each person makes an account with an email, a password and a display name, then walks
-through a three-step setup: profile picture and colour, their subjects and areas, and their
-daily goals. Nothing is prefilled — everyone's course list is their own.
+**Sign in** and **Create account** sit side by side at the top of the first screen, so
+somebody arriving from a link is not hunting for a small line of text at the bottom.
+
+An account needs an email, a password and a display name, then there is a three-step
+setup: picture and colour, subjects, goals. Nothing is prefilled — everyone's course list
+is their own.
+
+Subjects start from **the Knox list**, which is the full-width button and the only thing
+offered. Each subject you tap arrives with its 2026 HSC exam dates and its course sections
+already in it, the row turns green, and a count at the bottom tells you how many you have.
+Typing one in by hand is folded away behind *Not on the list?* — deliberately, because a
+hand-typed subject brings no exam dates and no course sections, and it will not match
+anybody else's spelling on the leaderboard either.
 
 ### Subjects and areas
 A **subject** is a course. An **area** is what you actually sit down and revise inside it —
