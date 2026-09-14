@@ -1,6 +1,6 @@
 {
-  "name": "Study Track",
-  "short_name": "Study Track",
+  "name": "Knox Study Track",
+  "short_name": "Knox Study",
   "description": "A shared study tracker. Log what you revise, see what everyone else is doing.",
   "start_url": "./",
   "scope": "./",

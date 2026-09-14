@@ -90,10 +90,10 @@ Deno.serve(async (req) => {
   const out: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Study Track//Reminders//EN",
+    "PRODID:-//Knox Study Track//Reminders//EN",
     "CALSCALE:GREGORIAN",
-    "X-WR-CALNAME:Study Track",
-    "X-WR-CALDESC:" + esc("Your study reminder and every exam you have dated in Study Track"),
+    "X-WR-CALNAME:Knox Study Track",
+    "X-WR-CALDESC:" + esc("Your study reminder and every exam you have dated in Knox Study Track"),
     /* Hint to re-fetch hourly. Google honours this loosely at best, which is
        why this feed only carries things known in advance. */
     "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
       "DURATION:PT15M",
       "RRULE:FREQ=WEEKLY;BYDAY=" + days.join(","),
       "SUMMARY:" + esc("Log your study"),
-      "DESCRIPTION:" + esc("Open Study Track and log what you did today. Even twenty minutes counts."),
+      "DESCRIPTION:" + esc("Open Knox Study Track and log what you did today. Even twenty minutes counts."),
       "URL:https://calculator26.github.io/studytrack/",
       /* Free, not busy — this must not make anyone look booked every evening. */
       "TRANSP:TRANSPARENT",
@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
       "DTSTART;VALUE=DATE:" + dateOnly(day),
       "DTEND;VALUE=DATE:" + nextDay(day),
       "SUMMARY:" + esc(e.title + " exam"),
-      "DESCRIPTION:" + esc("From your subjects and areas in Study Track."),
+      "DESCRIPTION:" + esc("From your subjects and areas in Knox Study Track."),
       "TRANSP:TRANSPARENT",
       "BEGIN:VALARM",
       "ACTION:DISPLAY",

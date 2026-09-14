@@ -406,5 +406,5 @@
       };
     }
   };
-  window.CREW_CONFIG = { SUPABASE_URL: "https://mock.supabase.co", SUPABASE_ANON_KEY: "mock", CREW_NAME: "Knox Study Crew", ALLOWED_EMAILS: [] };
+  window.CREW_CONFIG = { SUPABASE_URL: "https://mock.supabase.co", SUPABASE_ANON_KEY: "mock", CREW_NAME: "Knox Study Track", ALLOWED_EMAILS: [] };
 })();

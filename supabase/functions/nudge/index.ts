@@ -263,6 +263,11 @@ Deno.serve(async (req) => {
     const results = await Promise.all(subs.map(async (s) => {
       try {
         const r = await pushTo(s as Sub, {
+          // Reads "Study Track" rather than "Knox Study Track" because this
+          // file is deployed, not served from the repo, and redeploying 15 kB
+          // of hand-rolled push crypto to change one word in a test
+          // notification is not a trade worth making. Sync it next time this
+          // function is deployed for a real reason.
           title: "Study Track reminders are on",
           body: "This is what a nudge will look like.",
           kind: "test",

@@ -6,6 +6,11 @@
 "use strict";
 
 const CFG = window.CREW_CONFIG || {};
+/* The app's own name, in one place. CREW_NAME is only shown as a chip beside
+   it when a group has given itself a different one — matching either the
+   current name or the one this was called before keeps that chip hidden. */
+const APP_NAME = "Knox Study Track";
+const isGenericName = n => ["knox study track", "study track"].indexOf(String(n || "").trim().toLowerCase()) > -1;
 const PALETTE = ["#3E7CA6","#C0564C","#3FA98A","#C9A227","#7A6BB5","#D98C3F","#2B6177","#B0577E"];
 
 let sb = null;
@@ -315,11 +320,11 @@ function paintAuthMode() {
   const up = authMode === "up";
   /* the brand lockup sits right above this, so do not say it twice */
   const crew = String(CFG.CREW_NAME || "").trim();
-  const named = crew && crew.toLowerCase() !== "study track" ? crew : null;
-  $("au-title").textContent = up ? (named ? "Join " + named : "Join the crew")
+  const named = crew && !isGenericName(crew) ? crew : null;
+  $("au-title").textContent = up ? (named ? "Join " + named : "Join the peloton")
                                  : (named || "Welcome back");
   $("au-lede").textContent  = up ? "Make an account so the others can see how you are going."
-                                 : "Sign in to see how the crew is going.";
+                                 : "Sign in to see how the peloton is going.";
   $("au-go").textContent    = up ? "Create account" : "Sign in";
   $("au-namefield").style.display = up ? "" : "none";
   $("au-tab-in").setAttribute("aria-selected", String(!up));
@@ -365,7 +370,7 @@ async function doAuth() {
   if (up && pass.length < 6) { authMsg("err", "Use a password of at least 6 characters."); return; }
   const allow = CFG.ALLOWED_EMAILS || [];
   if (up && allow.length && !allow.map(x => x.toLowerCase()).includes(email)) {
-    authMsg("err", "That email is not on the invite list for this crew."); return;
+    authMsg("err", "That email is not on the invite list for this peloton."); return;
   }
 
   authBusy = true;
@@ -1087,7 +1092,7 @@ function paintTimer() {
   $("tm-stop").disabled   = !t;
   $("tm-cancel").disabled = !t;
   $("tsub").textContent = t ? (t.label + (t.running ? "" : " · paused")) : "Nothing running";
-  document.title = t ? (t.running ? "▶ " : "❚❚ ") + shortTime(elapsedMs()) + " · Study Track"
+  document.title = t ? (t.running ? "▶ " : "❚❚ ") + shortTime(elapsedMs()) + " · " + APP_NAME
                      : nudgeTitle();
   paintFavicon();
   paintNowPill();
@@ -1342,10 +1347,10 @@ function renderAll() {
     `${f1(tot.hours)} hours in total.`;
 }
 function renderShell() {
-  $("crewname").textContent = "Study Track";
+  $("crewname").textContent = APP_NAME;
   const crew = String(CFG.CREW_NAME || "").trim();
   const chip = $("crewchip");
-  if (crew && crew.toLowerCase() !== "study track") { chip.textContent = crew; chip.hidden = false; }
+  if (crew && !isGenericName(crew)) { chip.textContent = crew; chip.hidden = false; }
   else chip.hidden = true;
   $("meblock").dataset.profile = UID;
   const total = crewTotals().hours;
@@ -1492,7 +1497,7 @@ function renderHome() {
   const above = idx > 0 ? dayBoard[idx - 1] : null;
   $("k-rank-d").textContent = above
     ? `${f1(above.h - dayBoard[idx].h)} h behind ${profileOf(above.id).display_name}`
-    : (idx === 0 ? "Top of the crew today" : "—");
+    : (idx === 0 ? "Top of the peloton today" : "—");
 
   const st = streakFor(UID);
   $("k-streak").textContent = st;
@@ -2566,7 +2571,7 @@ $("nuke").addEventListener("click", async () => {
   if (!confirm(
     "Delete " + who + "?\n\n" +
     "This removes every session, subject, area and goal, the profile itself, and the login. " +
-    "You will disappear from the crew leaderboard.\n\nThere is no undo.")) return;
+    "You will disappear from the peloton leaderboard.\n\nThere is no undo.")) return;
   const typed = prompt('Type DELETE to confirm.');
   if (typed !== "DELETE") { toast("Not deleted"); return; }
 
@@ -3208,9 +3213,9 @@ function paintNudgeBar() {
    tab you are actually reading is just irritating. */
 function nudgeTitle() {
   const s = nudgeState();
-  if (!s || !s.due || !document.hidden || nudgeDismissed()) return "Study Track";
+  if (!s || !s.due || !document.hidden || nudgeDismissed()) return APP_NAME;
   return Math.floor(Date.now() / 2000) % 2
-    ? "Study Track"
+    ? APP_NAME
     : "⚠ " + (s.hours > 0 ? f1(s.hours) + " h" : "0 h") + " today";
 }
 

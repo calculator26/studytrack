@@ -367,7 +367,7 @@ function admOverview(flags) {
   return `
   <div class="adm-h"><div>
     <h2>Overview</h2>
-    <p>The whole crew at a glance. Anything that needs a decision is surfaced under Integrity —
+    <p>The whole peloton at a glance. Anything that needs a decision is surfaced under Integrity —
        nothing here is ever removed automatically.</p>
   </div></div>
 
@@ -379,13 +379,13 @@ function admOverview(flags) {
     <div class="adm-tile"><div class="v">${f1(todayH)}</div><div class="k">Hours logged today</div>
       <div class="d">${admAll().filter(s => s.day === today).length} sessions</div></div>
     <div class="adm-tile"><div class="v">${live}</div><div class="k">Timers running now</div>
-      <div class="d">${live ? "live on the crew strip" : "nobody studying"}</div></div>
+      <div class="d">${live ? "live on the peloton strip" : "nobody studying"}</div></div>
     <div class="adm-tile ${crit ? "alert" : ""}"><div class="v">${flags.length}</div><div class="k">Flagged entries</div>
       <div class="d">${crit ? crit + " critical" : "nothing critical"}</div></div>
   </div>
 
   <div class="adm-card">
-    <header><div><h3>Crew output, last 14 days</h3>
+    <header><div><h3>Peloton output, last 14 days</h3>
       <div class="sub">Total hours logged per day by everyone</div></div></header>
     <div class="pad adm-scroll">${admBars(wk, perDay)}</div>
   </div>
@@ -442,7 +442,7 @@ function admBars(days, vals) {
       ? `<text class="axis" x="${(ml + i * slot + slot / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(d.slice(8))}/${esc(d.slice(5,7))}</text>`
       : "").join("");
   return `<svg class="adm-chart" viewBox="0 0 ${W} ${H}" role="img"
-    aria-label="Total crew hours per day over the last 14 days">${g}${bars}${labels}</svg>`;
+    aria-label="Total peloton hours per day over the last 14 days">${g}${bars}${labels}</svg>`;
 }
 
 /* ================================================================ MEMBERS */
@@ -454,7 +454,7 @@ function admMembers() {
   <div class="adm-h"><div>
     <h2>Members</h2>
     <p>Everyone with an account. Editing a profile here changes how that person appears to the
-       whole crew — their own copy updates the moment they refresh.</p>
+       whole peloton — their own copy updates the moment they refresh.</p>
   </div></div>
 
   <div class="adm-warnbox"><strong>Removing an account is final.</strong>

@@ -14,7 +14,7 @@ self.addEventListener("push", event => {
   let d = {};
   try { d = event.data ? event.data.json() : {}; } catch (e) { d = {}; }
 
-  event.waitUntil(self.registration.showNotification(d.title || "Study Track", {
+  event.waitUntil(self.registration.showNotification(d.title || "Knox Study Track", {
     body:  d.body || "Time to put something on the board.",
     icon:  "favicon.svg",
     badge: "favicon.svg",

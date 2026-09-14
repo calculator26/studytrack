@@ -1,6 +1,6 @@
-# Study Track
+# Knox Study Track
 
-A shared study tracker for a small group. Everyone defines their own subjects, areas and
+A shared study tracker for a whole year group. Everyone defines their own subjects, areas and
 goals, logs their own sessions, and sees everyone else's. Static front end, Supabase for
 auth and data. No build step, no framework, no npm install.
 
@@ -40,7 +40,7 @@ Open `config.js` and fill in the two values:
 window.CREW_CONFIG = {
   SUPABASE_URL: "https://abcdefgh.supabase.co",
   SUPABASE_ANON_KEY: "eyJhbGciOi...",
-  CREW_NAME: "Knox Study Crew",
+  CREW_NAME: "Knox Study Track",
   ALLOWED_EMAILS: []
 };
 ```
@@ -49,7 +49,7 @@ The anon key is meant to be public — it is in every request the browser makes.
 security is what stops people touching data that is not theirs, and that is set up by
 `schema.sql`.
 
-**To keep the crew private**, put your mates' email addresses in `ALLOWED_EMAILS`:
+**To keep the peloton private**, put your mates' email addresses in `ALLOWED_EMAILS`:
 
 ```js
 ALLOWED_EMAILS: ["lewis@example.com", "sam@example.com", "priya@example.com"]
@@ -156,16 +156,16 @@ anything more specific.
 
 There is no "mode" dropdown. A fixed list of Consolidate / Drill / Timed paper never
 described what anyone actually did, so **write it in the note instead** — "Section II under
-time, 33/40, marketing was the weak one" is worth more than any dropdown, and the whole crew
+time, 33/40, marketing was the weak one" is worth more than any dropdown, and the whole peloton
 can read it.
 
 ### Fixing a session you already logged
 Every session of yours carries a **pencil** next to the ×, wherever it turns up — on Today, in
-your session log under My stats, in the crew activity feed, and inside your own profile. It
+your session log under My stats, in the peloton activity feed, and inside your own profile. It
 opens the session with everything about it editable: the subject, the area, **the date it
 lands on**, the minutes, and the note. Move a Tuesday session to Monday because you logged it
 after midnight, correct 90 minutes that were really 45, rewrite a note once you know what the
-mark was — it all recalculates immediately, including your goals, streaks and the crew
+mark was — it all recalculates immediately, including your goals, streaks and the peloton
 leaderboard.
 
 There is a **Delete session** button in there too, which asks first. The bare × in the list
@@ -262,7 +262,7 @@ were away they collapse into one — *"Lewis, Sam and 3 others nudged you"* — 
 than stacking up a wall of guilt. While a nudge is showing, your own progress bar
 steps aside, since two bars with the same button is just noise.
 
-Who nudged whom is the one thing in the app the crew cannot see. Sessions and
+Who nudged whom is the one thing in the app the peloton cannot see. Sessions and
 hours are deliberately public; your nudges are visible only to you and the person
 at the other end.
 
@@ -277,7 +277,7 @@ the save fails, the sheet stays open with your note in it and the timer keeps ru
 so nothing is lost to a dropped connection.
 
 ### While a session is running
-The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
+The browser tab title becomes a live clock — `▶ 12:34 · Knox Study Track` — so a pinned tab
 tells you where you are up to without switching to it. It shows `❚❚` while paused.
 
 Move to any other tab in the app and a pill appears in the bottom corner with the running
@@ -307,13 +307,13 @@ clear out test accounts.
 
 ### The admin console
 The addresses listed in `schema.sql` get one extra thing: a dark control room for keeping the
-crew honest. The way in is a button at the bottom of **Setup**, and it is only rendered after
+peloton honest. The way in is a button at the bottom of **Setup**, and it is only rendered after
 the *database* confirms the account is an administrator — nobody else sees it.
 
 Five sections:
 
 - **Overview** — members, sessions, hours, who is running a timer right now, and a 14-day bar
-  of the whole crew's output.
+  of the whole peloton's output.
 - **Members** — everyone, with sessions, hours, streak, when they last logged anything and
   whether they are still mid-setup. Rename someone, change their school, clear every session
   they have logged, or remove the account outright.
@@ -346,10 +346,10 @@ level security in `schema.sql`, where every update and delete policy reads
 you get a working-looking screen whose every button quietly changes nothing.
 
 ### What each browser actually downloads
-Study Track is built for a whole year group, so no client holds the whole database.
+Knox Study Track is built for a whole year group, so no client holds the whole database.
 It keeps **your** rows — your subjects, your areas, your sessions — because you are the
 only person who can edit them, and for everyone else it holds the rollup the statistics
-are actually made of: how many minutes each person did on each day. Every crew-wide
+are actually made of: how many minutes each person did on each day. Every peloton-wide
 number here (hours, streaks, the charts, the sparklines, goal-hit rates) comes from that
 one fact, so the raw sessions never need to travel.
 
@@ -387,7 +387,7 @@ nothing re-reads anything. A message row holds only who, what and when — the n
 colour and the hours are all resolved from what your browser already has.
 
 ### Filtering the leaderboard
-Above the podium are two pickers. **Subject** narrows the whole crew page to one subject —
+Above the podium are two pickers. **Subject** narrows the whole Peloton page to one subject —
 podium, table, both charts and the head-to-head all follow it — and **Ranked by** changes
 what the order actually means: hours, sessions, longest day, goal-hit rate or current streak.
 The day-range chips keep working alongside both.
@@ -397,7 +397,7 @@ in the range, so "first of six" never quietly becomes "first of two". Goal hit a
 are left blank under a subject filter: they count whole days across everything you study,
 so they answer a different question from the one the board is asking.
 
-Neither picker is remembered between visits. The crew page always opens on the whole crew,
+Neither picker is remembered between visits. The Peloton page always opens on everybody,
 ranked on hours.
 
 **A wrinkle worth knowing.** Subjects belong to each person, so your Physics and mine are
@@ -417,7 +417,7 @@ toss — `German X` could be Continuers or Extension — nothing is suggested, b
 the person who typed it knows which they meant.
 
 ### Comparison
-The Crew tab has a podium and a full leaderboard over Today / 7 days / 30 days / all time,
+The Peloton tab has a podium and a full leaderboard over Today / 7 days / 30 days / all time,
 with hours, sessions, average per day, longest day, goal-hit rate, streak and a seven-day
 sparkline each. Below that: a cumulative race chart, daily output stacked by person, a
 head-to-head that puts any two people side by side down to subject splits, and a live
@@ -440,15 +440,15 @@ are reading them, because they are.
 enforced by the database, not the interface. Your own sessions you can edit and delete freely
 — see *Fixing a session you already logged* above.
 
-The exception is a **crew administrator**, who can correct or remove anyone's entries so that
+The exception is an **administrator**, who can correct or remove anyone's entries so that
 abuse can actually be cleaned up. There is no way to hide this: every such action is written to
 an append-only audit log that even the administrator who wrote it cannot alter. Administrators
 are named in `schema.sql` and nowhere else.
 
-Editing is silent: a session that has been changed does not say so, and the crew sees the new
+Editing is silent: a session that has been changed does not say so, and the peloton sees the new
 version. Nothing keeps the old one.
 
-Reminder settings and registered devices are the one thing in here the crew **cannot** see.
+Reminder settings and registered devices are the one thing in here the peloton **cannot** see.
 Unlike sessions and goals, those rows are readable only by you. Nobody can tell whether you
 have reminders on, and the nudge itself is generated and sent without any human seeing it.
 
@@ -548,7 +548,7 @@ on the timer card is gated on this tab knowing about your timer, so if the tab e
 of a row that was still on the server, there was no button left that could remove it. The app
 now takes an orphaned row of yours back off the server within thirty seconds — or instantly on
 a refresh — which lights Discard up again. If a delete is actually refused you get a message
-saying so rather than a card that clears while the crew keeps seeing you study.
+saying so rather than a card that clears while the peloton keeps seeing you study.
 
 **Someone shows as studying who is not** — a running timer heartbeats every 60 seconds. If
 their tab closes, they drop off the live strip about five minutes later.
