@@ -1127,13 +1127,46 @@ function goToTimer() {
    or not you have a timer going, because other people's clocks have to tick too.
    Every displayed time is derived from started_at, so a throttled background tab
    catches up the instant it is foregrounded rather than drifting. */
+/* ---------------------------------------------------------------------------
+   Two things that stop a forgotten timer telling everybody lies.
+
+   A timer left running overnight is the commonest way this app produces a
+   wrong number: fourteen hours appears on the board, the leaderboard believes
+   it, and the person has to notice and fix it. Five hours is past any real
+   unbroken sitting and well short of a night's sleep, so that is where it
+   stops itself — paused, not discarded, and clamped to the cap so the figure
+   waiting for you is a plausible one you can still adjust before saving.
+
+   And a paused timer stops beating. The strip works out who is here from how
+   recently a timer checked in, so a pause that no longer checks in falls off
+   it by itself after a while, instead of a session paused yesterday lunchtime
+   still sitting between two people who are actually working.
+   --------------------------------------------------------------------------- */
+const TIMER_CAP_MS    = 5 * 60 * 60e3;   /* auto-pause a run this long */
+const PAUSED_FRESH_MS = 30 * 60e3;       /* how long a pause stays on the strip */
+
+function autoPauseIfStale() {
+  if (!localTimer || !localTimer.running) return false;
+  if (elapsedMs() < TIMER_CAP_MS) return false;
+  localTimer.acc_ms = TIMER_CAP_MS;      /* clamp: the rest was not studying */
+  localTimer.running = false;
+  paintTimer();
+  pushTimer();
+  toast("Timer paused itself at five hours. Adjust the minutes when you save it.", 6000);
+  return true;
+}
+
 function startClock() {
   if (tickHandle) return;
   tickHandle = setInterval(() => {
+    if (autoPauseIfStale()) return;      /* it repainted and pushed already */
     paintTimer();
-    /* while your own timer runs, touch updated_at now and then so everyone else
-       can tell the difference between "still going" and "closed the laptop" */
-    if (localTimer && Date.now() - lastBeat > 60000) { lastBeat = Date.now(); pushTimer(true); }
+    /* While your timer is actually running, touch updated_at now and then so
+       everybody else can tell "still going" from "closed the laptop". A paused
+       one deliberately does not, which is what lets it go quiet on its own. */
+    if (localTimer && localTimer.running && Date.now() - lastBeat > 60000) {
+      lastBeat = Date.now(); pushTimer(true);
+    }
   }, 1000);
 }
 function restoreTimer() {
@@ -1376,8 +1409,15 @@ let liveSig = "";
 
 function paintLive(force) {
   const now = Date.now();
-  const rows = DB.timers.filter(t => t.user_id !== UID)
-    .filter(t => now - new Date(t.updated_at || 0).getTime() < LIVE_FRESH_MS);
+  /* With other people hidden this empties both the strip and the header pill,
+     which is the whole of what the live view is. */
+  const rows = (hidingOthers() ? [] : DB.timers).filter(t => t.user_id !== UID)
+    /* A running timer has to have checked in recently. A paused one never
+       checks in, so it is shown for a while after the pause and then goes
+       quiet — long enough for a break, short enough that yesterday's pause is
+       not still sitting on the strip. */
+    .filter(t => now - new Date(t.updated_at || 0).getTime() <
+                 (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS));
   const mine = localTimer ? [Object.assign({}, localTimer, { user_id: UID })] : [];
   const all = mine.concat(rows);
   const msOf = t => t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0);
@@ -1459,7 +1499,65 @@ function paintNowBar(all, msOf, rebuild) {
     `</span>`;
 }
 
+/* =========================================================================
+   COUNTDOWN
+
+   Two dates that matter to this cohort. Both come out of the same place the
+   exam dates do — NESA's timetable has English Paper 1 on the 13th, which is
+   where that one is checked against rather than typed in twice.
+
+   A date that has passed simply stops being shown, so this needs no attention
+   after the day; once the first paper is behind us the card says so instead of
+   counting down to something that has already happened.
+   ========================================================================= */
+/* English Paper 1 is already in the catalogue, straight off NESA's timetable,
+   so it is read from there rather than typed in a second place and left to
+   drift apart from it. The literal is only a fallback for a catalogue that
+   has not been updated. Valedictory is ours and has nowhere else to live. */
+function englishPaper1() {
+  const dates = (CAT.papers || [])
+    .filter(p => /^English (Advanced|Standard|EAL)/.test(p.subject) && /Paper 1/i.test(p.paper))
+    .map(p => p.date).sort();
+  return dates[0] || "2026-10-13";
+}
+const KEY_DATES = () => [
+  { on: "2026-09-21",     what: "Valedictory",     note: "last day as a year group" },
+  { on: englishPaper1(),  what: "English Paper 1", note: "first HSC exam" }
+];
+
+const daysUntil = iso =>
+  Math.round((parseD(iso).getTime() - parseD(todayISO()).getTime()) / 864e5);
+
+function paintCountdown() {
+  const box = $("countdown");
+  if (!box) return;
+  const live = KEY_DATES().map(d => Object.assign({}, d, { left: daysUntil(d.on) }))
+                         .filter(d => d.left >= 0)
+                         .sort((a, b) => a.left - b.left);
+  if (!live.length) {
+    box.innerHTML = `<div class="cdcard"><div><div class="cdwhat">The HSC is underway</div>
+      <div class="cdwhen">One paper at a time. Keep logging.</div></div></div>`;
+    box.hidden = false;
+    return;
+  }
+  box.innerHTML = live.map(d => {
+    const today = d.left === 0, near = d.left <= 7;
+    return `<div class="cdcard${today ? " today near" : near ? " near" : ""}">
+      <div style="text-align:center;min-width:52px">
+        <div class="cdnum">${today ? "Today" : d.left}</div>
+        ${today ? "" : `<div class="cdunit">${d.left === 1 ? "day" : "days"}</div>`}
+      </div>
+      <div>
+        <div class="cdwhat">${esc(d.what)}</div>
+        <div class="cdwhen">${esc(fmtLong(d.on))} · ${esc(d.note)}</div>
+      </div>
+    </div>`;
+  }).join("");
+  box.hidden = false;
+}
+
 function renderHome() {
+  paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
   $("h-date").value = CUR;
   $("h-goal").value = goalFor(UID, CUR);
@@ -1491,7 +1589,7 @@ function renderHome() {
   $("k-today").style.color = col === "var(--none)" ? "var(--ink)" : col;
   $("k-today-d").textContent = g > 0 ? (h >= g ? "Goal met" : f1(g - h) + " short of " + f1(g)) : "Rest day";
 
-  const dayBoard = DB.profiles.map(p => ({ id: p.id, h: hoursFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
+  const dayBoard = visiblePeople().map(p => ({ id: p.id, h: hoursFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
   const idx = dayBoard.findIndex(x => x.id === UID);
   $("k-rank").textContent = idx >= 0 ? "#" + (idx + 1) : "—";
   const above = idx > 0 ? dayBoard[idx - 1] : null;
@@ -1509,7 +1607,7 @@ function renderHome() {
   $("k-week").textContent = f1(wk);
   $("k-week-d").textContent = `Against ${f1(wkg)} of goals`;
 
-  const rows = DB.profiles.map(p => ({ p, h: hoursFor(p.id, CUR), g: goalFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
+  const rows = visiblePeople().map(p => ({ p, h: hoursFor(p.id, CUR), g: goalFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
   const mx = Math.max(1, ...rows.map(x => Math.max(x.h, x.g)));
   $("todayrail").innerHTML = rows.map(x => {
     const rr = x.g > 0 ? x.h / x.g : (x.h > 0 ? 1 : null);
@@ -1784,7 +1882,7 @@ function leaderboard(rangeOverride, opts) {
   /* Everybody who takes the subject is on the board, including anyone who has
      not logged to it in this range. Dropping them would turn "first of six"
      into "first of two" without saying so. */
-  const people = takers ? DB.profiles.filter(p => takers.has(p.id)) : DB.profiles;
+  const people = takers ? visiblePeople().filter(p => takers.has(p.id)) : visiblePeople();
 
   return people.map(p => {
     const perDay = {};
@@ -1973,16 +2071,26 @@ function renderCrew() {
   drawRace(board, days);
   drawStack(board, days);
 
-  /* head to head */
-  const opts = DB.profiles.map(p => `<option value="${p.id}">${esc(p.display_name)}</option>`).join("");
-  if (!$("h2h-a").dataset.built) {
-    $("h2h-a").innerHTML = opts; $("h2h-b").innerHTML = opts;
-    $("h2h-a").value = UID;
-    const other = DB.profiles.find(p => p.id !== UID);
-    if (other) $("h2h-b").value = other.id;
-    $("h2h-a").dataset.built = "1";
-    $("h2h-a").addEventListener("change", () => drawH2H());
-    $("h2h-b").addEventListener("change", () => drawH2H());
+  /* head to head. Rebuilt when the set of people actually changes — somebody
+     joining, or somebody turning private mode on — and left alone otherwise,
+     so an open dropdown is not snatched away on a routine repaint. */
+  const people = visiblePeople();
+  const peopleSig = people.map(p => p.id + ":" + p.display_name).join("|");
+  const A = $("h2h-a"), B = $("h2h-b");
+  if (A.dataset.sig !== peopleSig) {
+    const keepA = A.value, keepB = B.value;
+    const opts = people.map(p => `<option value="${p.id}">${esc(p.display_name)}</option>`).join("");
+    A.innerHTML = opts; B.innerHTML = opts;
+    const has = v => people.some(p => p.id === v);
+    A.value = has(keepA) ? keepA : UID;
+    const other = people.find(p => p.id !== A.value);
+    B.value = has(keepB) && keepB !== A.value ? keepB : (other ? other.id : A.value);
+    A.dataset.sig = peopleSig;
+  }
+  if (!A.dataset.wired) {
+    A.dataset.wired = "1";
+    A.addEventListener("change", () => drawH2H());
+    B.addEventListener("change", () => drawH2H());
   }
   drawH2H();
 
@@ -2267,7 +2375,71 @@ function renderMyLog() {
 /* =========================================================================
    RENDER — setup
    ========================================================================= */
+/* =========================================================================
+   PRIVATE MODE
+
+   hide_hours is enforced in the database, not here. The row level policy on
+   sessions and live_timers drops a private person's rows for everybody except
+   themselves and an administrator, so the leaderboard, the charts, the feed,
+   the strip and the hours beside a name in chat all lose them at once, without
+   a single one of them having to remember to check. That matters because the
+   anon key is public: anything hidden only in this file is hidden from nobody.
+
+   hide_others is the opposite kind of switch. It only decides what one person
+   is shown, so it cannot be got around in any way that hurts anyone, and it
+   lives here.
+   ========================================================================= */
+const hidingOthers = () => !!(ME && ME.hide_others);
+const hidingMine   = () => !!(ME && ME.hide_hours);
+
+/* Everyone whose study is on show, which is everyone except the people who
+   asked not to be — and yourself, always, because private mode hides you from
+   the others, not from your own stats.
+
+   The database already refuses to hand over their sessions, so their hours are
+   genuinely unavailable. But a name still has to be taken off the board: left
+   in, a private person sits at the bottom on 0.0 h, which announces both that
+   they are here and that they have apparently done nothing. Worse than the
+   leak it was meant to close. */
+const visiblePeople = () => DB.profiles.filter(p => p.id === UID || !p.hide_hours);
+
+function paintPrivacy() {
+  if (!$("s-hidehours")) return;
+  $("s-hidehours").checked  = hidingMine();
+  $("s-hideothers").checked = hidingOthers();
+  const note = $("s-privstate");
+  if (note) note.textContent =
+    hidingMine() && hidingOthers() ? "You are hidden from the year group, and it is hidden from you."
+    : hidingMine()  ? "Your hours are yours alone. You can still see how everyone else is going."
+    : hidingOthers()? "You cannot see anybody else's hours. Yours are still on the board for them."
+    : "Everything is visible both ways.";
+  /* the two surfaces that are entirely about other people */
+  const crew = $("p-crew"), home = $("p-home"), solo = $("crew-solo");
+  if (crew) crew.classList.toggle("solo", hidingOthers());
+  if (home) home.classList.toggle("solo", hidingOthers());
+  if (solo) solo.hidden = !hidingOthers();
+}
+
+async function savePrivacy() {
+  const patch = { hide_hours: $("s-hidehours").checked, hide_others: $("s-hideothers").checked };
+  const { error } = await sb.from("profiles").update(patch).eq("id", UID);
+  if (error) { toast("Could not save that — " + error.message, 4600); paintPrivacy(); return; }
+  Object.assign(ME, patch);
+  paintPrivacy();
+  renderAll();
+  /* turning hide_hours off puts the rows back for everyone, but nobody else's
+     client knows to look again until it next reads — so read our own now */
+  await refresh();
+  toast(patch.hide_hours ? "Your hours are hidden from the year group" : "Your hours are visible again");
+}
+
 function renderSetup() {
+  paintPrivacy();
+  if (!$("s-hidehours").dataset.wired) {
+    $("s-hidehours").dataset.wired = "1";
+    $("s-hidehours").addEventListener("change", savePrivacy);
+    $("s-hideothers").addEventListener("change", savePrivacy);
+  }
   $("s-name").value = ME.display_name || "";
   $("s-colour").value = ME.colour || "#2FCFA6";
   $("s-avpreview").outerHTML = avatarHTML(ME, "xl").replace('class="av xl"', 'class="av xl" id="s-avpreview"');
@@ -3320,6 +3492,9 @@ const CHAT_TIERS = [
   { at: 1, cls: "t1" }
 ];
 function chatTier(uid) {
+  /* Somebody else's hours are exactly what this person asked not to see. Their
+     own still show, because that is their number and it is the point. */
+  if (uid !== UID && hidingOthers()) return { cls: null, hours: 0 };
   const h = hoursFor(uid, todayISO());
   for (const t of CHAT_TIERS) if (h >= t.at) return { cls: t.cls, hours: h };
   return { cls: null, hours: h };

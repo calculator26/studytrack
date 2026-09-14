@@ -721,6 +721,62 @@ begin
 end $$;
 
 -- ============================================================
+--  PRIVATE MODE
+-- ------------------------------------------------------------
+--  Two separate switches, because they are two separate wishes:
+--    hide_hours  — nobody else sees what I do
+--    hide_others — I do not see what anybody else does
+--
+--  Only the first needs the database. The second decides what one
+--  person is shown and cannot hurt anybody, so it lives in the app.
+--  The first has to be here: the anon key is public, so a rule kept
+--  in the browser is a rule anyone can skip.
+--
+--  Everything the year group sees about somebody's study is built
+--  from these two tables, so hiding the rows hides it everywhere at
+--  once — leaderboard, charts, streaks, feed, live strip, and the
+--  hours beside a name in chat. crew_daily() and the rest run as the
+--  caller, so they inherit this without being changed.
+-- ============================================================
+alter table public.profiles add column if not exists hide_hours  boolean not null default false;
+alter table public.profiles add column if not exists hide_others boolean not null default false;
+
+-- The subquery is over profiles, which is a few hundred rows and uncorrelated,
+-- so it is evaluated once per query rather than once per session row.
+drop policy if exists "read all" on public.sessions;
+create policy "read all" on public.sessions for select to authenticated
+using (
+  user_id = auth.uid()
+  or public.is_admin()
+  or user_id not in (select id from public.profiles where hide_hours)
+);
+
+drop policy if exists "read all" on public.live_timers;
+create policy "read all" on public.live_timers for select to authenticated
+using (
+  user_id = auth.uid()
+  or public.is_admin()
+  or user_id not in (select id from public.profiles where hide_hours)
+);
+
+-- ============================================================
+--  EMAILS IN THE CONSOLE
+-- ------------------------------------------------------------
+--  Emails live in auth.users, which the app cannot read. This hands
+--  back only the address, only to an administrator, and returns
+--  nothing at all to anybody else.
+-- ============================================================
+create or replace function public.admin_emails()
+returns table (id uuid, email text)
+language sql stable security definer set search_path = public
+as $$
+  select u.id, u.email::text from auth.users u where public.is_admin();
+$$;
+
+revoke execute on function public.admin_emails() from public, anon;
+grant  execute on function public.admin_emails() to authenticated;
+
+-- ============================================================
 --  CREW ROLLUPS
 -- ------------------------------------------------------------
 --  Every crew-wide statistic in the app — hours, streaks, the

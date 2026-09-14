@@ -60,9 +60,24 @@ function admAvatar(p) {
   if (p && p.avatar_url) return `<span class="adm-av"><img src="${esc(p.avatar_url)}" alt=""></span>`;
   return `<span class="adm-av" style="background:${esc(c)}">${esc(initials(p && p.display_name))}</span>`;
 }
+/* Emails live in auth.users, which the app itself cannot read. admin_emails()
+   hands back the address and nothing else, and only to an administrator —
+   anybody else calling it gets an empty set. Loaded with the console rather
+   than with the app, so an ordinary session never carries them at all. */
+let ADM_EMAIL = {};
+async function admLoadEmails() {
+  const { data, error } = await sb.rpc("admin_emails");
+  if (error) return;
+  ADM_EMAIL = {};
+  (data || []).forEach(r => { ADM_EMAIL[r.id] = r.email; });
+}
+const admEmail = id => ADM_EMAIL[id] || "";
+
 function admWho(id) {
   const p = profileOf(id);
-  return `<span class="adm-who">${admAvatar(p)}<span class="nm">${esc(p.display_name)}</span></span>`;
+  const mail = admEmail(id);
+  return `<span class="adm-who">${admAvatar(p)}<span class="nm">${esc(p.display_name)}${
+    mail ? `<span class="adm-mail">${esc(mail)}</span>` : ""}</span></span>`;
 }
 const admSessions = uid => admAll().filter(s => s.user_id === uid);
 const admHours = list => list.reduce((a, s) => a + s.minutes / 60, 0);
@@ -193,7 +208,7 @@ async function openAdmin() {
   $("adm").hidden = false;
   document.body.style.overflow = "hidden";
   renderAdmin();                      /* frame first, so it does not sit blank */
-  await Promise.all([admLoadSessions(), admLoadChat()]);
+  await Promise.all([admLoadSessions(), admLoadChat(), admLoadEmails()]);
   if (ADM.open) renderAdmin();
 }
 function closeAdmin() {
@@ -487,6 +502,8 @@ function admMembers() {
         <td><div class="adm-act">
           <button class="adm-btn sm" data-admprofile="${esc(p.id)}">View</button>
           <button class="adm-btn sm" data-admedituser="${esc(p.id)}">Edit</button>
+          ${DB.timers.some(t => t.user_id === p.id)
+            ? `<button class="adm-btn sm danger" data-admtimer="${esc(p.id)}">Stop timer</button>` : ""}
           <button class="adm-btn sm danger" data-admwipe="${esc(p.id)}"
             ${ss.length ? "" : "disabled"}>Clear sessions</button>
           <button class="adm-btn sm danger" data-admkill="${esc(p.id)}"

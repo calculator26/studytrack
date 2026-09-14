@@ -192,6 +192,8 @@
 
   <!-- ---------- HOME ---------- -->
   <section class="panel on" id="p-home">
+    <div class="countdown mb16" id="countdown" hidden></div>
+
     <div class="card mb16" id="live-card">
       <header><div><h2>Studying right now</h2><div class="sub">Live across the peloton. Timers update as they run.</div></div></header>
       <div class="body"><div class="livestrip" id="livestrip"></div></div>
@@ -281,6 +283,13 @@
 
   <!-- ---------- CREW ---------- -->
   <section class="panel" id="p-crew">
+    <div class="card mb16 solocard" id="crew-solo" hidden><div class="solonote">
+      <strong>You have other people's hours hidden</strong>
+      Everything here is about how the rest of the year group is going, so there is nothing
+      to show you. Your own figures are all on <b>Today</b> and <b>My stats</b>, exactly as
+      they were. Turn it back on in <b>Setup → Private mode</b> whenever you want.
+    </div></div>
+
     <div class="card mb16">
       <header>
         <div><h2>Leaderboard</h2><div class="sub" id="lb-sub">—</div></div>
@@ -442,6 +451,28 @@
           </div>
           <div class="note" style="margin-top:14px">A goal of 0 marks a rest day, which never breaks a streak.</div>
         </div>
+      </div>
+    </div>
+
+    <div class="card mb16">
+      <header><div><h2>Private mode</h2>
+        <div class="sub">Off for everyone by default. These are two separate switches because they are two separate wishes — you can take either one without the other.</div></div></header>
+      <div class="body">
+        <label class="privrow">
+          <input type="checkbox" id="s-hidehours">
+          <div>
+            <div class="privname">Hide my hours from everyone else</div>
+            <div class="privwhy">You come off the leaderboard, the charts, the activity feed and the live strip, and your hours stop appearing beside your name in chat. Your own stats, streaks and goals all carry on working exactly as they do now — you just keep them to yourself. You can still talk in chat and still get nudged.</div>
+          </div>
+        </label>
+        <label class="privrow">
+          <input type="checkbox" id="s-hideothers">
+          <div>
+            <div class="privname">Hide everyone else's hours from me</div>
+            <div class="privwhy">The Peloton page, the live strip and the hours in chat go away. Nothing about you changes for anybody else — this one is only about what you are shown. For when the comparison is more pressure than push.</div>
+          </div>
+        </label>
+        <div class="note" style="margin-top:14px" id="s-privstate">Everything is visible both ways.</div>
       </div>
     </div>
 

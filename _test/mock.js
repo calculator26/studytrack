@@ -22,6 +22,9 @@
     { id: uid(4), display_name: "Tom Beckett",    colour: "#C9A227", onboarded: true, default_goal: 2, weekday_goals: [2,2,2,2,2,4,4] }
   ];
   people.forEach((p, i) => p.created_at = joined(30 - i * 2));
+  people.forEach(p => { p.hide_hours = false; p.hide_others = false; });
+  const EMAIL = {};
+  people.forEach(p => { EMAIL[p.id] = p.display_name.toLowerCase().replace(/[^a-z]+/g, ".") + "@student.knox.nsw.edu.au"; });
   T.profiles = people;
 
   /* Reminder prefs for the signed-in stand-in, so the Study reminders card
@@ -148,7 +151,17 @@
       const stamp = new Date().toISOString();
       T.live_timers.forEach(r => { if (r.user_id !== ME) r.updated_at = stamp; });
     }
+    /* Stands in for the row level policy on these two tables: somebody with
+       hide_hours on is invisible to everyone but themselves and an admin. The
+       real rule is in the database — this is only so the behaviour can be
+       exercised locally. */
+    const isAdminHere = !/admin=0/.test(location.search);
     let rows = T[table] ? T[table].slice() : [];
+    if ((table === "sessions" || table === "live_timers") && !isAdminHere) {
+      const hidden = {};
+      T.profiles.forEach(p => { if (p.hide_hours && p.id !== ME) hidden[p.id] = 1; });
+      rows = rows.filter(r => !hidden[r.user_id]);
+    }
     const filters = [];
     let sort = null, cap = null, embed = false, orExpr = "";
     const api = {
@@ -328,7 +341,11 @@
             const nameOf = id => { const x = T.subjects.find(v => v.id === id); return x ? x.name : null; };
             const norm = n => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
             const per = {};
+            /* same rule the policy applies: hidden from everyone but themselves */
+            const blocked = {};
+            T.profiles.forEach(x => { if (x.hide_hours && x.id !== ME) blocked[x.id] = 1; });
             T.sessions.forEach(r => {
+              if (blocked[r.user_id]) return;
               if (key) { const n = nameOf(r.subject_id); if (!n || norm(n) !== key) return; }
               const u = (per[r.user_id] = per[r.user_id] || { days: {}, first: null, m: 0, n: 0 });
               if (!u.first || r.day < u.first) u.first = r.day;
@@ -387,6 +404,11 @@
             const id = uid(1300 + T.messages.length);
             T.messages.push({ id, user_id: ME, body: txt, created_at: new Date().toISOString() });
             return Promise.resolve({ data: { ok: true, id }, error: null });
+          }
+          if (name === "admin_emails") {
+            if (/admin=0/.test(location.search)) return Promise.resolve({ data: [], error: null });
+            return Promise.resolve({ error: null,
+              data: T.profiles.map(p => ({ id: p.id, email: EMAIL[p.id] || "" })) });
           }
           if (name === "is_admin") return Promise.resolve({ data: !/admin=0/.test(location.search), error: null });
           if (name === "admin_delete_user") {

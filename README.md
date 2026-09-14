@@ -361,6 +361,39 @@ re-reading anything; a top-up read once a minute tidies up behind it.
 The practical effect, measured on the real database: a routine update went from about
 **284 KB to 2.4 KB**, and a cold start from 284 KB to about 47 KB.
 
+### Private mode
+Two switches in **Setup**, both off for everyone by default, and deliberately separate
+because they are two different wishes.
+
+**Hide my hours from everyone else.** You come off the leaderboard, the charts, the
+activity feed and the live strip, and your hours stop appearing beside your name in chat.
+Your own stats, streaks and goals carry on working exactly as before — you just keep them
+to yourself. You can still talk in chat and still be nudged. This one is enforced by row
+level security on `sessions` and `live_timers`, not by the app: the anon key is public, so
+a rule kept in the browser is a rule anyone can skip. An administrator can still see your
+sessions, because moderation would be impossible otherwise.
+
+**Hide everyone else's hours from me.** The Peloton page, the live strip and the hours in
+chat go away. Nothing about you changes for anyone else. For when the comparison is more
+pressure than push.
+
+### Countdowns
+Today carries two: **Valedictory**, and **English Paper 1** — the date for which is read
+out of the catalogue rather than typed in a second place, so it cannot drift from NESA's
+timetable. Either card disappears once its day has passed, and once both have gone the
+space says the HSC is underway.
+
+### Timers that look after themselves
+A timer left running overnight is the commonest way this app produces a wrong number, so
+one that has been going **five hours** pauses itself and clamps to that figure — past any
+real unbroken sitting, well short of a night's sleep, and still editable before you save.
+
+A paused timer stops checking in, which is what makes it fade off the **Studying right
+now** strip by itself: a running timer has to have reported in the last five minutes, a
+paused one is shown for thirty and then goes quiet. A session paused yesterday lunchtime
+no longer sits between two people who are actually working. Administrators can also clear
+anyone's timer outright, from **Members** in the console.
+
 ### Chat
 A fifth tab, and one room for the whole year group. Open it and you are in it — there is
 nothing to join and nothing to choose. A dot appears on the tab when somebody has said
