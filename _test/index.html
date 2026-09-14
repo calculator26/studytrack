@@ -433,15 +433,30 @@
 
     <div class="card mb16">
       <header><div><h2>Subjects and areas</h2>
-        <div class="sub">Subjects are your courses. Areas are what you actually sit down and revise inside them. Target hours and current mark are optional but make your stats far more useful.</div></div>
-        <button class="btn" id="s-frompicker">Add from Knox list</button></header>
+        <div class="sub">Subjects are your courses. Areas are what you actually sit down and revise inside them. Target hours and current mark are optional but make your stats far more useful.</div></div></header>
       <div class="body">
-        <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end;margin-bottom:6px">
-          <div><label class="fl" for="s-subname">New subject</label><input type="text" id="s-subname" placeholder="Subject name"></div>
-          <div><label class="fl" for="s-subexam">Exam date</label><input type="date" id="s-subexam"></div>
-          <div><label class="fl">&nbsp;</label><input type="color" id="s-subcolour" value="#3E7CA6"></div>
-          <div><button class="btn" id="s-addsub">Add subject</button></div>
+        <!-- The Knox list is the way in. Typing a subject by hand still works
+             exactly as it did, but it is the exception now rather than the
+             first thing on screen: a hand-typed subject brings no exam dates
+             and no course sections with it, and most people want both. -->
+        <button class="btn" id="s-frompicker" style="width:100%;justify-content:center">Choose from the Knox subject list</button>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:8px">
+          Each subject arrives with its 2026 HSC exam dates and its course sections already filled in. Rename, delete or add to any of it afterwards.</div>
+
+        <div style="margin-top:14px;padding-top:13px;border-top:1px solid var(--rule-soft)">
+          <button class="btn ghost sm" id="s-manualtoggle" aria-expanded="false" aria-controls="s-manual">
+            Not on the list? Type one in by hand</button>
+          <div id="s-manual" hidden style="margin-top:12px">
+            <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end;margin-bottom:6px">
+              <div><label class="fl" for="s-subname">New subject</label><input type="text" id="s-subname" placeholder="Subject name"></div>
+              <div><label class="fl" for="s-subexam">Exam date</label><input type="date" id="s-subexam"></div>
+              <div><label class="fl">&nbsp;</label><input type="color" id="s-subcolour" value="#3E7CA6"></div>
+              <div><button class="btn" id="s-addsub">Add subject</button></div>
+            </div>
+            <div style="font-size:11.5px;color:var(--ink-soft)">No exam date or course sections come with a subject typed in by hand — you can fill both in yourself below.</div>
+          </div>
         </div>
+
         <div id="s-sublist" style="margin-top:16px"></div>
       </div>
     </div>

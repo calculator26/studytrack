@@ -81,10 +81,15 @@ let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
    the cross-tab listener both touch it, and both can run before the bottom of
    this file has been reached. */
 let timerLive = false;
-/* When a timer button was last pressed here. A read that set off before that
-   press cannot be trusted to say whether your row still exists, so it is not
-   allowed to reinstate a timer you have just stopped. */
-let timerTouched = 0;
+/* When this tab last wrote to its live_timers row, and how many of those
+   writes are still in the air. A read that set off before a write finished
+   cannot say whether the row still exists — it may have been answered from
+   before the write landed — so it is never allowed to reinstate a timer you
+   have just stopped. Getting this wrong resurrects a session the moment you
+   finish it. */
+let timerTouched = 0, timerWrites = 0;
+function timerWriteStart() { timerWrites++; timerTouched = Date.now(); }
+function timerWriteEnd()   { timerWrites = Math.max(0, timerWrites - 1); timerTouched = Date.now(); }
 
 const profileOf = id => DB.profiles.find(p => p.id === id) || {id, display_name:"Unknown", colour:"#7B8D98"};
 const mySubjects = uid => DB.subjects.filter(s => s.user_id === uid);
@@ -387,7 +392,8 @@ function applyTimers(rows, ticket, readAt) {
    --------------------------------------------------------------------------- */
 function adoptOrphanTimer(readAt) {
   if (localTimer || !UID) return;
-  if (readAt && readAt < timerTouched) return;
+  if (timerWrites > 0) return;                 /* a write is still in the air */
+  if (readAt && readAt < timerTouched) return; /* this read predates it landing */
   const row = DB.timers.find(t => t.user_id === UID);
   if (!row) return;
   localTimer = row;
@@ -869,8 +875,9 @@ if (timerChannel) timerChannel.onmessage = ev => {
 async function pushTimer(beat) {
   if (!localTimer) {
     if (beat) return;             /* nothing of ours to beat for */
-    timerTouched = Date.now();
+    timerWriteStart();
     const { error } = await sb.from("live_timers").delete().eq("user_id", UID);
+    timerWriteEnd();
     if (error) {
       /* The row is still on the table. Saying nothing here is what made the
          old bug so baffling: the card cleared, the crew went on seeing the
@@ -889,7 +896,7 @@ async function pushTimer(beat) {
     updated_at: new Date().toISOString()
   };
 
-  if (!beat) { timerTouched = Date.now(); }
+
 
   /* A press of a button, or a beat with nothing on the table yet to mend.
      A beat may only CREATE a row to repair a start that never reached the
@@ -898,7 +905,9 @@ async function pushTimer(beat) {
      resurrect a timer somebody has already stopped — so an older timer falls
      through to the update below, which lets it find out it is gone. */
   if (!beat || (!timerLive && elapsedMs() <= 10 * 60000)) {
+    if (!beat) timerWriteStart();
     const { error } = await sb.from("live_timers").upsert(row);
+    if (!beat) timerWriteEnd();
     if (!error) timerLive = true;
     if (!beat) announceTimer();
     return;
@@ -933,7 +942,11 @@ $("tm-start").addEventListener("click", async () => {
     const sj = subjById(t.subject_id), ar = t.area_id ? areaById(t.area_id) : null;
     localTimer = { label: ar ? (sj ? sj.name + " · " + ar.name : ar.name) : (sj ? sj.name : "Study"),
       subject_id: t.subject_id, area_id: t.area_id, acc_ms: 0,
-      started_at: new Date().toISOString(), running: true, day: CUR };
+      /* The day this is really happening on, not the one you happen to be
+         looking at. CUR follows the date picker on Today, so starting a timer
+         after scrolling back through last week used to file the hours you are
+         sitting there doing into last week. A stopwatch measures now. */
+      started_at: new Date().toISOString(), running: true, day: todayISO() };
   }
   lastBeat = Date.now(); paintTimer(); startClock(); pushTimer();
 });
@@ -953,7 +966,7 @@ $("tm-stop").addEventListener("click", () => {
   setPair("ms-subj", "ms-area", localTimer.subject_id, localTimer.area_id);
   $("ms-min").value = mins;
   $("ms-note").value = "";
-  $("ms-sub").textContent = hms(elapsedMs()) + " on " + fmtLong(localTimer.day || CUR);
+  $("ms-sub").textContent = hms(elapsedMs()) + " on " + fmtLong(localTimer.day || todayISO());
   $("ov-save").classList.add("on");
   setTimeout(() => $("ms-note").focus(), 60);
 });
@@ -961,22 +974,39 @@ $("ms-discard").addEventListener("click", async () => {
   if (!confirm("Discard this session without logging it?")) return;
   localTimer = null; await pushTimer(); $("ov-save").classList.remove("on"); paintTimer();
 });
+let savingSession = false;
 $("ms-save").addEventListener("click", async () => {
+  if (savingSession) return;            /* a double tap must not log it twice */
   const t = readPair("ms-subj", "ms-area");
-  const day = (localTimer && localTimer.day) || CUR;
-  await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim());
+  const day = (localTimer && localTimer.day) || todayISO();
+  savingSession = true;
+  $("ms-save").disabled = true;
+  let saved = false;
+  try { saved = await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim()); }
+  finally { savingSession = false; $("ms-save").disabled = false; }
+
+  /* Nothing was written, so the timer stays exactly as it was and the sheet
+     stays open with the note still in it. You can fix the minutes, or just
+     press save again once the connection is back. */
+  if (!saved) return;
+
   localTimer = null; await pushTimer();
   $("ov-save").classList.remove("on"); paintTimer();
 });
 
+/* Answers whether the session actually reached the database. Callers that are
+   about to throw away the timer it came from have to know: binning a running
+   timer on the strength of a save that never happened loses the hours for
+   good, and there is nowhere to get them back from. */
 async function addSession(day, target, minutes, note) {
-  if (!minutes || minutes < 1) { toast("Minutes needs to be at least 1"); return; }
+  if (!minutes || minutes < 1) { toast("Minutes needs to be at least 1"); return false; }
   const { error } = await sb.from("sessions").insert({
     user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
     day, minutes, note: note || null });
-  if (error) { toast("Could not save: " + error.message); return; }
+  if (error) { toast("Could not save — " + error.message, 4600); return false; }
   toast("Logged " + f1(minutes / 60) + " h");
   await refresh();
+  return true;
 }
 
 /* ---------- manual add ---------- */
@@ -1716,6 +1746,18 @@ $("s-addsub").addEventListener("click", async () => {
   await refresh(); toast("Subject added");
 });
 $("s-subname").addEventListener("keydown", e => { if (e.key === "Enter") $("s-addsub").click(); });
+
+/* Typing a subject in by hand is folded away until it is asked for, so the
+   Knox list is what you reach first. Once opened it stays open for the rest
+   of the visit — somebody adding one odd subject usually has a second. */
+$("s-manualtoggle").addEventListener("click", () => {
+  const box = $("s-manual"), open = box.hidden;
+  box.hidden = !open;
+  $("s-manualtoggle").setAttribute("aria-expanded", String(open));
+  $("s-manualtoggle").textContent = open
+    ? "Hide the by-hand form" : "Not on the list? Type one in by hand";
+  if (open) $("s-subname").focus();
+});
 
 /* ---------- areas modal ---------- */
 let areaSubject = null;
