@@ -112,7 +112,7 @@ a module, a topic, a paper section, whatever you call it. Areas are optional; yo
 against a subject in general instead. Each area can carry a **target hours** figure and the
 **mark you currently score** in it, which is what makes the personal stats worth reading.
 
-You do not have to type any of it. **Choose from the Knox subject list** — in onboarding, and
+Adding one starts from the Knox list. **Choose from the Knox subject list** — in onboarding, and
 again under Setup — and the subject arrives with its 2026 HSC exam dates and its syllabus
 sections already filled in. English Advanced brings the four modules, Physics brings modules
 5 to 8, Japanese Continuers brings speaking, listening, reading, writing, kanji and grammar.
@@ -255,6 +255,16 @@ steps aside, since two bars with the same button is just noise.
 Who nudged whom is the one thing in the app the crew cannot see. Sessions and
 hours are deliberately public; your nudges are visible only to you and the person
 at the other end.
+
+### What the timer files your hours against
+A timer measures the day you are actually sitting there, not the day you happen
+to be looking at. Scrolling the Today tab back through last week and then starting
+a timer files the hours under today, where they happened. The manual add form is the
+one that logs against the day on screen — that is what it is for.
+
+Finishing only lets go of the timer once the session is safely in the database. If
+the save fails, the sheet stays open with your note in it and the timer keeps running,
+so nothing is lost to a dropped connection.
 
 ### While a session is running
 The browser tab title becomes a live clock — `▶ 12:34 · Study Track` — so a pinned tab
@@ -406,8 +416,9 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |
 
 `_test/index.html` takes a few switches: `?admin=0` signs you in as an ordinary member so you
-can check the console really is invisible, and `?dirty=1` seeds one entry per integrity rule so
-the flagging can be exercised.
+can check the console really is invisible, `?dirty=1` seeds one entry per integrity rule so the
+flagging can be exercised, and `?stuck=1` leaves a timer of your own running for 25 hours so the
+Discard path can be tested from a cold load.
 
 To try it locally without a Supabase project at all, open `_test/index.html` in a browser.
 It runs the whole interface against four fake members and three weeks of invented sessions.
@@ -473,6 +484,13 @@ A background tab is throttled by the browser to roughly one tick a minute and st
 altogether — that is deliberate, and it catches up the moment you come back to it. Because
 every time is worked out from `started_at` rather than counted up, nothing drifts while you
 are away.
+
+**My own timer is stuck and Discard is greyed out** — it should not be any more. Every control
+on the timer card is gated on this tab knowing about your timer, so if the tab ever lost track
+of a row that was still on the server, there was no button left that could remove it. The app
+now takes an orphaned row of yours back off the server within thirty seconds — or instantly on
+a refresh — which lights Discard up again. If a delete is actually refused you get a message
+saying so rather than a card that clears while the crew keeps seeing you study.
 
 **Someone shows as studying who is not** — a running timer heartbeats every 60 seconds. If
 their tab closes, they drop off the live strip about five minutes later.
