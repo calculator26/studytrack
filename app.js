@@ -81,6 +81,10 @@ let localTimer = null, tickHandle = null, pollHandle = null, lastBeat = 0;
    the cross-tab listener both touch it, and both can run before the bottom of
    this file has been reached. */
 let timerLive = false;
+/* When a timer button was last pressed here. A read that set off before that
+   press cannot be trusted to say whether your row still exists, so it is not
+   allowed to reinstate a timer you have just stopped. */
+let timerTouched = 0;
 
 const profileOf = id => DB.profiles.find(p => p.id === id) || {id, display_name:"Unknown", colour:"#7B8D98"};
 const mySubjects = uid => DB.subjects.filter(s => s.user_id === uid);
@@ -360,15 +364,39 @@ async function onSession(session) {
    --------------------------------------------------------------------------- */
 let timersIssued = 0, timersApplied = 0;
 const timersTicket = () => ++timersIssued;
-function applyTimers(rows, ticket) {
+function applyTimers(rows, ticket, readAt) {
   if (ticket <= timersApplied) return false;     /* a fresher read beat us home */
   timersApplied = ticket;
   DB.timers = rows || [];
+  adoptOrphanTimer(readAt);
   return true;
 }
 
+/* ---------------------------------------------------------------------------
+   Adopting a timer of your own that this tab has lost track of.
+
+   Every control on the timer card is gated on localTimer being set — Discard
+   included. So if a row of yours is sitting on the server while this tab
+   believes nothing is running, there is no way left to stop it: Discard is
+   greyed out, and the crew carries on seeing you "studying" for as long as the
+   row survives. That is how a timer ends up stuck for twenty-five hours.
+
+   The row is the truth, so take it back rather than leaving it unreachable.
+   A read that began before your last button press is ignored, so the poll
+   that was already in flight when you pressed Discard cannot undo it.
+   --------------------------------------------------------------------------- */
+function adoptOrphanTimer(readAt) {
+  if (localTimer || !UID) return;
+  if (readAt && readAt < timerTouched) return;
+  const row = DB.timers.find(t => t.user_id === UID);
+  if (!row) return;
+  localTimer = row;
+  timerLive = true;                 /* we just read it, so it is on the table */
+  try { paintTimer(); startClock(); } catch (e) { /* page not built yet */ }
+}
+
 async function loadAll() {
-  const ticket = timersTicket();
+  const ticket = timersTicket(), readAt = Date.now();
   const [pr, su, ar, se, go, ti] = await Promise.all([
     sb.from("profiles").select("*"),
     sb.from("subjects").select("*").order("position"),
@@ -379,7 +407,7 @@ async function loadAll() {
   ]);
   DB.profiles = pr.data || []; DB.subjects = su.data || []; DB.areas = ar.data || [];
   DB.sessions = se.data || []; DB.goals = go.data || [];
-  applyTimers(ti.data, ticket);
+  applyTimers(ti.data, ticket, readAt);
   DB.profiles.forEach(p => {
     if (typeof p.weekday_goals === "string") { try { p.weekday_goals = JSON.parse(p.weekday_goals); } catch (e) { p.weekday_goals = null; } }
   });
@@ -395,11 +423,11 @@ async function refresh(rerender) {
    live areas, leaving the rest of the page — and anything you are typing — alone. */
 async function pollTimers() {
   if (!sb || !UID || document.hidden) return;
-  const ticket = timersTicket();
+  const ticket = timersTicket(), readAt = Date.now();
   try {
     const { data, error } = await sb.from("live_timers").select("*");
     if (error) return;
-    if (!applyTimers(data, ticket)) return;   /* stale by the time it arrived */
+    if (!applyTimers(data, ticket, readAt)) return;   /* stale by the time it arrived */
     paintLive();          /* the signature decides whether the DOM actually changes */
   } catch (e) { /* a dropped poll is not worth bothering anyone about */ }
 }
@@ -841,7 +869,16 @@ if (timerChannel) timerChannel.onmessage = ev => {
 async function pushTimer(beat) {
   if (!localTimer) {
     if (beat) return;             /* nothing of ours to beat for */
-    await sb.from("live_timers").delete().eq("user_id", UID);
+    timerTouched = Date.now();
+    const { error } = await sb.from("live_timers").delete().eq("user_id", UID);
+    if (error) {
+      /* The row is still on the table. Saying nothing here is what made the
+         old bug so baffling: the card cleared, the crew went on seeing the
+         timer, and nothing on screen admitted the difference. The next poll
+         adopts the row back so Discard can be pressed again. */
+      toast("Could not stop the timer — " + error.message, 4600);
+      return;
+    }
     timerLive = false;
     announceTimer();
     return;
@@ -852,8 +889,15 @@ async function pushTimer(beat) {
     updated_at: new Date().toISOString()
   };
 
-  /* A press of a button, or a beat with nothing on the table yet to mend. */
-  if (!beat || !timerLive) {
+  if (!beat) { timerTouched = Date.now(); }
+
+  /* A press of a button, or a beat with nothing on the table yet to mend.
+     A beat may only CREATE a row to repair a start that never reached the
+     server, which it does within the minute. Past that the server is the
+     authority, and creating a row again means a tab left open on a phone can
+     resurrect a timer somebody has already stopped — so an older timer falls
+     through to the update below, which lets it find out it is gone. */
+  if (!beat || (!timerLive && elapsedMs() <= 10 * 60000)) {
     const { error } = await sb.from("live_timers").upsert(row);
     if (!error) timerLive = true;
     if (!beat) announceTimer();
@@ -863,14 +907,23 @@ async function pushTimer(beat) {
   const { data, error } = await sb.from("live_timers")
     .update(row).eq("user_id", UID).select("user_id");
   /* An error is the network talking, not a verdict — keep the timer and try
-     again on the next beat. Nothing back, with no error, is a real answer:
-     the row has gone, so this session was finished somewhere else. */
-  if (!error && Array.isArray(data) && !data.length) {
-    localTimer = null;
-    timerLive = false;
-    paintTimer();
-    toast("That session was finished in another tab");
-  }
+     again on the next beat. */
+  if (error || !Array.isArray(data) || data.length) return;
+
+  /* Nothing back, with no error, usually means the row has gone. But a write
+     the database refuses also returns no rows and no error, and treating that
+     as "finished elsewhere" is what stranded the row in the first place: the
+     card cleared, the row stayed, and every button that could have removed it
+     went grey. So ask whether it is really gone before believing it. */
+  const { data: still, error: checkErr } = await sb.from("live_timers")
+    .select("user_id").eq("user_id", UID);
+  if (checkErr) return;                         /* ask again on the next beat */
+  if (still && still.length) return;            /* still there — the write was refused */
+
+  localTimer = null;
+  timerLive = false;
+  paintTimer();
+  toast("That session was finished in another tab");
 }
 $("tm-start").addEventListener("click", async () => {
   if (localTimer) { localTimer.running = true; localTimer.started_at = new Date().toISOString(); }

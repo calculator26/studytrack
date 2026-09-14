@@ -93,6 +93,14 @@
     { id: uid(901), from_user: uid(3), to_user: ME, seen_at: null,
       created_at: new Date(Date.now() - 3 * 60000).toISOString() });
 
+  /* ?stuck=1 reproduces the timer nobody could get rid of: a row of YOUR OWN
+     left running for 25 hours. Discarding it has to work from a cold load. */
+  if (/stuck=1/.test(location.search)) {
+    T.live_timers.push({ user_id: ME, label: "English Advanced", subject_id: null, area_id: null,
+      started_at: new Date(Date.now() - 25 * 3600e3).toISOString(), acc_ms: 0, running: true,
+      updated_at: new Date(Date.now() - 25 * 3600e3).toISOString() });
+  }
+
   T.live_timers.push({ user_id: uid(3), label: "Module B — Eliot · Write to time", subject_id: null, area_id: null,
     started_at: new Date(Date.now() - 22 * 60000).toISOString(), acc_ms: 0, running: true,
     updated_at: new Date().toISOString() });

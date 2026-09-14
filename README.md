@@ -383,8 +383,9 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `_test/` | A mock Supabase client for opening the app locally with fake data. Not needed in production — delete it if you want. |
 
 `_test/index.html` takes a few switches: `?admin=0` signs you in as an ordinary member so you
-can check the console really is invisible, and `?dirty=1` seeds one entry per integrity rule so
-the flagging can be exercised.
+can check the console really is invisible, `?dirty=1` seeds one entry per integrity rule so the
+flagging can be exercised, and `?stuck=1` leaves a timer of your own running for 25 hours so the
+Discard path can be tested from a cold load.
 
 To try it locally without a Supabase project at all, open `_test/index.html` in a browser.
 It runs the whole interface against four fake members and three weeks of invented sessions.
@@ -450,6 +451,13 @@ A background tab is throttled by the browser to roughly one tick a minute and st
 altogether — that is deliberate, and it catches up the moment you come back to it. Because
 every time is worked out from `started_at` rather than counted up, nothing drifts while you
 are away.
+
+**My own timer is stuck and Discard is greyed out** — it should not be any more. Every control
+on the timer card is gated on this tab knowing about your timer, so if the tab ever lost track
+of a row that was still on the server, there was no button left that could remove it. The app
+now takes an orphaned row of yours back off the server within thirty seconds — or instantly on
+a refresh — which lights Discard up again. If a delete is actually refused you get a message
+saying so rather than a card that clears while the crew keeps seeing you study.
 
 **Someone shows as studying who is not** — a running timer heartbeats every 60 seconds. If
 their tab closes, they drop off the live strip about five minutes later.
