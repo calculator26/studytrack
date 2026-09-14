@@ -15,6 +15,58 @@ try {
   }
 } catch (e) { console.error(e); }
 
+/* ---------------------------------------------------------------------------
+   Reads that would undo a write.
+
+   A full read takes a moment to come back, and one that set off before you
+   pressed delete still has the row in it. Applying that answer puts the row
+   straight back on the screen — which is exactly what deleting a session
+   looked like: gone, then back a second later, apparently at random.
+
+   So every write to a table the app keeps a copy of stamps a clock as it
+   lands, loadAll() notes when it set off, and a read older than the last
+   write is thrown away and asked again rather than believed.
+
+   Wrapped here, once, rather than at each of the twenty-nine places that
+   write something: the one that gets forgotten is the one that brings this
+   back. Reads are handed through untouched — only the four writing verbs
+   are wrapped, and each is still executed exactly once.
+   --------------------------------------------------------------------------- */
+const CACHED_TABLES = ["profiles", "subjects", "areas", "sessions", "goals"];
+const WRITE_VERBS   = ["insert", "update", "upsert", "delete"];
+let dataTouched = 0;
+
+if (sb) {
+  const rawFrom = sb.from.bind(sb);
+  /* Follows the chain — .eq(), .select(), .single() all hand back something
+     else to carry on with — and stamps the clock when the whole thing settles. */
+  const follow = o => (o && typeof o === "object") ? new Proxy(o, {
+    get(t, k) {
+      if (k === "then" && typeof t.then === "function") {
+        return (res, rej) => t.then(
+          v => { dataTouched = Date.now(); return v; },
+          e => { dataTouched = Date.now(); throw e; }
+        ).then(res, rej);
+      }
+      const v = Reflect.get(t, k, t);
+      return typeof v === "function" ? (...a) => follow(v.apply(t, a)) : v;
+    }
+  }) : o;
+
+  sb.from = table => {
+    const q = rawFrom(table);
+    if (CACHED_TABLES.indexOf(table) === -1) return q;
+    return new Proxy(q, {
+      get(t, k) {
+        const v = Reflect.get(t, k, t);
+        if (typeof v !== "function") return v;
+        if (WRITE_VERBS.indexOf(k) === -1) return (...a) => v.apply(t, a);   /* reads: untouched */
+        return (...a) => follow(v.apply(t, a));
+      }
+    });
+  };
+}
+
 /* ---------------- tiny helpers ---------------- */
 const $  = id => document.getElementById(id);
 const el = (t, a) => { const n = document.createElementNS("http://www.w3.org/2000/svg", t);
@@ -411,18 +463,37 @@ async function loadAll() {
     sb.from("goals").select("*"),
     sb.from("live_timers").select("*")
   ]);
+  /* Set off before the last write landed, so it cannot know about it. Throwing
+     it away costs one more read; believing it un-deletes things. */
+  if (readAt <= dataTouched) return false;
   DB.profiles = pr.data || []; DB.subjects = su.data || []; DB.areas = ar.data || [];
   DB.sessions = se.data || []; DB.goals = go.data || [];
   applyTimers(ti.data, ticket, readAt);
   DB.profiles.forEach(p => {
     if (typeof p.weekday_goals === "string") { try { p.weekday_goals = JSON.parse(p.weekday_goals); } catch (e) { p.weekday_goals = null; } }
   });
+  return true;
 }
-let refreshing = false;
+/* A refresh asked for while one is already running used to be dropped on the
+   floor — which is how a delete could finish, ask for the repaint that would
+   have shown it gone, and get nothing. Now it is remembered and run after,
+   and a read discarded as stale asks again by the same route. */
+let refreshing = false, refreshQueued = false;
 async function refresh(rerender) {
-  if (refreshing) return; refreshing = true;
-  try { await loadAll(); ME = DB.profiles.find(p => p.id === UID) || ME; if (rerender !== false) renderAll(); }
-  finally { refreshing = false; }
+  if (refreshing) { refreshQueued = true; return; }
+  refreshing = true;
+  try {
+    let tries = 0;
+    do {
+      refreshQueued = false;
+      if (await loadAll()) {
+        ME = DB.profiles.find(p => p.id === UID) || ME;
+        if (rerender !== false) renderAll();
+      } else {
+        refreshQueued = true;            /* stale read — go round again */
+      }
+    } while (refreshQueued && ++tries < 5);
+  } finally { refreshing = false; refreshQueued = false; }
 }
 /* live_timers is a handful of rows, so it is cheap to ask for it often. This is
    deliberately NOT a full refresh: it swaps in the timers and repaints the two
@@ -1235,9 +1306,25 @@ function entryHTML(s, withWho) {
 }
 /* Every list of entries — today, my log, the feed, a profile — gets the same
    two buttons on your own rows, so a session can be fixed wherever you find it. */
+/* Take it off the screen the moment the database says it has gone, instead of
+   waiting for the next full read to come back — which is a second or two if
+   one was already in the air. The read that follows only confirms it. */
+function dropSessionLocally(id) {
+  const i = DB.sessions.findIndex(s => s.id === id);
+  if (i >= 0) DB.sessions.splice(i, 1);
+}
+
 function wireEntryActions(scope) {
   scope.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
-    await sb.from("sessions").delete().eq("id", b.dataset.del); await refreshEntries();
+    if (b.disabled) return;                      /* no deleting the same row twice */
+    b.disabled = true;
+    const { error } = await sb.from("sessions").delete().eq("id", b.dataset.del);
+    /* This used to be thrown away, so a refused delete looked exactly like a
+       successful one: the row sat there and nobody was told why. */
+    if (error) { b.disabled = false; toast("Could not delete: " + error.message, 4600); return; }
+    dropSessionLocally(b.dataset.del);
+    renderAll();
+    await refreshEntries();
   }));
   scope.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => openEdit(b.dataset.edit)));
 }
@@ -1311,6 +1398,8 @@ $("e-del").addEventListener("click", async () => {
   closeEdit();
   const { error } = await sb.from("sessions").delete().eq("id", id);
   if (error) { toast("Could not delete: " + error.message); return; }
+  dropSessionLocally(id);
+  renderAll();
   toast("Session deleted");
   await refreshEntries();
   if (typeof ADM !== "undefined" && ADM.open) renderAdmin();
