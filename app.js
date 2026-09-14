@@ -1360,6 +1360,24 @@ $("e-save").addEventListener("click", async () => {
 const subjKey   = n => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
 const subjLoose = n => subjKey(n).replace(/[^a-z0-9]/g, "");
 
+/* Two names compared a word at a time. An exact word scores one, otherwise
+   they score on how much of their opening they share, which is what nearly
+   every abbreviation in a subject list turns out to be — maths/mathematics,
+   tech/technology. Measured from both sides so a longer name is not rewarded
+   simply for having more words to match against. */
+const subjTokens = n => subjKey(n).split(/[^a-z0-9]+/).filter(Boolean);
+function tokenSim(a, b) {
+  if (a === b) return 1;
+  let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i / Math.max(a.length, b.length);
+}
+function nameSim(a, b) {
+  const A = subjTokens(a), B = subjTokens(b);
+  if (!A.length || !B.length) return 0;
+  const side = (x, y) => x.reduce((n, t) => n + Math.max(...y.map(u => tokenSim(t, u))), 0) / x.length;
+  return (side(A, B) + side(B, A)) / 2;
+}
+
 /* subject id -> normalised name, built in one pass. Worth it: the alternative
    is a linear find through every subject in the crew for every session. */
 function subjectKeyMap() {
@@ -1389,6 +1407,21 @@ function subjectGroups() {
   /* differing only by spacing or punctuation is almost certainly one subject
      typed two ways, and worth saying out loud */
   out.forEach(e => e.nearMisses = out.filter(o => o !== e && o.loose === e.loose));
+
+  /* That only catches punctuation, and the drift that actually happens is
+     abbreviation: "Maths Standard 2" against "Mathematics Standard 2". So a
+     name the catalogue does not know is measured against the ones it does,
+     and if one course is a clear winner it is offered as the thing you
+     probably meant. A tie is left alone — "German X" could be Continuers or
+     Extension and only the person who wrote it knows which. */
+  out.forEach(e => {
+    e.suggest = null;
+    if (e.inCatalogue) return;
+    const scored = CAT.subjects.map(c => ({ name: c.name, score: nameSim(e.label, c.name) }))
+                               .sort((a, b) => b.score - a.score);
+    if (scored.length && scored[0].score >= 0.6 &&
+        (scored.length < 2 || scored[0].score - scored[1].score >= 0.08)) e.suggest = scored[0].name;
+  });
   return out.sort((a, b) => b.takers.size - a.takers.size || a.label.localeCompare(b.label));
 }
 
@@ -1493,7 +1526,7 @@ function paintLbControls(groups) {
 
 /* Says out loud when the subject you picked has a twin nobody has noticed, or
    is spelt in a way that will never match anyone else's. */
-function paintLbNote(group) {
+function paintLbNote(group, groups) {
   const note = $("lb-note");
   if (!note) return;
   const bits = [];
@@ -1503,8 +1536,18 @@ function paintLbNote(group) {
     (group.nearMisses || []).forEach(n => bits.push(
       `Also spelt <b>${esc(n.label)}</b> by ${n.takers.size === 1 ? "one person, who is" : n.takers.size + " people, who are"} ` +
       `ranked separately. Renaming one to match would put everyone on the same board.`));
-    if (!group.inCatalogue) bits.push(
-      `<b>${esc(group.label)}</b> is not a catalogue subject name, so it only matches people who spell it exactly the same way.`);
+    if (!group.inCatalogue) {
+      /* if the near-miss line above already named it, do not say it twice */
+      const said = (group.nearMisses || []).some(n => group.suggest && n.key === subjKey(group.suggest));
+      const other = (group.suggest && !said) ? (groups || []).find(g => g.key === subjKey(group.suggest)) : null;
+      if (said) group = Object.assign({}, group, { suggest: null });
+      bits.push(`<b>${esc(group.label)}</b> is not a catalogue subject name, so it only matches people who spell it exactly the same way.` +
+        (group.suggest
+          ? ` Did you mean <b>${esc(group.suggest)}</b>${
+              other ? `, which ${other.takers.size === 1 ? "one person takes" : other.takers.size + " people take"}` : ""
+            }? Renaming would put everyone on the same board.`
+          : ""));
+    }
   }
   note.innerHTML = bits.join("<br>");
   note.hidden = !bits.length;
@@ -1516,7 +1559,7 @@ function renderCrew() {
   const group = LB_SUBJECT ? groups.find(g => g.key === LB_SUBJECT) || null : null;
   if (LB_SUBJECT && !group) LB_SUBJECT = null;
   LB_METRIC = lbMetricFor(LB_METRIC, LB_SUBJECT);
-  paintLbNote(group);
+  paintLbNote(group, groups);
 
   const board = leaderboard(null, { subject: LB_SUBJECT, metric: LB_METRIC });
   const days = rangeDays();

@@ -352,11 +352,18 @@ ranked on hours.
 **A wrinkle worth knowing.** Subjects belong to each person, so your Physics and mine are
 two separate rows, and the only thing tying them together is the name. Spacing and
 capitals are folded together, so `english advanced` and `English Advanced` are one board.
-Anything beyond that cannot be guessed, so it is shown instead of hidden: the picker lists
-how many people take each subject and marks names that are not in the catalogue as
-`custom`, and picking one tells you if it has a near-twin — *"Also spelt Enterprise
-Computing. by one person, who is ranked separately."* Rename either one to put everybody
-on the same board.
+Anything beyond that is shown rather than hidden. The picker lists how many people take
+each subject and marks names the Knox list does not know as `custom`, and picking one
+tells you what it has collided with:
+
+- a twin differing only by punctuation — *"Also spelt Enterprise Computing. by one person,
+  who is ranked separately."*
+- an abbreviation of a real course — *"Maths Standard 2 is not a catalogue subject name.
+  Did you mean Mathematics Standard 2, which 11 people take?"*
+
+Rename either one to put everybody on the same board. Where the guess would be a coin
+toss — `German X` could be Continuers or Extension — nothing is suggested, because only
+the person who typed it knows which they meant.
 
 ### Comparison
 The Crew tab has a podium and a full leaderboard over Today / 7 days / 30 days / all time,
