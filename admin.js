@@ -36,7 +36,8 @@ const ADM = {
   sel:new Set(),              /* bulk selection of session ids */
   audit:[],
   auditLoaded:false,
-  annDraft:""              /* the announcement being composed, kept across repaints */
+  annDraft:"",             /* the announcement being composed, kept across repaints */
+  annLabel:""              /* the badge it will wear; empty means the plain "Admin" */
 };
 
 /* Ask the database, not the browser, whether this person is an admin.
@@ -350,7 +351,22 @@ async function admDeleteMessages(ids) {
    the badge on it.
    --------------------------------------------------------------------------- */
 const ANN_MAX = 1000;
+const ANN_LABEL_MAX = 24;
 const admAnnouncements = () => (ADM.chat || []).filter(m => m.announcement);
+
+/* The slab exactly as the room will get it, built by the room's own annHTML so
+   the preview cannot drift from the thing it is previewing. The delete control
+   is stripped because there is nothing yet to delete. */
+function admAnnPreview() {
+  const txt = (ADM.annDraft || "").trim();
+  if (!txt) return `<div class="adm-empty">Nothing to preview yet.</div>`;
+  return annHTML({
+    id: "preview", user_id: UID, body: txt,
+    mentions: mentionsInText(txt), announcement: true,
+    ann_label: (ADM.annLabel || "").trim() || null,
+    created_at: new Date().toISOString()
+  }).replace(/<button class="ann-del"[\s\S]*?<\/button>/, "");
+}
 
 function admAnnounceView() {
   const past = admAnnouncements();
@@ -361,31 +377,39 @@ function admAnnounceView() {
   <div class="adm-h"><div>
     <h2>Announce</h2>
     <p>Posts into the room as an announcement rather than as you &mdash; its own slab in the chat log,
-       badged and signed. Everyone with the app open sees it at once and it stays in the history like
+       badged and unsigned. Everyone with the app open sees it at once and it stays in the history like
        any other message. Only an administrator can post one, and the ordinary chat box cannot make
        one at all, so the badge is never worn by accident.</p>
   </div></div>
 
   <div class="adm-anngrid">
     <div class="adm-card"><div class="pad">
-      <label class="adm-lbl" for="adm-anntext">What the year group will read</label>
-      <textarea id="adm-anntext" class="adm-in adm-annbox" maxlength="${ANN_MAX}"
-        placeholder="e.g. Trials feedback is up on Canvas. Log the reading you do for it.">${esc(draft)}</textarea>
+      <label class="adm-lbl" for="adm-annlabel">Badge &mdash; what this one is called</label>
+      <input id="adm-annlabel" class="adm-in adm-annlabelin" maxlength="${ANN_LABEL_MAX}"
+        placeholder="Admin" value="${esc(ADM.annLabel || "")}">
+      <div class="adm-sub" style="margin-top:6px">Left empty it reads <b>Admin</b>. Give it a word that
+        says what kind of notice this is &mdash; <b>Timetable</b>, <b>Social justice</b>, <b>Heads up</b>
+        &mdash; and that is what the room sees on this one only.</div>
+
+      <label class="adm-lbl" style="margin-top:18px" for="adm-anntext">What the year group will read</label>
+      <div class="adm-annwrap">
+        <textarea id="adm-anntext" class="adm-in adm-annbox" maxlength="${ANN_MAX}"
+          placeholder="e.g. Trials feedback is up on Canvas. Log the reading you do for it.">${esc(draft)}</textarea>
+        <div class="mentionbox" id="adm-mentionbox" hidden role="listbox" aria-label="Mention somebody"></div>
+      </div>
       <div class="adm-annfoot">
-        <span class="adm-annleft${left < 80 ? " near" : ""}">${left} left</span>
+        <span class="adm-annleft${left < 80 ? " near" : ""}" id="adm-annleft">${left} left</span>
         <button class="adm-btn primary" id="adm-annsend"${draft.trim() ? "" : " disabled"}>Post announcement</button>
       </div>
-      <div class="adm-sub">Sent the moment you confirm &mdash; there is no draft anyone else can see, and
-        the only way to take one back is to delete it below. ${"\u2318"}/Ctrl + Enter posts it.</div>
+      <div class="adm-sub">Type <b>@</b> to tag somebody &mdash; they get the same mention bar they would
+        from a message, and you can tag yourself, which is the only way to put a contact on a notice
+        that carries no name. Sent the moment you confirm; the only way to take one back is to delete
+        it below. ${"\u2318"}/Ctrl + Enter posts it.</div>
     </div></div>
 
     <div class="adm-card"><div class="pad">
       <label class="adm-lbl">How it lands in chat</label>
-      <div class="adm-annprev">${draft.trim()
-        ? annHTML({ id: "preview", user_id: UID, body: draft.trim(), mentions: [],
-                    created_at: new Date().toISOString(), announcement: true })
-            .replace(/<button class="ann-del"[\s\S]*?<\/button>/, "")
-        : `<div class="adm-empty">Nothing to preview yet.</div>`}</div>
+      <div class="adm-annprev" id="adm-annprev">${admAnnPreview()}</div>
     </div></div>
   </div>
 
@@ -396,9 +420,11 @@ function admAnnounceView() {
   </div></div>
 
   ${past.length ? `<div class="adm-card"><div class="adm-scroll"><table class="adm-t">
-    <thead><tr><th class="l">When</th><th class="l">By</th><th class="l">Announcement</th><th></th></tr></thead>
+    <thead><tr><th class="l">When</th><th class="l">Badge</th><th class="l">By</th>
+      <th class="l">Announcement</th><th></th></tr></thead>
     <tbody>${past.map(m => `<tr>
       <td class="l adm-mono">${esc(new Date(m.created_at).toLocaleString())}</td>
+      <td class="l"><span class="adm-flag warn">${esc(annLabel(m))}</span></td>
       <td class="l">${admWho(m.user_id)}</td>
       <td class="l"><div class="adm-note" title="${esc(m.body)}">${esc(m.body)}</div></td>
       <td><div class="adm-act">
@@ -407,27 +433,41 @@ function admAnnounceView() {
 }
 
 async function admSendAnnouncement() {
-  const box = $("adm-anntext");
+  const box = $("adm-anntext"), lblBox = $("adm-annlabel");
   const txt = ((box && box.value) || "").trim();
+  const lbl = ((lblBox && lblBox.value) || "").trim();
   if (!txt) return;
 
-  if (!confirm(`Post this announcement to the whole year group?\n\n"${txt}"\n\n` +
-    `It appears in chat straight away, badged as an admin announcement with your name on it.`)) return;
+  /* Only the people whose name is still in the box actually go on it, the same
+     rule the room's composer uses — deleting "@Sam" takes Sam off the notice. */
+  const said = mentionsInText(txt);
+  const names = said.map(id => profileOf(id).display_name).filter(Boolean);
+
+  if (!confirm(`Post this to the whole year group, badged "${lbl || "Admin"}"?\n\n` +
+    `"${txt}"\n\n` +
+    (names.length ? `Tagged: ${names.join(", ")} \u2014 they each get a mention.\n\n` : "") +
+    `It appears in chat straight away. It carries no name, so nothing on it says it was you.`)) return;
 
   const btn = $("adm-annsend");
   if (btn) { btn.disabled = true; btn.textContent = "Posting\u2026"; }
 
-  const { data, error } = await sb.rpc("send_announcement", { body: txt });
+  const { data, error } = await sb.rpc("send_announcement",
+    { body: txt, label: lbl || null, mentions: said });
   if (btn) { btn.disabled = false; btn.textContent = "Post announcement"; }
   if (error)             { toast("Could not post \u2014 " + error.message, 4600); return; }
   if (data && !data.ok)  { toast(data.why || "Could not post", 4600); return; }
 
   /* An announcement is an admin action taken in public, so it is recorded like
-     every other one — the audit log is the only place that keeps it after the
-     message itself is deleted. */
-  await admLog("chat.announce", null, null, txt.slice(0, 200), null);
+     every other one — the audit log is the only place it survives the message
+     itself being deleted, and the only place the room's anonymity does not
+     apply, which is the point of having one. */
+  await admLog("chat.announce", null, null,
+    `[${lbl || "Admin"}] ${txt.slice(0, 180)}` + (names.length ? ` \u2014 tagged ${names.join(", ")}` : ""),
+    null);
 
   ADM.annDraft = "";
+  ADM.annLabel = "";
+  mentionDraft = [];
   await admLoadChat();                 /* so it shows in the list below at once */
   renderAdmin();
   toast("Announcement posted");
@@ -844,21 +884,46 @@ function admWire() {
   const kill = $("adm-selkill"); if (kill) kill.onclick = () => admDeleteSelected();
 
   /* ---- announcements ---- */
-  const ann = $("adm-anntext");
+  const ann = $("adm-anntext"), annLbl = $("adm-annlabel");
   if (ann) {
-    /* Repainting on every keystroke would rebuild the textarea and lose the
-       caret, so the draft is held in ADM and the caret put back afterwards,
-       the same way the session search does it. */
-    ann.oninput = () => {
+    /* Repainting the whole console on every keystroke would rebuild the mention
+       list out from under the caret, so the three things that actually change
+       are updated in place instead: the counter, the send button and the
+       preview. Nothing else on this screen depends on the draft. */
+    const annPaint = () => {
       ADM.annDraft = ann.value;
-      const at = ann.selectionStart;
-      renderAdmin();
-      const n = $("adm-anntext");
-      if (n) { n.focus(); n.setSelectionRange(at, at); }
+      ADM.annLabel = annLbl ? annLbl.value : "";
+      const left = ANN_MAX - ann.value.length;
+      const l = $("adm-annleft");
+      if (l) { l.textContent = left + " left"; l.classList.toggle("near", left < 80); }
+      const go = $("adm-annsend"); if (go) go.disabled = !ann.value.trim();
+      const pv = $("adm-annprev"); if (pv) pv.innerHTML = admAnnPreview();
     };
+    /* The room's composer and this one share the one mention list, so each
+       claims it before use rather than trusting whatever touched it last. */
+    const claim = () => useMentions("adm-anntext", "adm-mentionbox", annPaint, true);
+
+    ann.onfocus = claim;
+    ann.oninput = () => { claim(); annPaint(); refreshMentionBox(); };
+    ann.onblur  = () => { mentionOpen = false; paintMentionBox(); };
     ann.onkeydown = e => {
+      claim();
+      /* while the mention list is up it owns the arrows, tab and enter */
+      if (mentionOpen && mentionMatches.length) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          mentionIdx = (mentionIdx + (e.key === "ArrowDown" ? 1 : -1) + mentionMatches.length) % mentionMatches.length;
+          paintMentionBox();
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault(); insertMention(mentionMatches[mentionIdx].id); return;
+        }
+        if (e.key === "Escape") { e.preventDefault(); mentionOpen = false; paintMentionBox(); return; }
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); admSendAnnouncement(); }
     };
+    if (annLbl) annLbl.oninput = annPaint;
   }
   const annGo = $("adm-annsend");
   if (annGo) annGo.onclick = () => admSendAnnouncement();
