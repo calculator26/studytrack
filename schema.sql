@@ -1201,3 +1201,22 @@ end $fn$;
 
 revoke execute on function public.send_announcement(text, text, uuid[]) from public, anon;
 grant  execute on function public.send_announcement(text, text, uuid[]) to authenticated;
+
+-- ============================================================
+--  TELL THE API ABOUT ALL OF THAT
+--  ------------------------------------------------------------
+--  PostgREST answers sb.rpc() from a cached picture of the schema,
+--  not from the database directly. A function created a moment ago
+--  is real in Postgres and still missing from that cache, which
+--  surfaces in the browser as
+--
+--    Could not find the function public.send_announcement(...)
+--    in the schema cache
+--
+--  — an error that reads like the SQL did not run when it ran
+--  perfectly well. Supabase usually reloads by itself on DDL, but
+--  it can lag, and re-running this file is exactly when you are
+--  waiting on it. So the file ends by asking, every time. Harmless
+--  when nothing changed.
+-- ============================================================
+notify pgrst, 'reload schema';
