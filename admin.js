@@ -454,7 +454,18 @@ async function admSendAnnouncement() {
   const { data, error } = await sb.rpc("send_announcement",
     { body: txt, label: lbl || null, mentions: said });
   if (btn) { btn.disabled = false; btn.textContent = "Post announcement"; }
-  if (error)             { toast("Could not post \u2014 " + error.message, 4600); return; }
+  if (error) {
+    /* The one failure that is not about this announcement at all. PostgREST
+       answers rpc() from a cached picture of the schema, so a database that
+       has never had announcements.sql run on it — or has had it run and not
+       been told — reports the function as missing, in words that read like a
+       bug in the app. Say what it actually is and what fixes it. */
+    const missing = /schema cache|could not find the function|does not exist/i.test(error.message || "");
+    toast(missing
+      ? "The database has not been set up for announcements yet \u2014 run announcements.sql in the Supabase SQL editor, then try again."
+      : "Could not post \u2014 " + error.message, 7000);
+    return;
+  }
   if (data && !data.ok)  { toast(data.why || "Could not post", 4600); return; }
 
   /* An announcement is an admin action taken in public, so it is recorded like
