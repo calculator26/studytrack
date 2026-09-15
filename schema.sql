@@ -1121,7 +1121,26 @@ alter table public.messages add constraint messages_body_check
 create index if not exists messages_ann_idx
   on public.messages (created_at desc) where announcement;
 
-create or replace function public.send_announcement(body text)
+-- The badge an announcement wears. Null means the plain "Admin"; anything else
+-- is what the console was told to call this one, so a timetable notice and a
+-- social justice notice do not have to arrive under the same word. Constrained
+-- to announcements so an ordinary message cannot carry a label, and kept short
+-- because it renders as a letterspaced badge rather than a sentence.
+alter table public.messages add column if not exists ann_label text;
+alter table public.messages drop constraint if exists messages_ann_label_check;
+alter table public.messages add constraint messages_ann_label_check
+  check (ann_label is null
+         or (announcement and length(btrim(ann_label)) between 1 and 24));
+
+-- Dropped rather than replaced: adding arguments to a function creates an
+-- overload beside the old one rather than superseding it, and an old one-argument
+-- send_announcement left sitting there is a second way in that nobody maintains.
+drop function if exists public.send_announcement(text);
+
+create or replace function public.send_announcement(
+  body text,
+  label text default null,
+  mentions uuid[] default '{}')
 returns jsonb
 language plpgsql
 security definer
@@ -1130,6 +1149,8 @@ as $fn$
 declare
   me     uuid := auth.uid();
   txt    text := btrim(body);
+  lbl    text := nullif(btrim(coalesce(label, '')), '');
+  who    uuid[];
   recent int;
   new_id uuid;
 begin
@@ -1149,6 +1170,9 @@ begin
   if length(txt) > 1000 then
     return jsonb_build_object('ok', false, 'why', 'That is longer than 1000 characters');
   end if;
+  if lbl is not null and length(lbl) > 24 then
+    return jsonb_build_object('ok', false, 'why', 'A label is at most 24 characters');
+  end if;
 
   -- Not a flood limit — an administrator is trusted. This is a guard against
   -- a stuck button or a loop putting the same notice up four hundred times.
@@ -1159,12 +1183,21 @@ begin
     return jsonb_build_object('ok', false, 'why', 'Three announcements in a minute is the limit');
   end if;
 
-  insert into public.messages (user_id, body, image_path, mentions, announcement)
-  values (me, txt, null, '{}', true)
+  -- Only real members, and never the same person twice. Unlike send_message()
+  -- this does NOT drop the sender: an announcement carries no name, so naming
+  -- yourself in one ("see @Lewis at lunch") is the only way to put a contact on
+  -- it, and dropping it silently would be the wrong answer to a fair request.
+  select coalesce(array_agg(distinct p.id), '{}')
+    into who
+    from public.profiles p
+   where p.id = any(mentions);
+
+  insert into public.messages (user_id, body, image_path, mentions, announcement, ann_label)
+  values (me, txt, null, who, true, lbl)
   returning id into new_id;
 
   return jsonb_build_object('ok', true, 'id', new_id);
 end $fn$;
 
-revoke execute on function public.send_announcement(text) from public, anon;
-grant  execute on function public.send_announcement(text) to authenticated;
+revoke execute on function public.send_announcement(text, text, uuid[]) from public, anon;
+grant  execute on function public.send_announcement(text, text, uuid[]) to authenticated;

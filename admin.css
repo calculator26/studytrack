@@ -205,8 +205,28 @@ table.adm-t tbody tr:last-child td{border-bottom:0}
 .adm-anngrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
 .adm-lbl{display:block;font:700 9.5px/1 var(--a-mono);letter-spacing:.11em;
   text-transform:uppercase;color:var(--a-ink-soft);margin-bottom:9px}
+.adm-annlabelin{width:100%;max-width:280px;font-weight:650;letter-spacing:.06em;
+  text-transform:uppercase;font-size:12px}
+.adm-annwrap{position:relative}
 .adm-annbox{width:100%;min-height:150px;resize:vertical;line-height:1.55;
   font-family:inherit;font-size:13px}
+/* The mention list is the room's element reused verbatim, so it arrives wearing
+   the app's light palette. These are the console's colours put back on it.
+   position is restated because `.adm *{position:relative}` above matches it at
+   the same specificity as .mentionbox and lands later, which drops the list
+   into the flow and pushes the send button down the page. */
+.adm-annwrap .mentionbox{
+  /* Chat opens this upward because its composer is pinned to the bottom of the
+     room. Here there is nothing below the box and the badge field above it, so
+     up would cover the field you just filled in: this one opens downward. */
+  position:absolute; bottom:auto; top:calc(100% + 6px);
+  background:var(--a-raise); border:1px solid var(--a-rule);
+  box-shadow:0 10px 30px rgba(0,0,0,.55);
+}
+.adm-annwrap .mentionbox .mh{color:var(--a-ink-soft)}
+.adm-annwrap .mentionbox button{color:var(--a-ink);font-size:12.5px}
+.adm-annwrap .mentionbox button:hover,
+.adm-annwrap .mentionbox button[aria-selected="true"]{background:var(--a-surface-2)}
 .adm-annfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin-top:11px}
 .adm-annleft{font:500 11px/1 var(--a-mono);color:var(--a-ink-soft)}

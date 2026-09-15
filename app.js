@@ -3747,13 +3747,26 @@ function chatNote(text) {
 let mentionDraft = [];       /* [{ id, name }] offered so far */
 let mentionOpen  = false, mentionIdx = 0, mentionMatches = [], mentionAt = -1;
 
+/* Two boxes now want this: the room's composer and the console's announcement
+   box. It is the same interaction against different elements, so the machinery
+   takes the ids rather than assuming chat's — one implementation, because the
+   copy of it that did not get the bug fix is the one that goes wrong.
+   `self` is the one real difference: chat never offers you yourself, an
+   announcement does, because an unsigned notice naming a contact is the whole
+   reason you would want it. */
+let MENTION = { input: "chat-input", list: "mentionbox", after: null, self: false };
+function useMentions(input, list, after, self) {
+  MENTION = { input: input, list: list, after: after || null, self: !!self };
+}
+
 const mentionable = () => DB.profiles
-  .filter(p => p.id !== UID)
+  .filter(p => MENTION.self || p.id !== UID)
   .sort((a, b) => a.display_name.localeCompare(b.display_name));
 
 /* The "@" being typed right now, if the caret is inside one. */
 function mentionQuery() {
-  const box = $("chat-input");
+  const box = $(MENTION.input);
+  if (!box) return null;
   const upto = box.value.slice(0, box.selectionStart);
   const at = upto.lastIndexOf("@");
   if (at === -1) return null;
@@ -3764,7 +3777,7 @@ function mentionQuery() {
 }
 
 function paintMentionBox() {
-  const box = $("mentionbox");
+  const box = $(MENTION.list);
   if (!box) return;
   if (!mentionOpen || !mentionMatches.length) { box.hidden = true; box.innerHTML = ""; return; }
   box.innerHTML = `<div class="mh">Mention somebody</div>` + mentionMatches.map((p, i) =>
@@ -3791,7 +3804,7 @@ function refreshMentionBox() {
 
 function insertMention(id) {
   const p = profileOf(id);
-  const box = $("chat-input");
+  const box = $(MENTION.input);
   const m = mentionQuery();
   if (!p || !m) return;
   const before = box.value.slice(0, m.at);
@@ -3803,8 +3816,7 @@ function insertMention(id) {
   if (!mentionDraft.some(x => x.id === id)) mentionDraft.push({ id, name: p.display_name });
   mentionOpen = false;
   paintMentionBox();
-  paintChatCount();
-  autoGrowChat();
+  if (MENTION.after) MENTION.after();
   box.focus();
 }
 
@@ -3838,13 +3850,18 @@ function paintMentionBar() {
      thing, so it keeps the top spot and this waits its turn. */
   if (!MENTIONS.length || POKES.length) { bar.className = "hide"; bar.innerHTML = ""; reconcileBars(); return; }
   const newest = MENTIONS[MENTIONS.length - 1];
-  const who = profileOf(newest.user_id).display_name;
+  /* An announcement carries no name in the room, so it must not carry one here
+     either — naming the admin in the bar would undo the whole point of leaving
+     the notice unsigned. It says what kind of thing wants you instead. */
+  const headline = newest.announcement
+    ? annLabel(newest) + " announcement mentioned you"
+    : profileOf(newest.user_id).display_name + " mentioned you in chat";
   const many = MENTIONS.length > 1;
   bar.className = "";
   bar.innerHTML =
-    `<span class="pb-icon" aria-hidden="true">💬</span>
+    `<span class="pb-icon" aria-hidden="true">${newest.announcement ? "\u25b2" : "💬"}</span>
      <div class="pb-text">
-       <strong>${esc(who)} mentioned you in chat</strong>
+       <strong>${esc(headline)}</strong>
        <span>${esc(many ? MENTIONS.length + " mentions waiting · " : "")}${
          esc((newest.body || "").slice(0, 90) || "sent you a picture")}</span>
      </div>
@@ -3918,11 +3935,15 @@ function chatTimeLabel(iso) {
    messages table, and the row still carries the user_id that posted it,
    because the rate limit, the delete policy and the audit log are all keyed
    on it. Anyone who opens the network tab can still see who wrote one. */
+/* Null means the plain word. Kept in one place because the badge, the mention
+   bar and the console's own list all have to agree on what a notice is called. */
+const annLabel = m => ((m && m.ann_label) || "").trim() || "Admin";
+
 function annHTML(m) {
   const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
   return `<div class="ann" data-msg="${esc(m.id)}">
     <div class="ann-top">
-      <span class="ann-badge"><i class="fi" aria-hidden="true">\u25b2</i>Admin</span>
+      <span class="ann-badge"><i class="fi" aria-hidden="true">\u25b2</i>${esc(annLabel(m))}</span>
       <span class="ann-time">${esc(chatTimeLabel(m.created_at))}</span>
       ${canDelete ? `<button class="ann-del" data-msgdel="${esc(m.id)}"
         title="Delete this announcement">delete</button>` : ""}
@@ -4139,9 +4160,15 @@ function initChat() {
   const box = $("chat-input");
   if (!box || box.dataset.wired) return;
   box.dataset.wired = "1";
-  box.addEventListener("input", () => { paintChatCount(); autoGrowChat(); refreshMentionBox(); });
+  /* The console's announcement box borrows the same list, so the room claims it
+     back on every interaction rather than trusting whatever touched it last. */
+  const claim = () => useMentions("chat-input", "mentionbox",
+                                  () => { paintChatCount(); autoGrowChat(); }, false);
+  box.addEventListener("focus", claim);
+  box.addEventListener("input", () => { claim(); paintChatCount(); autoGrowChat(); refreshMentionBox(); });
   box.addEventListener("blur", () => { mentionOpen = false; paintMentionBox(); });
   box.addEventListener("keydown", e => {
+    claim();
     /* while the mention list is up it owns the arrows, tab and enter */
     if (mentionOpen && mentionMatches.length) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
