@@ -3906,11 +3906,32 @@ function chatTimeLabel(iso) {
   return fmtD(isoOf(d)) + " " + hhmm;
 }
 
+/* An announcement is not a chat bubble and does not try to be one. It breaks
+   the run of messages deliberately: its own slab, its own colours, and the
+   name underneath as a signature rather than above as a speaker. Nothing on it
+   moves — it has to be noticed once, not compete with the room around it. */
+function annHTML(m) {
+  const p = profileOf(m.user_id);
+  const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
+  return `<div class="ann" data-msg="${esc(m.id)}">
+    <div class="ann-top">
+      <span class="ann-badge"><i class="fi" aria-hidden="true">\u25b2</i>Admin</span>
+      <span class="ann-time">${esc(chatTimeLabel(m.created_at))}</span>
+      ${canDelete ? `<button class="ann-del" data-msgdel="${esc(m.id)}"
+        title="Delete this announcement">delete</button>` : ""}
+    </div>
+    <div class="ann-text">${withMentions(esc(m.body), m.mentions)}</div>
+    <div class="ann-by">Posted by <b class="person" data-profile="${esc(m.user_id)}">${esc(p.display_name)}</b>
+      from the admin console</div>
+  </div>`;
+}
+
 function msgHTML(m, prev) {
+  if (m.announcement) return annHTML(m);
   const p = profileOf(m.user_id);
   const t = chatTier(m.user_id);
   /* consecutive messages from one person within five minutes share a header */
-  const cont = prev && prev.user_id === m.user_id &&
+  const cont = prev && !prev.announcement && prev.user_id === m.user_id &&
                Math.abs(new Date(m.created_at) - new Date(prev.created_at)) < 5 * 60e3;
   const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
   return `<div class="msg${cont ? " cont" : ""}${m.user_id === UID ? " mine" : ""}" data-msg="${esc(m.id)}">
