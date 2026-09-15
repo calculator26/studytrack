@@ -3906,11 +3906,37 @@ function chatTimeLabel(iso) {
   return fmtD(isoOf(d)) + " " + hhmm;
 }
 
+/* An announcement is not a chat bubble and does not try to be one. It breaks
+   the run of messages deliberately: its own slab, its own colours, and no
+   speaker at all. Nothing on it moves — it has to be noticed once, not compete
+   with the room around it.
+
+   It is unsigned on purpose. The room reads it as coming from the console
+   rather than from a person, which is the whole difference between a notice
+   and somebody with a badge telling you what to do. Note that this is what
+   the room is SHOWN, not what it could work out: every member can read the
+   messages table, and the row still carries the user_id that posted it,
+   because the rate limit, the delete policy and the audit log are all keyed
+   on it. Anyone who opens the network tab can still see who wrote one. */
+function annHTML(m) {
+  const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
+  return `<div class="ann" data-msg="${esc(m.id)}">
+    <div class="ann-top">
+      <span class="ann-badge"><i class="fi" aria-hidden="true">\u25b2</i>Admin</span>
+      <span class="ann-time">${esc(chatTimeLabel(m.created_at))}</span>
+      ${canDelete ? `<button class="ann-del" data-msgdel="${esc(m.id)}"
+        title="Delete this announcement">delete</button>` : ""}
+    </div>
+    <div class="ann-text">${withMentions(esc(m.body), m.mentions)}</div>
+  </div>`;
+}
+
 function msgHTML(m, prev) {
+  if (m.announcement) return annHTML(m);
   const p = profileOf(m.user_id);
   const t = chatTier(m.user_id);
   /* consecutive messages from one person within five minutes share a header */
-  const cont = prev && prev.user_id === m.user_id &&
+  const cont = prev && !prev.announcement && prev.user_id === m.user_id &&
                Math.abs(new Date(m.created_at) - new Date(prev.created_at)) < 5 * 60e3;
   const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
   return `<div class="msg${cont ? " cont" : ""}${m.user_id === UID ? " mine" : ""}" data-msg="${esc(m.id)}">

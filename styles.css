@@ -837,6 +837,47 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 .chatempty{text-align:center;color:var(--ink-soft);font-size:13px;padding:28px 10px}
 @media (max-width:620px){.chatlog{height:min(52vh,420px)}}
 
+/* ---- admin announcements ----------------------------------------------
+   The room is light and chatty; this is dark, squared off and edged in gold,
+   so it reads as a notice pinned to the wall rather than somebody talking.
+   Strong but calm on purpose: nothing here animates, because it has to hold
+   its authority on the fortieth read as well as the first.
+   ------------------------------------------------------------------------ */
+.ann{
+  --ann-gold:#E9C26A;
+  margin:14px 0;
+  padding:14px 17px 15px;
+  border:1px solid rgba(233,194,106,.45);
+  border-left:4px solid var(--ann-gold);
+  border-radius:var(--r-sm);
+  background:linear-gradient(180deg,#1C2330 0%,#141A24 100%);
+  box-shadow:var(--sh-2);
+}
+.ann-top{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.ann-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:10.5px;font-weight:700;line-height:1;
+  text-transform:uppercase;letter-spacing:.17em;
+  color:var(--ann-gold);
+}
+.ann-badge .fi{font-size:9.5px;font-style:normal;letter-spacing:0}
+.ann-time{margin-left:auto;font-size:11px;color:#8792A3;font-variant-numeric:tabular-nums}
+.ann-text{
+  font-size:14.5px;line-height:1.6;color:#F2F5FA;font-weight:500;
+  white-space:pre-wrap;word-break:break-word;
+}
+.ann-text .mention{background:rgba(233,194,106,.16);color:var(--ann-gold)}
+.ann-del{
+  border:0;background:none;color:#8792A3;cursor:pointer;font-size:12px;
+  opacity:0;transition:opacity var(--fast);padding:0;
+}
+.ann:hover .ann-del,.ann-del:focus-visible{opacity:1}
+.ann-del:hover{color:#FF8D78}
+@media (max-width:620px){
+  .ann{padding:13px 14px 12px;margin:12px 0}
+  .ann-text{font-size:14px}
+}
+
 /* ---- subject picker rows ---------------------------------------------- */
 /* The whole row is the target. Most of this is used on a phone, where a small
    button on the end of a three-line row is a fiddly thing to hit. */

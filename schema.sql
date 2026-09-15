@@ -1059,6 +1059,10 @@ begin
     from public.profiles p
    where p.id = any(mentions) and p.id <> me;
 
+  -- The announcement column is deliberately absent from this list. Leaving it
+  -- out rather than writing false means there is no code path from the room's
+  -- own composer that could ever set it, however this function is later
+  -- edited: an ordinary message takes the column default, which is false.
   insert into public.messages (user_id, body, image_path, mentions)
   values (me, txt, img, who)
   returning id into new_id;
@@ -1075,3 +1079,92 @@ begin
   begin execute 'alter publication supabase_realtime add table public.messages';
   exception when others then null; end;
 end $$;
+
+-- ============================================================
+--  ADMIN ANNOUNCEMENTS
+--  ------------------------------------------------------------
+--  A message from the console that does not look like a message.
+--  Two separate rules, and it matters which is which:
+--
+--    1. Only an administrator can make one. That is enforced
+--       here, by is_admin() inside send_announcement(), and it
+--       holds against anything the browser sends. A member who
+--       calls this function gets turned away exactly as they
+--       would if they called admin_delete_user().
+--
+--    2. It has to come from the console rather than the ordinary
+--       chat box. That one is a convention, not a wall, and the
+--       honest way to say it is that send_message() simply has
+--       no way to set the flag — it always writes false. So an
+--       admin typing in the normal composer posts a normal
+--       message, which is the point: the badge cannot be worn by
+--       accident, only on purpose. An admin who wants to call
+--       this RPC from the browser console still can, and that is
+--       fine, because they are already the person allowed to.
+--
+--  The flag lives on the row rather than in a separate table so
+--  that the room's existing paging, realtime and delete policy
+--  all keep working untouched.
+-- ============================================================
+alter table public.messages
+  add column if not exists announcement boolean not null default false;
+
+-- Announcements may run longer than a chat line — they carry notices, not
+-- banter. The table now allows a thousand characters; send_message() still
+-- holds ordinary members to five hundred, so nothing about the room changes.
+alter table public.messages drop constraint if exists messages_body_check;
+alter table public.messages add constraint messages_body_check
+  check (length(btrim(body)) <= 1000
+         and (length(btrim(body)) > 0 or image_path is not null));
+
+-- An announcement is always worth finding quickly, and there are few of them.
+create index if not exists messages_ann_idx
+  on public.messages (created_at desc) where announcement;
+
+create or replace function public.send_announcement(body text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  me     uuid := auth.uid();
+  txt    text := btrim(body);
+  recent int;
+  new_id uuid;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'why', 'You are not signed in');
+  end if;
+
+  -- The whole of the security. Checked in the function rather than trusted
+  -- from the caller, so it holds no matter which page the call came from.
+  if not public.is_admin() then
+    return jsonb_build_object('ok', false, 'why', 'Only an administrator can announce');
+  end if;
+
+  if txt = '' then
+    return jsonb_build_object('ok', false, 'why', 'Nothing to announce');
+  end if;
+  if length(txt) > 1000 then
+    return jsonb_build_object('ok', false, 'why', 'That is longer than 1000 characters');
+  end if;
+
+  -- Not a flood limit — an administrator is trusted. This is a guard against
+  -- a stuck button or a loop putting the same notice up four hundred times.
+  select count(*) into recent
+    from public.messages
+   where user_id = me and announcement and created_at > now() - interval '60 seconds';
+  if recent >= 3 then
+    return jsonb_build_object('ok', false, 'why', 'Three announcements in a minute is the limit');
+  end if;
+
+  insert into public.messages (user_id, body, image_path, mentions, announcement)
+  values (me, txt, null, '{}', true)
+  returning id into new_id;
+
+  return jsonb_build_object('ok', true, 'id', new_id);
+end $fn$;
+
+revoke execute on function public.send_announcement(text) from public, anon;
+grant  execute on function public.send_announcement(text) to authenticated;

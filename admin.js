@@ -35,7 +35,8 @@ const ADM = {
   from:"", to:"",             /* session date filter */
   sel:new Set(),              /* bulk selection of session ids */
   audit:[],
-  auditLoaded:false
+  auditLoaded:false,
+  annDraft:""              /* the announcement being composed, kept across repaints */
 };
 
 /* Ask the database, not the browser, whether this person is an admin.
@@ -231,6 +232,7 @@ const ADM_TABS = [
   ["members",   "☗", "Members"],
   ["sessions",  "▤", "Sessions"],
   ["chat",      "✽", "Chat"],
+  ["announce",  "▲", "Announce"],
   ["integrity", "⚑", "Integrity"],
   ["audit",     "⎘", "Audit log"]
 ];
@@ -332,6 +334,105 @@ async function admDeleteMessages(ids) {
   toast(ids.length === 1 ? "Message deleted" : ids.length + " messages deleted");
 }
 
+/* ---------------------------------------------------------------------------
+   ANNOUNCEMENTS
+
+   The one place in this console that writes to the room rather than tidying
+   it, so it is the one place that asks twice before acting.
+
+   The rule people will actually care about — that a member cannot announce —
+   is not enforced here. It is enforced by is_admin() inside
+   send_announcement(), the same way every other privileged thing in this file
+   is. What this screen is for is the other half: an announcement has to be a
+   deliberate act. The ordinary chat box cannot produce one at all, because it
+   calls send_message(), which has no way to set the flag. So an admin saying
+   something in the room says it as themselves, and only a trip in here puts
+   the badge on it.
+   --------------------------------------------------------------------------- */
+const ANN_MAX = 1000;
+const admAnnouncements = () => (ADM.chat || []).filter(m => m.announcement);
+
+function admAnnounceView() {
+  const past = admAnnouncements();
+  const draft = ADM.annDraft || "";
+  const left = ANN_MAX - draft.length;
+
+  return `
+  <div class="adm-h"><div>
+    <h2>Announce</h2>
+    <p>Posts into the room as an announcement rather than as you &mdash; its own slab in the chat log,
+       badged and signed. Everyone with the app open sees it at once and it stays in the history like
+       any other message. Only an administrator can post one, and the ordinary chat box cannot make
+       one at all, so the badge is never worn by accident.</p>
+  </div></div>
+
+  <div class="adm-anngrid">
+    <div class="adm-card"><div class="pad">
+      <label class="adm-lbl" for="adm-anntext">What the year group will read</label>
+      <textarea id="adm-anntext" class="adm-in adm-annbox" maxlength="${ANN_MAX}"
+        placeholder="e.g. Trials feedback is up on Canvas. Log the reading you do for it.">${esc(draft)}</textarea>
+      <div class="adm-annfoot">
+        <span class="adm-annleft${left < 80 ? " near" : ""}">${left} left</span>
+        <button class="adm-btn primary" id="adm-annsend"${draft.trim() ? "" : " disabled"}>Post announcement</button>
+      </div>
+      <div class="adm-sub">Sent the moment you confirm &mdash; there is no draft anyone else can see, and
+        the only way to take one back is to delete it below. ${"\u2318"}/Ctrl + Enter posts it.</div>
+    </div></div>
+
+    <div class="adm-card"><div class="pad">
+      <label class="adm-lbl">How it lands in chat</label>
+      <div class="adm-annprev">${draft.trim()
+        ? annHTML({ id: "preview", user_id: UID, body: draft.trim(), mentions: [],
+                    created_at: new Date().toISOString(), announcement: true })
+            .replace(/<button class="ann-del"[\s\S]*?<\/button>/, "")
+        : `<div class="adm-empty">Nothing to preview yet.</div>`}</div>
+    </div></div>
+  </div>
+
+  <div class="adm-h" style="margin-top:22px"><div>
+    <h2>Posted</h2>
+    <p>${past.length ? `Every announcement in the last ${ADM_CHAT_PAGE} messages of the room.`
+                     : `Nothing announced in the last ${ADM_CHAT_PAGE} messages.`}</p>
+  </div></div>
+
+  ${past.length ? `<div class="adm-card"><div class="adm-scroll"><table class="adm-t">
+    <thead><tr><th class="l">When</th><th class="l">By</th><th class="l">Announcement</th><th></th></tr></thead>
+    <tbody>${past.map(m => `<tr>
+      <td class="l adm-mono">${esc(new Date(m.created_at).toLocaleString())}</td>
+      <td class="l">${admWho(m.user_id)}</td>
+      <td class="l"><div class="adm-note" title="${esc(m.body)}">${esc(m.body)}</div></td>
+      <td><div class="adm-act">
+        <button class="adm-btn sm danger" data-admchatdel="${esc(m.id)}">Delete</button>
+      </div></td></tr>`).join("")}</tbody></table></div></div>` : ""}`;
+}
+
+async function admSendAnnouncement() {
+  const box = $("adm-anntext");
+  const txt = ((box && box.value) || "").trim();
+  if (!txt) return;
+
+  if (!confirm(`Post this announcement to the whole year group?\n\n"${txt}"\n\n` +
+    `It appears in chat straight away, badged as an admin announcement with your name on it.`)) return;
+
+  const btn = $("adm-annsend");
+  if (btn) { btn.disabled = true; btn.textContent = "Posting\u2026"; }
+
+  const { data, error } = await sb.rpc("send_announcement", { body: txt });
+  if (btn) { btn.disabled = false; btn.textContent = "Post announcement"; }
+  if (error)             { toast("Could not post \u2014 " + error.message, 4600); return; }
+  if (data && !data.ok)  { toast(data.why || "Could not post", 4600); return; }
+
+  /* An announcement is an admin action taken in public, so it is recorded like
+     every other one — the audit log is the only place that keeps it after the
+     message itself is deleted. */
+  await admLog("chat.announce", null, null, txt.slice(0, 200), null);
+
+  ADM.annDraft = "";
+  await admLoadChat();                 /* so it shows in the list below at once */
+  renderAdmin();
+  toast("Announcement posted");
+}
+
 async function admSetMuted(uid, on) {
   const { error } = await sb.from("profiles").update({ chat_muted: on }).eq("id", uid);
   if (error) { toast("Could not change that — " + error.message, 4600); return; }
@@ -353,6 +454,7 @@ function renderAdmin() {
       const n = id === "members" ? DB.profiles.length
               : id === "sessions" ? admAll().length
               : id === "chat" ? ((ADM.chat && ADM.chat.length) || "")
+              : id === "announce" ? (admAnnouncements().length || "")
               : id === "integrity" ? flags.length
               : id === "audit" ? (ADM.audit.length || "") : "";
       return `<button class="adm-nav" data-admtab="${id}" aria-current="${ADM.tab === id}">
@@ -372,6 +474,7 @@ function renderAdmin() {
   if (ADM.tab === "members")   body.innerHTML = admMembers();
   if (ADM.tab === "sessions")  body.innerHTML = admSessionsView();
   if (ADM.tab === "chat")      body.innerHTML = admChatView();
+  if (ADM.tab === "announce")  body.innerHTML = admAnnounceView();
   if (ADM.tab === "integrity") body.innerHTML = admIntegrity(flags);
   if (ADM.tab === "audit")     body.innerHTML = admAudit();
 
@@ -739,6 +842,26 @@ function admWire() {
   if (cclr) cclr.onclick = () => { ADM.sel.clear(); renderAdmin(); };
   const none = $("adm-selnone"); if (none) none.onclick = () => { ADM.sel.clear(); renderAdmin(); };
   const kill = $("adm-selkill"); if (kill) kill.onclick = () => admDeleteSelected();
+
+  /* ---- announcements ---- */
+  const ann = $("adm-anntext");
+  if (ann) {
+    /* Repainting on every keystroke would rebuild the textarea and lose the
+       caret, so the draft is held in ADM and the caret put back afterwards,
+       the same way the session search does it. */
+    ann.oninput = () => {
+      ADM.annDraft = ann.value;
+      const at = ann.selectionStart;
+      renderAdmin();
+      const n = $("adm-anntext");
+      if (n) { n.focus(); n.setSelectionRange(at, at); }
+    };
+    ann.onkeydown = e => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); admSendAnnouncement(); }
+    };
+  }
+  const annGo = $("adm-annsend");
+  if (annGo) annGo.onclick = () => admSendAnnouncement();
 
   /* ---- member actions ---- */
   $$("[data-admedituser]").forEach(b => b.onclick = () => admEditMember(b.dataset.admedituser));

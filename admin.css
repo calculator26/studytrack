@@ -201,6 +201,29 @@ table.adm-t tbody tr:last-child td{border-bottom:0}
   margin-top:10px}
 .adm-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:6px}
 
+/* ---------- announcements ---------- */
+.adm-anngrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.adm-lbl{display:block;font:700 9.5px/1 var(--a-mono);letter-spacing:.11em;
+  text-transform:uppercase;color:var(--a-ink-soft);margin-bottom:9px}
+.adm-annbox{width:100%;min-height:150px;resize:vertical;line-height:1.55;
+  font-family:inherit;font-size:13px}
+.adm-annfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:11px}
+.adm-annleft{font:500 11px/1 var(--a-mono);color:var(--a-ink-soft)}
+.adm-annleft.near{color:var(--a-warn)}
+/* The preview shows the real thing, so it carries the app's light-theme tokens
+   that .ann is written against rather than the console's dark ones. */
+.adm-annprev{
+  --r-sm:10px; --fast:.14s;
+  --sh-2:0 1px 2px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.28);
+  background:var(--a-void); border:1px solid var(--a-rule);
+  border-radius:11px; padding:4px 14px; min-height:150px;
+  display:flex; flex-direction:column; justify-content:center;
+}
+.adm-annprev .ann{margin:12px 0}
+.adm-annprev .adm-empty{border:0;background:none;padding:18px}
+@media (max-width:900px){ .adm-anngrid{grid-template-columns:1fr} }
+
 /* ---------- empty / misc ---------- */
 .adm-empty{color:var(--a-ink-soft);font-size:12.5px;padding:30px;text-align:center;
   border:1px dashed var(--a-rule);border-radius:11px;background:var(--a-surface-2)}
