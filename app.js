@@ -563,6 +563,8 @@ async function onSession(session) {
     subscribeRealtime();
     restoreTimer();
     try { await loadReactions(); } catch (e) { /* counts can wait */ }
+    noteLiveSoon();
+    try { await loadLiveHistory(); } catch (e) { /* the line can wait */ }
     renderAll();
     initReminders();
     loadPokes();
@@ -749,6 +751,8 @@ async function runRefresh(rerender, full) {
            read. Failing here leaves the entries drawn without their counts,
            which is a great deal better than not drawing the entries. */
         try { await loadReactions(); } catch (e) { /* counts can wait */ }
+        noteLiveSoon();
+        try { await loadLiveHistory(); } catch (e) { /* the line can wait */ }
         if (rerender !== false) renderAll();
       } else {
         refreshQueued = true;            /* stale read — go round again */
@@ -1589,6 +1593,8 @@ function paintLive(force) {
     </div>`;
   }).join("");
 
+  paintProfileLive();
+
   const sub = $("live-sub");
   if (sub) {
     const running = all.filter(t => t.running).length;
@@ -1750,6 +1756,7 @@ function paintCountdown() {
 
 function renderHome() {
   paintClassWarn();
+  drawLiveHistory();
   paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
   $("h-date").value = CUR;
@@ -1932,17 +1939,76 @@ function absorbTimerReactions(res) {
 
 const timerRxOf = id => DB.timerReactions[id] || { kudos: [], sus: [] };
 
-function timerReactionsHTML(t) {
+/* The words are on the buttons rather than only in a tooltip: an icon alone
+   asks people to guess, and guessing wrong on the sus one is worse than the
+   space it costs. The tooltip is then free to do the thing a label cannot,
+   which is name everybody who pressed it. */
+function timerReactionsHTML(t, big) {
   if (t.user_id === UID) return "";          /* nothing to press on your own */
   const r = timerRxOf(t.user_id);
-  return `<div class="rx lrx">` + RX_KINDS.map(k => {
+  return `<div class="rx lrx${big ? " big" : ""}">` + RX_KINDS.map(k => {
     const ids = r[k.kind] || [];
     const mine = ids.indexOf(UID) > -1;
     return `<button type="button" class="rxb rx-${k.kind}${mine ? " on" : ""}"
       data-treact="${k.kind}" data-trxid="${esc(t.user_id)}"
-      title="${esc(ids.length ? rxWho(ids, k.verb) : k.label)}"
-      ><span aria-hidden="true">${k.icon}</span><span class="rxn">${ids.length || ""}</span></button>`;
+      title="${esc(ids.length ? rxWho(ids, k.verb) : "Nobody yet \u2014 " + k.label.toLowerCase())}"
+      ><span aria-hidden="true">${k.icon}</span><span class="rxn">${ids.length || ""}</span
+      ><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("") + `</div>`;
+}
+
+/* ---------------------------------------------------------------------------
+   The live panel on somebody's profile.
+
+   The card on the strip is a glance; this is the same session with the things
+   that did not fit on it — when they started, how long they have been at it,
+   what it has added to their day — and the reaction buttons at a size you can
+   actually aim at. It only exists while they are on the clock.
+   --------------------------------------------------------------------------- */
+function profileLiveHTML(id) {
+  if (hidingOthers() && id !== UID) return "";
+  const t = (DB.timers || []).find(x => x.user_id === id);
+  if (!t) return "";
+  const now = Date.now();
+  const fresh = now - new Date(t.updated_at || 0).getTime() <
+                (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS);
+  if (!fresh) return "";
+  const w = splitLabel(t.label);
+  const ms = t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0);
+  const began = new Date(t.started_at);
+  return `<div class="pflive${t.running ? "" : " paused"}" style="--lc-subj:${esc(subjectTint(w.subject))}">
+    <div class="pfl-top">
+      <span class="pfl-tag">${t.running ? `<i class="dot"></i>On the clock now` : "Paused"}</span>
+      <span class="pfl-since">started ${esc(began.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</span>
+    </div>
+    <div class="pfl-time" data-pfclock="${esc(id)}">${hms(ms)}</div>
+    <div class="pfl-what"><b>${esc(w.subject)}</b>${w.area ? ` \u00b7 ${esc(w.area)}` : ""}</div>
+    <div class="pfl-sub">${f1(hoursFor(id, todayISO()))} h logged today, before this one</div>
+    ${timerReactionsHTML(t, true)}
+  </div>`;
+}
+
+/* Kept ticking by the same paint that drives the strip, so the modal never
+   shows a clock that stopped when you opened it. */
+/* The panel carries its own copy of the buttons, so a press made there has to
+   redraw there too — paintLive only reaches the strip. */
+function repaintProfileLive(id) {
+  if (openProfileId !== id) return;
+  const el = document.querySelector("#pf-body .pflive");
+  if (!el) return;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = profileLiveHTML(id);
+  const fresh = wrap.firstElementChild;
+  if (fresh) el.replaceWith(fresh); else el.remove();
+}
+
+function paintProfileLive() {
+  if (!openProfileId) return;
+  const box = document.querySelector('[data-pfclock="' + CSS.escape(openProfileId) + '"]');
+  if (!box) return;
+  const t = (DB.timers || []).find(x => x.user_id === openProfileId);
+  if (!t) return;
+  box.textContent = hms(t.acc_ms + (t.running ? Date.now() - new Date(t.started_at).getTime() : 0));
 }
 
 async function sendTimerReaction(owner, kind) {
@@ -1954,12 +2020,14 @@ async function sendTimerReaction(owner, kind) {
   if (kind !== had) next[kind].push(UID);
   DB.timerReactions[owner] = next;
   paintLive(true);                            /* rare enough to just redraw */
+  repaintProfileLive(owner);
 
   const { data, error } = await sb.rpc("react_timer",
     { owner_id: owner, kind: kind === had ? null : kind });
   if (error || (data && data.ok === false)) {
     DB.timerReactions[owner] = before;
     paintLive(true);
+    repaintProfileLive(owner);
     toast((data && data.why) ||
       (/schema cache|could not find the function|does not exist/i.test((error && error.message) || "")
         ? "Reactions are not set up on the database yet \u2014 run migrate.sql"
@@ -2465,6 +2533,131 @@ function renderCrew() {
     ? feed.map(s => `<div style="padding:0 16px">${entryHTML(s, true)}</div>`).join("")
     : `<div class="empty" style="margin:18px">Nothing logged yet by anyone.</div>`;
   wireEntryActions($("feed"));
+}
+
+/* ---------------------------------------------------------------------------
+   HOW BUSY THE ROOM GETS
+
+   One point per hour: the most people who were on the clock at once inside
+   it. Not hours logged — this is the room filling up and emptying out, which
+   is the thing the live strip only ever shows you one frame of.
+
+   The record is drawn as a line across the whole chart rather than as a number
+   in a corner, because the question people actually have is "are we near it",
+   and a line answers that without arithmetic.
+   --------------------------------------------------------------------------- */
+let LIVEHIST = { rows: [], best: 0, loaded: false };
+
+async function loadLiveHistory() {
+  if (!sb || !UID) return;
+  const { data, error } = await sb.rpc("live_history", { hours: 48 });
+  /* No such function yet means migrate.sql has not been run; the card says so
+     for itself rather than the whole page falling over. */
+  if (error) { LIVEHIST = { rows: [], best: 0, loaded: false }; return; }
+  const rows = data || [];
+  LIVEHIST = { rows: rows, best: rows.length ? Number(rows[0].best || 0) : 0, loaded: true };
+}
+
+/* Once an hour at most, and only from a tab that is actually being looked at:
+   the hour's number is a peak, so one client noticing is enough, and every
+   client noticing writes the same value. */
+let liveNoted = "";
+function noteLiveSoon() {
+  if (!sb || !UID || document.hidden) return;
+  const bucket = new Date().toISOString().slice(0, 13);
+  if (liveNoted === bucket) return;
+  liveNoted = bucket;
+  sb.rpc("note_live").catch(() => { liveNoted = ""; });
+}
+
+function drawLiveHistory() {
+  const svg = $("livegraph");
+  if (!svg) return;
+  const note = $("livegraph-note");
+  svg.innerHTML = "";
+  const rows = LIVEHIST.rows;
+  if (!rows.length) {
+    if (note) note.textContent = LIVEHIST.loaded
+      ? "Nothing recorded yet. The first hour somebody studies starts the line."
+      : "Run migrate.sql on the database to start recording this.";
+    return;
+  }
+
+  const vals = rows.map(r => Number(r.peak || 0));
+  const best = Math.max(LIVEHIST.best, 0);
+  const now = vals[vals.length - 1];
+  const peakNow = Math.max(...vals);
+  if (note) {
+    const when = rows.reduce((a, r) => Number(r.peak || 0) > Number(a.peak || 0) ? r : a, rows[0]);
+    note.textContent = best > 0
+      ? `Most at once in the last two days: ${peakNow}` +
+        (best > peakNow ? ` \u00b7 all-time record ${best}` : ` \u00b7 that is the all-time record`)
+      : "Nothing recorded yet.";
+  }
+
+  const W = 620, H = 220, ml = 34, mr = 14, mt = 16, mb = 30;
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const maxY = Math.max(1, best, ...vals) * 1.12;
+  const X = i => ml + (vals.length < 2 ? iw / 2 : (i / (vals.length - 1)) * iw);
+  const Y = v => mt + ih - (v / maxY) * ih;
+
+  for (let i = 0; i <= 4; i++) {
+    const v = maxY * i / 4;
+    svg.appendChild(el("line", { x1: ml, x2: ml + iw, y1: Y(v), y2: Y(v),
+      stroke: "#EDF1F3", "stroke-width": 1 }));
+    const t = el("text", { x: ml - 7, y: Y(v) + 4, "text-anchor": "end", "font-size": 10.5, fill: "#7B8D98" });
+    t.textContent = f0(v); svg.appendChild(t);
+  }
+
+  /* Midnight lines, so two days of hours can be told apart at a glance. */
+  rows.forEach((r, i) => {
+    if (new Date(r.bucket).getHours() !== 0) return;
+    svg.appendChild(el("line", { x1: X(i), x2: X(i), y1: mt, y2: mt + ih,
+      stroke: "#DFE5E8", "stroke-width": 1, "stroke-dasharray": "3 3" }));
+  });
+
+  if (best > 0) {
+    svg.appendChild(el("line", { x1: ml, x2: ml + iw, y1: Y(best), y2: Y(best),
+      stroke: "#C08A2E", "stroke-width": 1.5, "stroke-dasharray": "5 4" }));
+    const t = el("text", { x: ml + iw, y: Y(best) - 6, "text-anchor": "end",
+      "font-size": 10.5, fill: "#C08A2E", "font-weight": 700 });
+    t.textContent = "record " + best; svg.appendChild(t);
+  }
+
+  const pts = vals.map((v, i) => X(i) + "," + Y(v)).join(" ");
+  svg.appendChild(el("polyline", {
+    points: X(0) + "," + Y(0) + " " + pts + " " + X(vals.length - 1) + "," + Y(0),
+    fill: "rgba(43,97,119,.10)", stroke: "none" }));
+  svg.appendChild(el("polyline", { points: pts, fill: "none", stroke: "#2B6177",
+    "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+  /* Every hour that touched the record gets a mark; that is what "shows
+     records" has to mean on a line that is mostly not at one. */
+  vals.forEach((v, i) => {
+    if (best <= 0 || v < best) return;
+    svg.appendChild(el("circle", { cx: X(i), cy: Y(v), r: 4, fill: "#C08A2E",
+      stroke: "#fff", "stroke-width": 1.6 }));
+  });
+
+  svg.appendChild(el("circle", { cx: X(vals.length - 1), cy: Y(now), r: 4.2,
+    fill: "#fff", stroke: "#2B6177", "stroke-width": 2.4 }));
+
+  /* Two days of hours means the bare hour repeats, so a label that is on a
+     different day to the one before it says which day. "1pm ... 1pm" told
+     nobody anything. */
+  let lastDay = null;
+  [0, Math.floor(rows.length / 2), rows.length - 1].forEach((i, n) => {
+    const d = new Date(rows[i].bucket);
+    const hour = d.toLocaleTimeString([], { hour: "numeric" }).toLowerCase().replace(" ", "");
+    const day = d.toDateString();
+    const label = (day !== lastDay ? d.toLocaleDateString([], { weekday: "short" }) + " " : "") + hour;
+    lastDay = day;
+    const t = el("text", { x: X(i), y: H - 10,
+      "text-anchor": n === 0 ? "start" : (n === 2 ? "end" : "middle"),
+      "font-size": 10.5, fill: "#7B8D98" });
+    t.textContent = label;
+    svg.appendChild(t);
+  });
 }
 
 function drawRace(board, days) {
@@ -3053,6 +3246,7 @@ async function openProfile(id) {
   const logDays = Object.keys(byDay).sort().reverse();
 
   $("pf-body").innerHTML = `
+    ${profileLiveHTML(id)}
     <div class="grid g4 mb16">
       <div class="kpi"><div class="v">${f1(totalH)}</div><div class="k">Hours logged, all time</div>
         <div class="d">${all.length} session${all.length === 1 ? "" : "s"}</div></div>

@@ -390,12 +390,42 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .rxb.still:hover{background:var(--surface-2);border-color:var(--rule);color:var(--ink-mid)}
 @media (max-width:520px){ .rxb .rxl{display:none} .rxb{padding:3px 9px} }
 
-/* On a live card there is no room for the words and no need for them: the
-   card is small, the two icons are the same two everywhere else in the app,
-   and a count beside them is the whole message. */
+/* The words stay on a live card too. They cost a line when the card is narrow
+   — which is what the wrap is for — and the alternative is asking people to
+   guess what a face means before they press it. */
 .lrx{margin-top:9px;gap:5px}
 .lrx .rxb{padding:2px 8px;font-size:11px;background:var(--surface)}
+.lrx .rxl{font-size:10.5px}
 .livecard.self .lrx .rxb{background:var(--surface)}
+.lrx.big{margin-top:12px;gap:8px}
+.lrx.big .rxb{padding:5px 13px;font-size:12.5px}
+.lrx.big .rxl{font-size:12px}
+
+/* ---- the live panel on a profile --------------------------------------
+   The strip card is a glance; this is the same session with what did not
+   fit on it, at a size you can aim at.
+   ---------------------------------------------------------------------- */
+.pflive{
+  position:relative;overflow:hidden;
+  border:1px solid var(--rule);border-radius:var(--r);
+  background:var(--surface-2);padding:14px 16px 15px;margin-bottom:16px;
+}
+.pflive::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--lc-subj,var(--rule))}
+.pflive.paused{background:var(--surface);border-style:dashed}
+.pfl-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px}
+.pfl-tag{display:inline-flex;align-items:center;gap:6px;
+  font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--good)}
+.pflive.paused .pfl-tag{color:var(--ink-soft)}
+.pfl-tag .dot{width:7px;height:7px}
+.pfl-since{margin-left:auto;font-size:11.5px;color:var(--ink-soft)}
+.pfl-time{font-size:30px;font-weight:720;letter-spacing:-.035em;line-height:1.1;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+.pflive.paused .pfl-time{color:var(--ink-soft)}
+.pfl-what{font-size:13.5px;color:var(--ink-mid);margin-top:6px}
+.pfl-what b{color:var(--ink);font-weight:650}
+.pfl-sub{font-size:11.5px;color:var(--ink-soft);margin-top:3px}
 
 .x{appearance:none;border:0;background:transparent;color:var(--ink-soft);cursor:pointer;
   font-size:16px;line-height:1;padding:4px 7px;border-radius:var(--r-xs);

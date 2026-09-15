@@ -363,6 +363,91 @@ end $fn$;
 revoke execute on function public.react_timer(uuid, text) from public, anon;
 grant  execute on function public.react_timer(uuid, text) to authenticated;
 
+-- ============================================================
+--  HOW MANY PEOPLE WERE ON THE CLOCK AT ONCE
+--  ------------------------------------------------------------
+--  live_timers is a photograph of right now, so a graph of how
+--  busy the room gets needs somebody to keep the photographs.
+--
+--  Not pg_cron. This is one row an hour and it only matters when
+--  somebody is actually studying — and somebody studying has
+--  their own tab open by definition, because that tab is what
+--  sends the heartbeat the live strip reads. So the clients do
+--  it: whoever notices the hour has turned over calls note_live()
+--  once, and the highest count any of them saw is what the hour
+--  keeps. A project with nobody online records nothing, which is
+--  the correct answer rather than a gap.
+--
+--  The count is taken here rather than sent, so it cannot be
+--  invented by a browser: a bored member cannot post a record of
+--  four hundred.
+-- ============================================================
+create table if not exists public.live_samples (
+  bucket timestamptz primary key,      -- the hour, truncated
+  peak   int not null                  -- most people on the clock at once in it
+);
+
+alter table public.live_samples enable row level security;
+drop policy if exists "samples read all" on public.live_samples;
+create policy "samples read all" on public.live_samples
+  for select to authenticated using (true);
+revoke insert, update, delete on public.live_samples from anon, authenticated;
+
+create or replace function public.note_live()
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  now_bucket timestamptz := date_trunc('hour', now());
+  live       int;
+begin
+  if auth.uid() is null then return 0; end if;
+
+  /* The same freshness rule the strip draws by: a running timer has to have
+     checked in within five minutes, or its owner has closed the laptop and is
+     not studying, whatever the row says. */
+  select count(*) into live
+    from public.live_timers t
+   where t.running and t.updated_at > now() - interval '5 minutes';
+
+  insert into public.live_samples (bucket, peak)
+  values (now_bucket, live)
+  on conflict on constraint live_samples_pkey
+    do update set peak = greatest(public.live_samples.peak, excluded.peak);
+
+  return live;
+end $fn$;
+
+revoke execute on function public.note_live() from public, anon;
+grant  execute on function public.note_live() to authenticated;
+
+-- The line, plus the record to draw it against. Hours nobody studied come back
+-- as zero rather than as gaps, so the line does not lie by joining across them.
+create or replace function public.live_history(hours int default 48)
+returns table (bucket timestamptz, peak int, best int)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with span as (
+    select generate_series(
+      date_trunc('hour', now()) - (least(greatest(coalesce(hours, 48), 1), 720) - 1) * interval '1 hour',
+      date_trunc('hour', now()),
+      interval '1 hour') as b
+  )
+  select span.b,
+         coalesce(s.peak, 0)::int,
+         (select coalesce(max(peak), 0)::int from public.live_samples)
+    from span left join public.live_samples s on s.bucket = span.b
+   order by span.b
+$$;
+
+revoke execute on function public.live_history(int) from public, anon;
+grant  execute on function public.live_history(int) to authenticated;
+
 -- -------------------------------------------------------------------------
 --  The API answers rpc() from a cached picture of the schema, so a function
 --  created a second ago can be real in Postgres and still missing from it.
@@ -381,6 +466,8 @@ select
     where n.nspname = 'public' and p.proname = 'reactions_for')          as reaction_counts,
   (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname = 'react_timer')            as timer_reactions,
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'live_history')           as live_graph,
   (select count(*) = 2 from information_schema.columns
     where table_schema = 'public' and table_name = 'messages'
       and column_name in ('announcement','ann_label'))                   as announcement_columns;
