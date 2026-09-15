@@ -220,7 +220,10 @@ const DB = {
      your own day, the forty in the feed, and whoever's profile is open. Asked
      for by id rather than held whole — this app spent a commit getting the
      habit of downloading tables it only needed forty rows of. */
-  reactions: {}
+  reactions: {},
+  /* owner_id -> { kudos:[uid], sus:[uid], at:started_at }. Bounded by who is
+     actually running a timer, so unlike the session ones this is read whole. */
+  timerReactions: {}
 };
 
 /* How far back the rollup reaches. Long enough for any streak anyone will
@@ -646,7 +649,7 @@ function normaliseProfiles() {
 async function loadAll() {
   const ticket = timersTicket(), readAt = Date.now();
   const since = crewSince();
-  const [pr, su, ar, se, go, ti, cd, cs, fe] = await Promise.all([
+  const [pr, su, ar, se, go, ti, cd, cs, fe, tr] = await Promise.all([
     sb.from("profiles").select("*"),
     sb.from("subjects").select("*").eq("user_id", UID).order("position"),
     sb.from("areas").select("*").eq("user_id", UID).order("position"),
@@ -657,7 +660,10 @@ async function loadAll() {
     sb.from("live_timers").select("*"),
     sb.rpc("crew_daily", { since }),
     sb.rpc("crew_subjects"),
-    sb.from("sessions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(40)
+    sb.from("sessions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(40),
+    /* Errors rather than throws on a project that has not run migrate.sql yet,
+       which absorbTimerReactions reads as "nobody has reacted". */
+    sb.from("timer_reactions").select("*")
   ]);
   /* Set off before the last write landed, so it cannot know about it. Throwing
      it away costs one more read; believing it un-deletes things. */
@@ -668,6 +674,11 @@ async function loadAll() {
   DB.crewSubjects = (cs.data || []).map(r => ({ key: r.key, label: r.label, takers: r.takers || [] }));
   DB.feed = (fe.data || []).map(feedRow);
   applyTimers(ti.data, ticket, readAt);
+  /* After applyTimers, never before: each reaction is matched against the
+     started_at it was aimed at, so running it first compares against the
+     previous read's timers and drops every reaction on a timer that has just
+     been started or restarted. */
+  absorbTimerReactions(tr);
   normaliseProfiles();
   return true;
 }
@@ -695,10 +706,11 @@ async function loadCrew() {
   const jobs = [
     sb.rpc("crew_daily", { since, only_active: true }),
     sb.from("live_timers").select("*"),
-    feedJob
+    feedJob,
+    sb.from("timer_reactions").select("*")
   ];
   if (crewReloadProfiles) jobs.push(sb.from("profiles").select("*"));
-  const [cd, ti, fe, pr] = await Promise.all(jobs);
+  const [cd, ti, fe, tr, pr] = await Promise.all(jobs);
   if (readAt <= dataTouched) return false;
   absorbDaily(cd.data, true);            /* merged, so older days are kept */
   if (LB_SUBJECT) { SUBJECT_DAILY.key = null; await loadSubjectDaily(LB_SUBJECT); }
@@ -709,6 +721,11 @@ async function loadCrew() {
   DB.feed = newest ? fresh.concat(DB.feed).slice(0, 40) : fresh;
   if (pr && pr.data) { DB.profiles = pr.data; normaliseProfiles(); crewReloadProfiles = false; }
   applyTimers(ti.data, ticket, readAt);
+  /* After applyTimers, never before: each reaction is matched against the
+     started_at it was aimed at, so running it first compares against the
+     previous read's timers and drops every reaction on a timer that has just
+     been started or restarted. */
+  absorbTimerReactions(tr);
   return true;
 }
 /* A refresh asked for while one is already running used to be dropped on the
@@ -1521,8 +1538,17 @@ function paintLive(force) {
      else did, which is precisely the glitch people were reporting. They only
      move when somebody starts, pauses or resumes, never on a heartbeat, so
      this costs no extra rebuilds. */
+  /* The reaction counts belong in here for the same reason started_at does:
+     everything not in the signature is invisible to the cheap path, which only
+     rewrites the clock text. A kudos arriving from somebody else has to change
+     the signature or it would sit in DB.timerReactions and never be drawn. */
+  const rxSig = t => {
+    const r = timerRxOf(t.user_id);
+    return (r.kudos || []).length + "." + (r.sus || []).length +
+           ((r.kudos || []).indexOf(UID) > -1 ? "k" : (r.sus || []).indexOf(UID) > -1 ? "s" : "");
+  };
   const sig = all.map(t => [t.user_id, t.running ? 1 : 0, t.label || "",
-                            t.started_at, t.acc_ms].join("~")).join("|");
+                            t.started_at, t.acc_ms, rxSig(t)].join("~")).join("|");
   const rebuild = force === true || sig !== liveSig;
   liveSig = sig;
 
@@ -1559,6 +1585,7 @@ function paintLive(force) {
       <div class="lc-time" data-clock="${esc(t.user_id)}">${hms(msOf(t))}</div>
       <div class="lc-subj">${esc(w.subject)}</div>
       ${w.area ? `<div class="lc-area">${esc(w.area)}</div>` : ""}
+      ${timerReactionsHTML(t)}
     </div>`;
   }).join("");
 
@@ -1855,7 +1882,7 @@ async function sendReaction(id, kind) {
     repaintReactions(id);
     const why = (data && data.why) ||
       (/schema cache|could not find the function/i.test((error && error.message) || "")
-        ? "Reactions are not set up on the database yet \u2014 run reactions.sql"
+        ? "Reactions are not set up on the database yet \u2014 run migrate.sql"
         : (error && error.message) || "Could not react");
     toast(why, 4200);
   }
@@ -1875,6 +1902,71 @@ function repaintReactions(id) {
   });
 }
 
+/* ---------------------------------------------------------------------------
+   The same two answers, aimed at a clock that is still running. Cheering
+   somebody on at 9pm is the half the session reactions cannot do, and a
+   four-hour timer still going is the most natural thing here to raise an
+   eyebrow at.
+
+   Reactions are stamped with the started_at they were aimed at, so a person
+   who stops and starts again does not inherit the last run's: the read drops
+   anything that no longer matches, and the database sweeps them on the next
+   press. Stopping a timer removes the row and the foreign key takes these
+   with it, so nothing has to remember to tidy up.
+   --------------------------------------------------------------------------- */
+function absorbTimerReactions(res) {
+  /* A project that has not run migrate.sql yet has no such table. That is not
+     an error worth showing anybody — it just means nobody has reacted. */
+  const rows = (res && res.data) || [];
+  const next = {};
+  rows.forEach(r => {
+    const t = (DB.timers || []).find(x => x.user_id === r.owner_id);
+    /* Aimed at a run that has since been restarted: no longer about what is
+       on the screen, so it is not drawn. */
+    if (!t || +new Date(t.started_at) !== +new Date(r.for_started_at)) return;
+    const e = next[r.owner_id] || (next[r.owner_id] = { kudos: [], sus: [] });
+    (e[r.kind] || []).push(r.user_id);
+  });
+  DB.timerReactions = next;
+}
+
+const timerRxOf = id => DB.timerReactions[id] || { kudos: [], sus: [] };
+
+function timerReactionsHTML(t) {
+  if (t.user_id === UID) return "";          /* nothing to press on your own */
+  const r = timerRxOf(t.user_id);
+  return `<div class="rx lrx">` + RX_KINDS.map(k => {
+    const ids = r[k.kind] || [];
+    const mine = ids.indexOf(UID) > -1;
+    return `<button type="button" class="rxb rx-${k.kind}${mine ? " on" : ""}"
+      data-treact="${k.kind}" data-trxid="${esc(t.user_id)}"
+      title="${esc(ids.length ? rxWho(ids, k.verb) : k.label)}"
+      ><span aria-hidden="true">${k.icon}</span><span class="rxn">${ids.length || ""}</span></button>`;
+  }).join("") + `</div>`;
+}
+
+async function sendTimerReaction(owner, kind) {
+  const before = timerRxOf(owner);
+  const had = (before.kudos || []).indexOf(UID) > -1 ? "kudos"
+            : (before.sus || []).indexOf(UID) > -1 ? "sus" : null;
+  const next = { kudos: (before.kudos || []).filter(u => u !== UID),
+                 sus:   (before.sus   || []).filter(u => u !== UID) };
+  if (kind !== had) next[kind].push(UID);
+  DB.timerReactions[owner] = next;
+  paintLive(true);                            /* rare enough to just redraw */
+
+  const { data, error } = await sb.rpc("react_timer",
+    { owner_id: owner, kind: kind === had ? null : kind });
+  if (error || (data && data.ok === false)) {
+    DB.timerReactions[owner] = before;
+    paintLive(true);
+    toast((data && data.why) ||
+      (/schema cache|could not find the function|does not exist/i.test((error && error.message) || "")
+        ? "Reactions are not set up on the database yet \u2014 run migrate.sql"
+        : (error && error.message) || "Could not react"), 4200);
+  }
+}
+
 /* Asked for by id, for exactly the rows that can be drawn right now. */
 async function loadReactions() {
   if (!sb || !UID) return;
@@ -1886,7 +1978,7 @@ async function loadReactions() {
   const uniq = [...new Set(ids)];
   if (!uniq.length) { DB.reactions = {}; return; }
   const { data, error } = await sb.rpc("reactions_for", { ids: uniq });
-  /* A project that has not run reactions.sql yet simply has no reactions;
+  /* A project that has not run migrate.sql yet simply has no reactions;
      that is not an error worth putting on anybody's screen. */
   if (error) return;
   const next = {};
@@ -3009,6 +3101,10 @@ async function openProfile(id) {
 
 /* one listener for every avatar and name in the app */
 document.addEventListener("click", e => {
+  /* A live card opens a profile and carries reaction buttons, so a press on
+     the buttons would do both. Both listeners are on document, where
+     stopPropagation does not reach a sibling, so the check belongs here. */
+  if (e.target.closest && e.target.closest("[data-treact],[data-react]")) return;
   const t = e.target.closest && e.target.closest("[data-profile]");
   if (t && t.dataset.profile) openProfile(t.dataset.profile);
 });
@@ -3018,7 +3114,14 @@ document.addEventListener("click", e => {
    button would be thrown away by the very click that used it. */
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest("[data-react]");
-  if (b && b.dataset.rxid) sendReaction(b.dataset.rxid, b.dataset.react);
+  if (b && b.dataset.rxid) { sendReaction(b.dataset.rxid, b.dataset.react); return; }
+  const t = e.target.closest && e.target.closest("[data-treact]");
+  if (t && t.dataset.trxid) {
+    /* The card underneath opens a profile. A press on the buttons is about the
+       timer, not the person, so it stops there. */
+    e.stopPropagation();
+    sendTimerReaction(t.dataset.trxid, t.dataset.treact);
+  }
 });
 function closeProfile() { openProfileId = null; $("ov-profile").classList.remove("on"); }
 document.querySelectorAll("[data-closeprofile]").forEach(b => b.addEventListener("click", closeProfile));

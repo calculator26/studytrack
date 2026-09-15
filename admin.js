@@ -457,12 +457,12 @@ async function admSendAnnouncement() {
   if (error) {
     /* The one failure that is not about this announcement at all. PostgREST
        answers rpc() from a cached picture of the schema, so a database that
-       has never had announcements.sql run on it — or has had it run and not
+       has never had migrate.sql run on it — or has had it run and not
        been told — reports the function as missing, in words that read like a
        bug in the app. Say what it actually is and what fixes it. */
     const missing = /schema cache|could not find the function|does not exist/i.test(error.message || "");
     toast(missing
-      ? "The database has not been set up for announcements yet \u2014 run announcements.sql in the Supabase SQL editor, then try again."
+      ? "The database has not been set up for announcements yet \u2014 run migrate.sql in the Supabase SQL editor, then try again."
       : "Could not post \u2014 " + error.message, 7000);
     return;
   }

@@ -390,6 +390,13 @@ tr.me td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .rxb.still:hover{background:var(--surface-2);border-color:var(--rule);color:var(--ink-mid)}
 @media (max-width:520px){ .rxb .rxl{display:none} .rxb{padding:3px 9px} }
 
+/* On a live card there is no room for the words and no need for them: the
+   card is small, the two icons are the same two everywhere else in the app,
+   and a count beside them is the whole message. */
+.lrx{margin-top:9px;gap:5px}
+.lrx .rxb{padding:2px 8px;font-size:11px;background:var(--surface)}
+.livecard.self .lrx .rxb{background:var(--surface)}
+
 .x{appearance:none;border:0;background:transparent;color:var(--ink-soft);cursor:pointer;
   font-size:16px;line-height:1;padding:4px 7px;border-radius:var(--r-xs);
   transition:color var(--fast) var(--ease),background var(--fast) var(--ease)}

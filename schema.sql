@@ -1332,6 +1332,101 @@ revoke execute on function public.reactions_for(uuid[]) from public, anon;
 grant  execute on function public.reactions_for(uuid[]) to authenticated;
 
 -- ============================================================
+--  REACTIONS ON A RUNNING TIMER
+--  ------------------------------------------------------------
+--  The same two answers, aimed at somebody who is working right
+--  now rather than at a block they already logged. Cheering
+--  somebody on at 9pm is the half of this the finished-session
+--  reactions cannot do, and a four-hour clock still ticking is
+--  the most natural thing in the app to raise an eyebrow at.
+--
+--  Two ways a reaction stops being about the thing it was
+--  aimed at, and both are handled without a sweeper job:
+--
+--    * They stop the timer. The row in live_timers goes, and
+--      the foreign key takes these with it.
+--    * They stop and start a new one. The row stays but its
+--      started_at moves, so every reaction stores the
+--      started_at it was aimed at, reads ignore any that do
+--      not match, and the next reaction clears them out.
+-- ============================================================
+create table if not exists public.timer_reactions (
+  owner_id       uuid not null references public.live_timers(user_id) on delete cascade,
+  user_id        uuid not null references auth.users(id)              on delete cascade,
+  kind           text not null check (kind in ('kudos', 'sus')),
+  for_started_at timestamptz not null,
+  created_at     timestamptz not null default now(),
+  primary key (owner_id, user_id)
+);
+
+alter table public.timer_reactions enable row level security;
+drop policy if exists "timer reactions read all"   on public.timer_reactions;
+drop policy if exists "timer reactions delete own" on public.timer_reactions;
+
+create policy "timer reactions read all" on public.timer_reactions
+  for select to authenticated using (true);
+create policy "timer reactions delete own" on public.timer_reactions
+  for delete to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+
+revoke insert, update on public.timer_reactions from anon, authenticated;
+
+create or replace function public.react_timer(owner_id uuid, kind text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  /* Copied out of the arguments for the same reason react() does it: a
+     parameter sharing a column's name makes the insert ambiguous. */
+  own   uuid := react_timer.owner_id;
+  me    uuid := auth.uid();
+  k     text := nullif(btrim(coalesce(react_timer.kind, '')), '');
+  began timestamptz;
+  had   text;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'why', 'You are not signed in');
+  end if;
+  if k is not null and k not in ('kudos', 'sus') then
+    return jsonb_build_object('ok', false, 'why', 'Not a reaction');
+  end if;
+  if own = me then
+    return jsonb_build_object('ok', false, 'why', 'You cannot react to your own timer');
+  end if;
+
+  select t.started_at into began from public.live_timers t where t.user_id = own;
+  if began is null then
+    return jsonb_build_object('ok', false, 'why', 'They are not running a timer');
+  end if;
+
+  /* Anything aimed at a previous run of this person's timer is no longer about
+     what is on the screen. Cleared here rather than by a job. */
+  delete from public.timer_reactions r
+   where r.owner_id = own and r.for_started_at <> began;
+
+  select r.kind into had
+    from public.timer_reactions r
+   where r.owner_id = own and r.user_id = me and r.for_started_at = began;
+
+  if k is null or k = had then
+    delete from public.timer_reactions r where r.owner_id = own and r.user_id = me;
+  else
+    insert into public.timer_reactions (owner_id, user_id, kind, for_started_at)
+    values (own, me, k, began)
+    on conflict on constraint timer_reactions_pkey
+      do update set kind = excluded.kind, for_started_at = excluded.for_started_at,
+                    created_at = now();
+  end if;
+
+  return jsonb_build_object('ok', true);
+end $fn$;
+
+revoke execute on function public.react_timer(uuid, text) from public, anon;
+grant  execute on function public.react_timer(uuid, text) to authenticated;
+
+-- ============================================================
 --  TELL THE API ABOUT ALL OF THAT
 --  ------------------------------------------------------------
 --  PostgREST answers sb.rpc() from a cached picture of the schema,
