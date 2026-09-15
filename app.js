@@ -1756,7 +1756,6 @@ function paintCountdown() {
 
 function renderHome() {
   paintClassWarn();
-  drawLiveHistory();
   paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
   $("h-date").value = CUR;
@@ -2503,6 +2502,11 @@ function renderCrew() {
 
   drawRace(board, days);
   drawStack(board, days);
+  /* Drawn here rather than on Today because it sits with the other two charts
+     now. Unlike them it ignores the range chips on purpose: it is always the
+     last two days, because "how busy does the room get" is a question about
+     hours of the day, and a month of hours would be a smear. */
+  drawLiveHistory();
 
   /* head to head. Rebuilt when the set of people actually changes — somebody
      joining, or somebody turning private mode on — and left alone otherwise,
