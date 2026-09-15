@@ -1493,8 +1493,17 @@ function paintLive(force) {
     .filter(t => now - new Date(t.updated_at || 0).getTime() <
                  (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS));
   const mine = localTimer ? [Object.assign({}, localTimer, { user_id: UID })] : [];
-  const all = mine.concat(rows);
   const msOf = t => t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0);
+
+  /* You first, then whoever has been at it longest, with the paused ones after
+     everybody still going. Deliberately an order that cannot drift between
+     rebuilds: two running clocks grow at the same rate so their places never
+     swap, a paused one is frozen, and paused sitting below running means a
+     frozen clock can never be overtaken into a different row either. Order
+     therefore only changes when somebody starts, pauses or stops — which is
+     exactly what the signature below already triggers a rebuild on. */
+  const all = mine.concat(rows.slice().sort((a, b) =>
+    (a.running === b.running) ? msOf(b) - msOf(a) : (a.running ? -1 : 1)));
 
   /* started_at and acc_ms belong in here. They are what the clock is actually
      derived from, so leaving them out let a changed row be swapped in through
@@ -1527,16 +1536,54 @@ function paintLive(force) {
 
   box.innerHTML = all.map(t => {
     const p = profileOf(t.user_id);
-    return `<div class="livecard ${t.user_id === UID ? "self" : ""}">
-      ${avatarHTML(p, "")}
-      <div style="min-width:0">
-        <div class="t"><span data-clock="${esc(t.user_id)}">${hms(msOf(t))}</span>${
-          t.running ? "" : ' <span style="font-size:11px;color:var(--ink-soft);font-weight:500">paused</span>'}</div>
-        <div class="s">${esc(p.display_name)} · ${esc(t.label || "studying")}</div>
+    const w = splitLabel(t.label);
+    const mine = t.user_id === UID;
+    return `<div class="livecard${mine ? " self" : ""}${t.running ? "" : " paused"} person"
+      data-profile="${esc(t.user_id)}" title="See ${esc(p.display_name)}'s full profile"
+      style="--lc-subj:${esc(subjectTint(w.subject))}">
+      <div class="lc-top">
+        ${avatarHTML(p, "sm")}
+        <span class="lc-who">${esc(mine ? "You" : p.display_name)}</span>
+        ${t.running ? '<span class="dot"></span>' : '<span class="lc-paused">paused</span>'}
       </div>
-      ${t.running ? '<div class="dot" style="margin-left:auto"></div>' : ""}
+      <div class="lc-time" data-clock="${esc(t.user_id)}">${hms(msOf(t))}</div>
+      <div class="lc-subj">${esc(w.subject)}</div>
+      ${w.area ? `<div class="lc-area">${esc(w.area)}</div>` : ""}
     </div>`;
   }).join("");
+
+  const sub = $("live-sub");
+  if (sub) {
+    const running = all.filter(t => t.running).length;
+    sub.textContent = running
+      ? `${running} ${running === 1 ? "person is" : "people are"} on the clock right now`
+      : "Timers update as they run.";
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   A timer row carries its subject and area already joined into one string,
+   because that is the only way somebody else's subject can be named at all:
+   since clients stopped downloading the whole database they hold their own
+   subjects and nobody else's, so there is no id to look up. Splitting on the
+   first separator gets them back apart — startTimer builds it subject-first —
+   and a label with no separator is left whole rather than guessed at.
+   --------------------------------------------------------------------------- */
+function splitLabel(label) {
+  const s = String(label || "studying");
+  const i = s.indexOf(" \u00b7 ");
+  return i === -1 ? { subject: s, area: "" }
+                  : { subject: s.slice(0, i), area: s.slice(i + 3) };
+}
+
+/* Same subject, same colour, on every card and every reload, without needing
+   anybody else's subject row. Scanning for who else is on English Advanced is
+   the thing people actually do with this strip. */
+function subjectTint(name) {
+  const k = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  let h = 0;
+  for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
 }
 
 /* The header strip: who is on the track right now. */
