@@ -215,7 +215,12 @@ const DB = {
   daily: new Map(),      /* user_id -> { days: {"2026-09-14":[minutes,sessions]}, first_day, ... } */
   crewSubjects: [],      /* [{ key, label, takers:[user_id] }] for the leaderboard picker */
   feed: [],              /* the 40 most recent sessions crew-wide, labels included */
-  allSessions: null      /* only ever filled for the admin console */
+  allSessions: null,     /* only ever filled for the admin console */
+  /* session_id -> { kudos:[uid], sus:[uid] }, only for rows currently drawable:
+     your own day, the forty in the feed, and whoever's profile is open. Asked
+     for by id rather than held whole — this app spent a commit getting the
+     habit of downloading tables it only needed forty rows of. */
+  reactions: {}
 };
 
 /* How far back the rollup reaches. Long enough for any streak anyone will
@@ -554,6 +559,7 @@ async function onSession(session) {
     show("app");
     subscribeRealtime();
     restoreTimer();
+    try { await loadReactions(); } catch (e) { /* counts can wait */ }
     renderAll();
     initReminders();
     loadPokes();
@@ -722,6 +728,10 @@ async function runRefresh(rerender, full) {
       refreshWantsAll = false;
       if (await (wantAll ? loadAll() : loadCrew())) {
         ME = DB.profiles.find(p => p.id === UID) || ME;
+        /* After the rows, because it asks by id for exactly the ones just
+           read. Failing here leaves the entries drawn without their counts,
+           which is a great deal better than not drawing the entries. */
+        try { await loadReactions(); } catch (e) { /* counts can wait */ }
         if (rerender !== false) renderAll();
       } else {
         refreshQueued = true;            /* stale read — go round again */
@@ -1779,9 +1789,116 @@ function renderHome() {
 
   paintLive();
 }
+/* ---------------------------------------------------------------------------
+   REACTIONS
+
+   Two answers to somebody's session: kudos, or calling it suspicious. The
+   second is the honest half of a public leaderboard — six hours on a Tuesday
+   invites a raised eyebrow, and it is better as a button than as a rumour.
+
+   Deliberately not anonymous. Every reaction names who left it, in the title
+   and under the count, because an anonymous pile-on aimed at a named person
+   is a different and worse thing than a visible one, and everything else
+   here is public and named already. The database allows one per person per
+   session, so the counts cannot be stacked.
+   --------------------------------------------------------------------------- */
+const RX_KINDS = [
+  { kind: "kudos", icon: "\ud83d\udc4f", label: "Kudos",      verb: "gave kudos" },
+  { kind: "sus",   icon: "\ud83e\udd28", label: "Sus",        verb: "called it sus" }
+];
+const rxOf = id => DB.reactions[id] || { kudos: [], sus: [] };
+
+/* Who, by name, for the tooltip — capped so one popular session cannot build a
+   title attribute the length of the room. */
+function rxWho(ids, verb) {
+  if (!ids || !ids.length) return "";
+  const names = ids.slice(0, 12).map(u => (profileOf(u) || {}).display_name || "someone");
+  const more = ids.length - names.length;
+  return names.join(", ") + (more > 0 ? ` and ${more} more` : "") + " " + verb;
+}
+
+function reactionsHTML(s) {
+  const r = rxOf(s.id);
+  const own = s.user_id === UID;
+  const bits = RX_KINDS.map(k => {
+    const ids = r[k.kind] || [];
+    const mine = ids.indexOf(UID) > -1;
+    /* On your own session there is nothing to press, so a count that is zero
+       is simply not drawn — an empty row of dead buttons under every entry is
+       noise on the one screen you look at most. */
+    if (own && !ids.length) return "";
+    const title = ids.length ? rxWho(ids, k.verb)
+                             : (own ? "" : "Nobody yet \u2014 " + k.label.toLowerCase());
+    return `<button type="button" class="rxb rx-${k.kind}${mine ? " on" : ""}${own ? " still" : ""}"
+      ${own ? "disabled" : `data-react="${k.kind}" data-rxid="${esc(s.id)}"`}
+      title="${esc(title)}"><span aria-hidden="true">${k.icon}</span><span class="rxn">${
+        ids.length || ""}</span><span class="rxl">${esc(k.label)}</span></button>`;
+  }).join("");
+  return bits ? `<div class="rx">${bits}</div>` : "";
+}
+
+/* One press. The row is moved locally first so the button answers instantly,
+   and put back if the database disagrees. */
+async function sendReaction(id, kind) {
+  const r = rxOf(id);
+  const before = { kudos: (r.kudos || []).slice(), sus: (r.sus || []).slice() };
+  const had = before.kudos.indexOf(UID) > -1 ? "kudos"
+            : before.sus.indexOf(UID) > -1 ? "sus" : null;
+  const next = { kudos: before.kudos.filter(u => u !== UID), sus: before.sus.filter(u => u !== UID) };
+  if (kind !== had) next[kind].push(UID);
+  DB.reactions[id] = next;
+  repaintReactions(id);
+
+  const { data, error } = await sb.rpc("react", { session_id: id, kind: kind === had ? null : kind });
+  if (error || (data && data.ok === false)) {
+    DB.reactions[id] = before;
+    repaintReactions(id);
+    const why = (data && data.why) ||
+      (/schema cache|could not find the function/i.test((error && error.message) || "")
+        ? "Reactions are not set up on the database yet \u2014 run reactions.sql"
+        : (error && error.message) || "Could not react");
+    toast(why, 4200);
+  }
+}
+
+/* The same session can be on screen more than once — your own day and the feed
+   both draw it — so every copy is redrawn, not just the one that was pressed. */
+function repaintReactions(id) {
+  const s = DB.sessions.find(x => x.id === id) || DB.feed.find(x => x.id === id)
+         || GUEST.sessions.find(x => x.id === id);
+  if (!s) return;
+  document.querySelectorAll('.entry[data-sid="' + CSS.escape(id) + '"] .rx').forEach(el => {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = reactionsHTML(s);
+    const fresh = wrap.firstElementChild;
+    if (fresh) el.replaceWith(fresh); else el.remove();
+  });
+}
+
+/* Asked for by id, for exactly the rows that can be drawn right now. */
+async function loadReactions() {
+  if (!sb || !UID) return;
+  const ids = [].concat(
+    DB.sessions.map(s => s.id),
+    DB.feed.map(s => s.id),
+    GUEST.sessions.map(s => s.id)
+  ).filter(Boolean);
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) { DB.reactions = {}; return; }
+  const { data, error } = await sb.rpc("reactions_for", { ids: uniq });
+  /* A project that has not run reactions.sql yet simply has no reactions;
+     that is not an error worth putting on anybody's screen. */
+  if (error) return;
+  const next = {};
+  (data || []).forEach(r => {
+    next[r.session_id] = { kudos: r.kudos_by || [], sus: r.sus_by || [] };
+  });
+  DB.reactions = next;
+}
+
 function entryHTML(s, withWho) {
   const p = profileOf(s.user_id);
-  return `<div class="entry"><div class="top">
+  return `<div class="entry" data-sid="${esc(s.id)}"><div class="top">
     <div>${withWho ? `<span class="wholink" data-profile="${esc(s.user_id)}" title="See ${esc(p.display_name)}'s full profile">${esc(p.display_name)}</span><span style="color:var(--ink-soft);font-size:11.5px"> · </span>` : ""}
       <strong style="color:${colourOf(s)}">${esc(labelOf(s))}</strong>
       ${withWho ? `<span style="color:var(--ink-soft);font-size:11.5px"> · ${fmtD(s.day)}</span>` : ""}</div>
@@ -1789,7 +1906,7 @@ function entryHTML(s, withWho) {
     ${s.user_id === UID ? `<span class="acts">
       <button class="x pencil" data-edit="${s.id}" title="Edit this session" aria-label="Edit this session">✎</button>
       <button class="x" data-del="${s.id}" title="Remove" aria-label="Remove this session">×</button></span>` : "<span></span>"}
-  </div>${s.note ? `<div class="enote">${esc(s.note)}</div>` : ""}</div>`;
+  </div>${s.note ? `<div class="enote">${esc(s.note)}</div>` : ""}${reactionsHTML(s)}</div>`;
 }
 /* Every list of entries — today, my log, the feed, a profile — gets the same
    two buttons on your own rows, so a session can be fixed wherever you find it. */
@@ -2782,6 +2899,9 @@ async function openProfile(id) {
         sb.from("areas").select("*").eq("user_id", id).order("position")
       ]);
       GUEST = { id, subjects: su.data || [], areas: ar.data || [], sessions: se.data || [] };
+      /* Their whole history has just arrived and none of it has counts yet,
+         so ask again now that there are ids to ask about. */
+      try { await loadReactions(); } catch (e) { /* counts can wait */ }
     }
     all = GUEST.sessions.slice();
   }
@@ -2891,6 +3011,14 @@ async function openProfile(id) {
 document.addEventListener("click", e => {
   const t = e.target.closest && e.target.closest("[data-profile]");
   if (t && t.dataset.profile) openProfile(t.dataset.profile);
+});
+
+/* And one for every reaction button, for the same reason and one more: a press
+   swaps the row it was in for a freshly drawn one, so a listener bound to the
+   button would be thrown away by the very click that used it. */
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-react]");
+  if (b && b.dataset.rxid) sendReaction(b.dataset.rxid, b.dataset.react);
 });
 function closeProfile() { openProfileId = null; $("ov-profile").classList.remove("on"); }
 document.querySelectorAll("[data-closeprofile]").forEach(b => b.addEventListener("click", closeProfile));
