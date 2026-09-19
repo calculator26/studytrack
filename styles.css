@@ -884,11 +884,17 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 #reactbar .pb-text span{font-size:12.5px;color:var(--ink-mid)}
 
 /* "3.4 h today" beside a live card's clock: the thing you would otherwise
-   have opened their profile to find out. */
-.daychip{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;
-  letter-spacing:.02em;padding:2px 7px;border-radius:999px;
-  color:var(--dc,var(--ink-soft));background:var(--surface-3);
+   have opened their profile to find out. The number is ink, always — the
+   attainment ramp is a set of fill colours and every step of it fails
+   contrast as small text. The ramp goes on the dot instead, which only has
+   to be a visible shape, and the ring makes even the pale yellow one read. */
+.daychip{display:inline-flex;align-items:center;gap:5px;
+  font-size:11px;font-weight:700;letter-spacing:.01em;
+  padding:2px 8px 2px 6px;border-radius:999px;
+  color:var(--ink);background:var(--surface-3);
   border:1px solid var(--rule);font-variant-numeric:tabular-nums;white-space:nowrap}
+.daychip .dcdot{width:7px;height:7px;border-radius:50%;flex:none;
+  box-shadow:inset 0 0 0 1px rgba(16,22,32,.28)}
 .lc-today{margin-top:7px}
 
 @media (max-width:640px){

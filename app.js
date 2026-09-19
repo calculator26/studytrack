@@ -2140,10 +2140,15 @@ function dayChip(t, ms) {
      point of view; the session will be filed against the day it is stopped on,
      so counting all of it here agrees with where it is about to land. */
   const total = logged + (ms || 0) / 3600000;
-  const lvl = lvlColour(goalFor(t.user_id, todayISO()) > 0
-    ? total / goalFor(t.user_id, todayISO()) : (total > 0 ? 1 : 0), total > 0);
-  return `<span class="daychip" style="--dc:${esc(lvl === "var(--none)" ? "var(--ink-soft)" : lvl)}"
-    >${f1(total)} h today</span>`;
+  const goal = goalFor(t.user_id, todayISO());
+  const lvl = lvlColour(goal > 0 ? total / goal : (total > 0 ? 1 : 0), total > 0);
+  /* The colour is on a dot, not on the number. The attainment ramp is a set of
+     FILL colours — it is what the progress lanes and the heatmap are painted
+     with — and as small text on a near-white chip every step of it fails
+     contrast, the yellow at 1.3:1 to the point of being invisible. Ink reads
+     at 16:1; the dot carries the same meaning it carries everywhere else. */
+  return `<span class="daychip"><i class="dcdot" style="background:${esc(lvl)}"
+    aria-hidden="true"></i>${f1(total)} h today</span>`;
 }
 
 function timerReactionsHTML(t, big) {
