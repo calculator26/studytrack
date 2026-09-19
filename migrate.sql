@@ -2,19 +2,17 @@
 --  MIGRATE — everything added since the last time you ran schema.sql
 --  -----------------------------------------------------------------------
 --  Paste the whole file into the Supabase SQL editor and run it. That is the
---  only step; there is nothing to do afterwards.
+--  only step. Safe to run as many times as you like, and the last statement
+--  prints whether it worked.
 --
---  Why this file exists rather than "just re-run schema.sql": the editor runs
---  a script as one transaction and aborts on the first error, showing you only
---  that error. New work lands at the bottom of an eleven-hundred-line file, so
---  it is the first thing lost to an unrelated failure anywhere above it and
---  the last place anyone thinks to look. This is short enough to fail loudly.
+--  Why this file and not schema.sql: the editor runs a script as one
+--  transaction and aborts on the first error, showing only that error. New
+--  work lands at the bottom of a very long file, so it is the first thing
+--  lost to an unrelated failure above it and the last place anyone looks.
 --
---  Safe to run as many times as you like. Every statement is written to be
---  repeatable, and the last one prints whether it worked.
---
---  Needs public.sessions, public.messages, public.live_timers, public.profiles
---  and public.is_admin() to exist, which they do if the app runs at all.
+--  Nothing here writes to a table the app reads from, and every trigger
+--  swallows its own errors, so a failure in the record cannot fail a
+--  person's timer, session, reaction or message. There is a test for that.
 -- =========================================================================
 
 -- ============================================================
@@ -448,9 +446,356 @@ $$;
 revoke execute on function public.live_history(int) from public, anon;
 grant  execute on function public.live_history(int) to authenticated;
 
+-- ============================================================
+--  THE RECORD
+--  ------------------------------------------------------------
+--  Keep what the app currently throws away, so a feature thought
+--  of next year is not blocked by a year of missing history.
+--
+--  WHAT IS DELIBERATELY *NOT* RECORDED HERE, AND WHY
+--  Sessions, messages, profiles, goals and subjects are already
+--  permanent rows. Copying them into a log would double the
+--  storage bill to learn nothing, so this records only what
+--  vanishes:
+--
+--    * a live study span — live_timers is one row per person that
+--      gets overwritten and then deleted, so every span the app
+--      has ever shown is already gone
+--    * the old values behind an edit, and anything deleted
+--    * reactions taken back
+--    * who signed in, and when
+--
+--  THE VOLUME TRAP, WHICH IS THE WHOLE REASON TO READ THIS
+--  A running client writes to live_timers every sixty seconds to
+--  say "still here". A naive row-level trigger would log every one
+--  of those: four hundred people times sixty an hour is half a
+--  million rows a day and a bill to match. So the trigger below
+--  ignores any update that did not change something a person did,
+--  and there is a test for exactly that.
+--
+--  Rough size at four hundred people: spans about 1,200 rows a
+--  day, events about 6,000 — call it two megabytes a day. Events
+--  older than 400 days are pruned, which keeps a whole HSC year;
+--  spans are small enough to keep forever.
+-- ============================================================
+
+-- ------------------------------------------------------------
+--  Every live study span, start to finish.
+-- ------------------------------------------------------------
+create table if not exists public.study_spans (
+  id          bigserial primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  started_at  timestamptz not null,
+  ended_at    timestamptz,                  -- null while it is still running
+  ended_why   text,                         -- stopped | restarted | expired
+  label       text,
+  subject_id  uuid,
+  area_id     uuid,
+  acc_ms      bigint,                       -- what the clock read at the end
+  day         date not null default (now() at time zone 'Australia/Sydney')::date
+);
+create index if not exists study_spans_user_idx on public.study_spans(user_id, started_at desc);
+create index if not exists study_spans_open_idx on public.study_spans(user_id) where ended_at is null;
+create index if not exists study_spans_day_idx  on public.study_spans(day);
+
+-- ------------------------------------------------------------
+--  Everything else, one shape, so a new kind of event needs no
+--  migration — only a new string.
+-- ------------------------------------------------------------
+create table if not exists public.events (
+  id      bigserial primary key,
+  at      timestamptz not null default now(),
+  actor   uuid,                             -- who did it
+  kind    text not null,                    -- 'reaction.remove', 'session.delete', ...
+  subject uuid,                             -- who it was done to, when that differs
+  ref     uuid,                             -- the row it concerns
+  data    jsonb not null default '{}'::jsonb
+);
+create index if not exists events_at_idx    on public.events(at desc);
+create index if not exists events_kind_idx  on public.events(kind, at desc);
+create index if not exists events_actor_idx on public.events(actor, at desc);
+
+alter table public.study_spans enable row level security;
+alter table public.events      enable row level security;
+drop policy if exists "spans read"  on public.study_spans;
+drop policy if exists "events read" on public.events;
+
+-- Your own, or everything if you run the console. Nobody writes to either
+-- from a browser at all: the triggers below are the only authors.
+create policy "spans read" on public.study_spans
+  for select to authenticated using (user_id = auth.uid() or public.is_admin());
+create policy "events read" on public.events
+  for select to authenticated using (actor = auth.uid() or public.is_admin());
+
+revoke insert, update, delete on public.study_spans from anon, authenticated;
+revoke insert, update, delete on public.events      from anon, authenticated;
+
+-- ------------------------------------------------------------
+--  Writing to the log must never be able to fail a real write.
+--  Everything goes through here, and here swallows its own
+--  errors: a missing column or a bad cast costs a log line, not
+--  somebody's session.
+-- ------------------------------------------------------------
+create or replace function public.log_event(
+  p_kind text, p_actor uuid, p_subject uuid, p_ref uuid, p_data jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  insert into public.events (actor, kind, subject, ref, data)
+  values (p_actor, p_kind, p_subject, p_ref, coalesce(p_data, '{}'::jsonb));
+exception when others then
+  return;                                   -- never break the caller
+end $fn$;
+
+revoke all on function public.log_event(text, uuid, uuid, uuid, jsonb) from public, anon, authenticated;
+
+-- ------------------------------------------------------------
+--  LIVE STUDY SPANS
+--
+--  The heartbeat is the thing to get right. A running client
+--  touches updated_at every sixty seconds; none of those are
+--  events. Only a change to started_at, running or the label is
+--  something a person did, and only those are written.
+-- ------------------------------------------------------------
+create or replace function public.trg_live_timers_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.study_spans (user_id, started_at, label, subject_id, area_id)
+    values (new.user_id, new.started_at, new.label, new.subject_id, new.area_id);
+    perform public.log_event('timer.start', new.user_id, null, null,
+      jsonb_build_object('label', new.label, 'started_at', new.started_at));
+
+  elsif tg_op = 'UPDATE' then
+    -- The heartbeat, and nothing else, leaves every one of these alone.
+    if new.started_at is not distinct from old.started_at
+       and new.running is not distinct from old.running
+       and new.label   is not distinct from old.label then
+      return null;
+    end if;
+
+    if new.started_at is distinct from old.started_at then
+      -- a fresh run: close whatever was open and begin again
+      update public.study_spans s
+         set ended_at = now(), ended_why = 'restarted', acc_ms = old.acc_ms
+       where s.user_id = old.user_id and s.ended_at is null;
+      insert into public.study_spans (user_id, started_at, label, subject_id, area_id)
+      values (new.user_id, new.started_at, new.label, new.subject_id, new.area_id);
+      perform public.log_event('timer.restart', new.user_id, null, null,
+        jsonb_build_object('label', new.label));
+
+    elsif new.running is distinct from old.running then
+      perform public.log_event(case when new.running then 'timer.resume' else 'timer.pause' end,
+        new.user_id, null, null, jsonb_build_object('acc_ms', new.acc_ms, 'label', new.label));
+
+    else
+      -- they changed what they are working on mid-session
+      update public.study_spans s
+         set label = new.label, subject_id = new.subject_id, area_id = new.area_id
+       where s.user_id = new.user_id and s.ended_at is null;
+      perform public.log_event('timer.relabel', new.user_id, null, null,
+        jsonb_build_object('from', old.label, 'to', new.label));
+    end if;
+
+  elsif tg_op = 'DELETE' then
+    update public.study_spans s
+       set ended_at = now(), ended_why = 'stopped', acc_ms = old.acc_ms
+     where s.user_id = old.user_id and s.ended_at is null;
+    perform public.log_event('timer.stop', old.user_id, null, null,
+      jsonb_build_object('acc_ms', old.acc_ms, 'label', old.label));
+  end if;
+  return null;
+exception when others then
+  return null;                              -- a lost log line, never a lost timer
+end $fn$;
+
+drop trigger if exists live_timers_log on public.live_timers;
+create trigger live_timers_log
+  after insert or update or delete on public.live_timers
+  for each row execute function public.trg_live_timers_log();
+
+-- ------------------------------------------------------------
+--  What an edit painted over, and what a delete took away.
+--  The old row is kept whole, so a question nobody has asked yet
+--  can still be answered.
+-- ------------------------------------------------------------
+create or replace function public.trg_sessions_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  if tg_op = 'UPDATE' then
+    if to_jsonb(new) - 'updated_at' is not distinct from to_jsonb(old) - 'updated_at' then
+      return null;
+    end if;
+    perform public.log_event('session.edit', auth.uid(), new.user_id, new.id,
+      jsonb_build_object('before', to_jsonb(old), 'after', to_jsonb(new)));
+  elsif tg_op = 'DELETE' then
+    perform public.log_event('session.delete', auth.uid(), old.user_id, old.id,
+      jsonb_build_object('row', to_jsonb(old)));
+  end if;
+  return null;
+exception when others then return null;
+end $fn$;
+
+drop trigger if exists sessions_log on public.sessions;
+create trigger sessions_log
+  after update or delete on public.sessions
+  for each row execute function public.trg_sessions_log();
+
+-- ------------------------------------------------------------
+--  Reactions, including the ones taken back — the table only
+--  ever holds the current answer, so without this a change of
+--  mind is invisible.
+-- ------------------------------------------------------------
+create or replace function public.trg_reactions_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare owner uuid;
+begin
+  if tg_op = 'DELETE' then
+    perform public.log_event(tg_table_name || '.remove', old.user_id,
+      case when tg_table_name = 'timer_reactions' then old.owner_id else null end,
+      case when tg_table_name = 'session_reactions' then old.session_id else null end,
+      jsonb_build_object('kind', old.kind));
+  else
+    perform public.log_event(tg_table_name || '.' || lower(tg_op), new.user_id,
+      case when tg_table_name = 'timer_reactions' then new.owner_id else null end,
+      case when tg_table_name = 'session_reactions' then new.session_id else null end,
+      jsonb_build_object('kind', new.kind));
+  end if;
+  return null;
+exception when others then return null;
+end $fn$;
+
+drop trigger if exists session_reactions_log on public.session_reactions;
+create trigger session_reactions_log
+  after insert or update or delete on public.session_reactions
+  for each row execute function public.trg_reactions_log();
+
+drop trigger if exists timer_reactions_log on public.timer_reactions;
+create trigger timer_reactions_log
+  after insert or update or delete on public.timer_reactions
+  for each row execute function public.trg_reactions_log();
+
+-- ------------------------------------------------------------
+--  Profile changes, which is where private mode, display names
+--  and mutes live. Skips the columns that move on their own.
+-- ------------------------------------------------------------
+create or replace function public.trg_profiles_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  if to_jsonb(new) - 'updated_at' is not distinct from to_jsonb(old) - 'updated_at' then
+    return null;
+  end if;
+  perform public.log_event('profile.edit', auth.uid(), new.id, new.id,
+    jsonb_build_object('before', to_jsonb(old), 'after', to_jsonb(new)));
+  return null;
+exception when others then return null;
+end $fn$;
+
+drop trigger if exists profiles_log on public.profiles;
+create trigger profiles_log
+  after update on public.profiles
+  for each row execute function public.trg_profiles_log();
+
+-- ------------------------------------------------------------
+--  Anything the app wants to record that no table sees: opening
+--  the app, a tab, a nudge sent. Rate limited so a loop in a
+--  browser cannot fill the table.
+-- ------------------------------------------------------------
+create or replace function public.note(kind text, data jsonb default '{}'::jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare recent int;
+begin
+  if auth.uid() is null then return; end if;
+  if kind is null or length(kind) > 40 then return; end if;
+  select count(*) into recent from public.events e
+   where e.actor = auth.uid() and e.at > now() - interval '1 minute';
+  if recent >= 30 then return; end if;
+  perform public.log_event('app.' || kind, auth.uid(), null, null, data);
+end $fn$;
+
+revoke execute on function public.note(text, jsonb) from public, anon;
+grant  execute on function public.note(text, jsonb) to authenticated;
+
+-- ------------------------------------------------------------
+--  Keeping it from growing forever. Spans are small and stay;
+--  events are trimmed past a year and a bit, which covers a whole
+--  HSC year with room either side.
+-- ------------------------------------------------------------
+create or replace function public.prune_events(keep_days int default 400)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare n int;
+begin
+  delete from public.events where at < now() - (greatest(keep_days, 30) || ' days')::interval;
+  get diagnostics n = row_count;
+  return n;
+end $fn$;
+
+revoke all on function public.prune_events(int) from public, anon, authenticated;
+
+-- Weekly, if pg_cron is there. It already is on this project — run_nudges uses
+-- it — but a project without it just keeps everything, which breaks nothing.
+do $$
+begin
+  perform cron.unschedule('prune-events');
+exception when others then null;
+end $$;
+do $$
+begin
+  perform cron.schedule('prune-events', '17 4 * * 0', $c$select public.prune_events(400)$c$);
+exception when others then null;
+end $$;
+
+-- ------------------------------------------------------------
+--  Two views so the questions you actually have are one line.
+-- ------------------------------------------------------------
+create or replace view public.study_spans_done as
+  select s.*,
+         extract(epoch from (s.ended_at - s.started_at)) as wall_seconds,
+         s.acc_ms / 1000.0                               as clock_seconds
+    from public.study_spans s
+   where s.ended_at is not null;
+
+create or replace view public.live_by_hour as
+  select date_trunc('hour', gs) as hour, count(*) as people
+    from public.study_spans s,
+         generate_series(date_trunc('hour', s.started_at),
+                         date_trunc('hour', coalesce(s.ended_at, now())),
+                         interval '1 hour') gs
+   group by 1
+   order by 1;
+
+grant select on public.study_spans_done, public.live_by_hour to authenticated;
+
 -- -------------------------------------------------------------------------
---  The API answers rpc() from a cached picture of the schema, so a function
---  created a second ago can be real in Postgres and still missing from it.
+--  rpc() is answered from a cached picture of the schema, so a function made
+--  a second ago can be real in Postgres and still missing from the API.
 -- -------------------------------------------------------------------------
 notify pgrst, 'reload schema';
 
@@ -459,15 +804,15 @@ notify pgrst, 'reload schema';
 -- -------------------------------------------------------------------------
 select
   (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'send_announcement')      as announcements,
+    where n.nspname='public' and p.proname='send_announcement')                 as announcements,
   (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'react')                  as session_reactions,
+    where n.nspname='public' and p.proname='react')                             as session_reactions,
   (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'reactions_for')          as reaction_counts,
+    where n.nspname='public' and p.proname='react_timer')                       as timer_reactions,
   (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'react_timer')            as timer_reactions,
+    where n.nspname='public' and p.proname='note_live')                         as busyness_sampler,
   (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'live_history')           as live_graph,
-  (select count(*) = 2 from information_schema.columns
-    where table_schema = 'public' and table_name = 'messages'
-      and column_name in ('announcement','ann_label'))                   as announcement_columns;
+    where n.nspname='public' and p.proname='live_history')                      as busyness_graph,
+  (select count(*) = 2 from information_schema.tables
+    where table_schema='public' and table_name in ('events','study_spans'))     as the_record,
+  (select count(*) = 1 from pg_trigger where tgname = 'live_timers_log')         as span_trigger;

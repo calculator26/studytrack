@@ -80,7 +80,17 @@ const colourClash = c =>
 let sb = null;
 try {
   if (window.supabase && CFG.SUPABASE_URL && !/YOUR-PROJECT/.test(CFG.SUPABASE_URL)) {
-    sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+    /* These are the library's defaults. They are written out anyway because
+       they are the difference between "signed in until you say otherwise" and
+       "signed in until you close the tab", and a default is a poor place for
+       something that important to live silently. */
+    sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,          /* the session survives a closed tab */
+        autoRefreshToken: true,        /* and is renewed before it expires */
+        detectSessionInUrl: true
+      }
+    });
   }
 } catch (e) { console.error(e); }
 
@@ -511,9 +521,33 @@ function show(which) {
 
   /* This is what actually drives the app after a sign-in or sign-up. Without it
      a successful sign-in leaves you sitting on the login screen. */
-  sb.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_OUT" || !session) { UID = null; ME = null; show("auth"); return; }
-    if (event === "SIGNED_IN" || event === "USER_UPDATED") enterSession(session);
+  sb.auth.onAuthStateChange(async (event, session) => {
+    /* The ONLY thing that takes somebody to the login screen. Pressing sign
+       out fires this; nothing else here does. */
+    if (event === "SIGNED_OUT") {
+      UID = null; ME = null; loadSucceeded(); show("auth"); return;
+    }
+
+    if (!session) {
+      /* Events arrive with no session for reasons that are not a sign-out —
+         INITIAL_SESSION before the stored one has been read back, a refresh
+         in flight. Treating those as a sign-out is what made the app throw
+         people out at random, so ask the client what it actually holds. */
+      const { data } = await sb.auth.getSession();
+      if (data && data.session) return;              /* false alarm */
+      if (UID) return;                               /* already in; leave it up */
+      show("auth");
+      return;
+    }
+
+    /* TOKEN_REFRESHED lands roughly hourly, and on some versions SIGNED_IN
+       fires again when a tab regains focus. Re-entering would blank the
+       screen to the spinner and re-read everything for no reason, so the same
+       person already on screen just gets a quiet refresh. */
+    if (UID === session.user.id && ME) { refreshSoon(); return; }
+    if (event === "SIGNED_IN" || event === "USER_UPDATED" || event === "INITIAL_SESSION") {
+      enterSession(session);
+    }
   });
 })();
 
@@ -554,8 +588,12 @@ async function onSession(session) {
     await loadAll();
     ME = DB.profiles.find(p => p.id === UID) || await ensureProfile(session);
     if (!ME) {
-      show("auth");
-      authMsg("err", "Signed in, but there is no profile row for you and one could not be made. Has schema.sql been run on this project?");
+      /* Also not a reason to show the password box. Whatever is wrong with the
+         profile row, the account is fine and retyping a password cannot touch
+         it — usually this is the signup trigger losing a race, and the retry
+         is what fixes it. */
+      loadFailed(new Error(
+        "Signed in, but your profile row has not appeared yet. If this keeps up, schema.sql may not have been run."));
       return;
     }
     if (!ME.onboarded) { startOnboarding(); return; }
@@ -572,11 +610,75 @@ async function onSession(session) {
        the console entry in Setup if it is. Never blocks the app: a project
        that has not re-run schema.sql simply has no console. */
     if (typeof adminBoot === "function") adminBoot();
+    loadSucceeded();
+    /* One line in the record saying you were here. Promise.resolve because
+       what rpc() returns only has then() on it — the mistake that was
+       throwing everybody back to the login screen. */
+    try {
+      Promise.resolve(sb.rpc("note", { kind: "open", data: {} })).then(() => {}, () => {});
+    } catch (e) { /* older project without the record: nothing to do */ }
   } catch (err) {
     console.error(err);
-    show("auth");
-    authMsg("err", "Signed in, but the data would not load: " + ((err && err.message) || err));
+    /* Being unable to read is not being signed out, and it must never look
+       like it: dropping somebody on the login screen makes them retype a
+       password that was never the problem, and a password cannot fix a
+       flaky line. The session is left exactly as it is and we try again. */
+    loadFailed(err);
   }
+}
+
+/* ---------------------------------------------------------------------------
+   The read did not come back.
+
+   Whatever went wrong, the one thing that is certainly still fine is the
+   session. So: say so, offer a button, and keep trying by ourselves with a
+   backoff, because nine times in ten it is a tunnel or a dropped wifi and it
+   will be working again in twenty seconds.
+   --------------------------------------------------------------------------- */
+let loadRetry = 0, loadRetryHandle = null;
+
+function loadFailed(err) {
+  const why = (err && err.message) || String(err || "unknown");
+  /* Already inside the app with data on screen: do not tear it down over a
+     refresh that failed. A quiet line is the right size of complaint. */
+  if (ME && document.getElementById("app") && !$("app").classList.contains("hide")) {
+    toast("Could not reach the database \u2014 still signed in, trying again.", 4200);
+  } else {
+    show("boot");
+    const box = $("boot");
+    if (box) box.innerHTML =
+      `<div class="bootfail">
+         <strong>Could not load your data</strong>
+         <p>You are still signed in \u2014 this is the connection, not your account.
+            Trying again on its own.</p>
+         <p class="why">${esc(why)}</p>
+         <button class="btn" id="boot-retry">Try now</button>
+       </div>`;
+    const go = $("boot-retry");
+    if (go) go.addEventListener("click", () => { loadRetry = 0; retryLoadNow(); });
+  }
+
+  if (loadRetryHandle) clearTimeout(loadRetryHandle);
+  const wait = Math.min(30000, 2000 * Math.pow(2, Math.min(loadRetry, 4)));
+  loadRetry++;
+  loadRetryHandle = setTimeout(retryLoadNow, wait);
+}
+
+async function retryLoadNow() {
+  if (loadRetryHandle) { clearTimeout(loadRetryHandle); loadRetryHandle = null; }
+  if (!sb) return;
+  const { data } = await sb.auth.getSession();
+  /* Genuinely signed out — the only route to the login screen from here. */
+  if (!data || !data.session) { UID = null; ME = null; show("auth"); return; }
+  const box = $("boot");
+  if (box && box.querySelector(".bootfail")) box.innerHTML = `<div class="spin"></div>`;
+  entering = null;                    /* let the same session be entered again */
+  await enterSession(data.session);
+}
+
+function loadSucceeded() {
+  loadRetry = 0;
+  if (loadRetryHandle) { clearTimeout(loadRetryHandle); loadRetryHandle = null; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1570,7 +1672,12 @@ function paintLive(force) {
     all.forEach(t => {
       const el = box.querySelector('[data-clock="' + t.user_id + '"]');
       if (el) el.textContent = hms(msOf(t));
+      /* The day total has the running session inside it, so it climbs with
+         the clock. Same in-place path — rebuilding would flicker the avatars. */
+      const d = box.querySelector('[data-today="' + t.user_id + '"]');
+      if (d) d.innerHTML = dayChip(t, msOf(t));
     });
+    paintProfileLive();
     return;
   }
 
@@ -1589,6 +1696,8 @@ function paintLive(force) {
       <div class="lc-time" data-clock="${esc(t.user_id)}">${hms(msOf(t))}</div>
       <div class="lc-subj">${esc(w.subject)}</div>
       ${w.area ? `<div class="lc-area">${esc(w.area)}</div>` : ""}
+      <div class="lc-today" data-today="${esc(t.user_id)}"
+        title="Everything logged today, with this session counted in">${dayChip(t, msOf(t))}</div>
       ${timerReactionsHTML(t)}
     </div>`;
   }).join("");
@@ -1692,40 +1801,6 @@ const KEY_DATES = () => [
 const daysUntil = iso =>
   Math.round((parseD(iso).getTime() - parseD(todayISO()).getTime()) / 864e5);
 
-/* ---------------------------------------------------------------------------
-   The class-time warning.
-
-   It is up while school is on and gone from 3:15pm, and once it has gone it
-   does not come back that day — every render after the bell leaves it hidden,
-   so there is nothing to dismiss and nothing that flickers back.
-
-   The tab is often left open across the bell, so as well as checking the
-   clock on every render we set one timer for the exact moment and let it
-   pull the sign down while you are looking at it.
-   --------------------------------------------------------------------------- */
-const CLASSWARN_END_H = 15, CLASSWARN_END_M = 15;   /* 3:15pm, the wearer's own clock */
-let classWarnTimer = null;
-
-function paintClassWarn() {
-  const box = $("classwarn");
-  if (!box) return;
-
-  const now = new Date();
-  const bell = new Date(now);
-  bell.setHours(CLASSWARN_END_H, CLASSWARN_END_M, 0, 0);
-  const left = bell.getTime() - now.getTime();
-
-  if (classWarnTimer) { clearTimeout(classWarnTimer); classWarnTimer = null; }
-
-  if (left <= 0) { box.hidden = true; return; }     /* past the bell: stays down */
-  box.hidden = false;
-  classWarnTimer = setTimeout(() => {
-    classWarnTimer = null;
-    const b = $("classwarn");
-    if (b) b.hidden = true;
-  }, left);
-}
-
 function paintCountdown() {
   const box = $("countdown");
   if (!box) return;
@@ -1755,7 +1830,6 @@ function paintCountdown() {
 }
 
 function renderHome() {
-  paintClassWarn();
   paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
   $("h-date").value = CUR;
@@ -1909,6 +1983,115 @@ function repaintReactions(id) {
 }
 
 /* ---------------------------------------------------------------------------
+   BEING REACTED TO
+
+   Reactions already arrive with the ordinary reads: your own sessions carry
+   their counts, and your own timer's are in with everybody else's. So nothing
+   new is fetched — this only works out which of them you have not seen yet.
+
+   "Seen" is kept per device in localStorage rather than in the database. It
+   is a read receipt for a shrug, and a table of four hundred people's read
+   receipts is a real cost for something nobody would miss.
+
+   The first run on a device seeds the list without announcing anything.
+   Otherwise installing the app on your phone would open with two weeks of
+   kudos you have already had on your laptop.
+   --------------------------------------------------------------------------- */
+const RX_SEEN_KEY = "crew.rxseen.v1";
+let RXSEEN = null;          /* Set of keys, or null until first read */
+let RXNEW = [];             /* [{ by, kind, what }] waiting to be looked at */
+
+function rxSeenLoad() {
+  if (RXSEEN) return RXSEEN;
+  try {
+    const raw = localStorage.getItem(RX_SEEN_KEY);
+    RXSEEN = new Set(raw ? JSON.parse(raw) : null);
+    if (!raw) RXSEEN.seeding = true;
+  } catch (e) { RXSEEN = new Set(); RXSEEN.seeding = true; }
+  return RXSEEN;
+}
+function rxSeenSave() {
+  try {
+    /* Only ever the keys still live, so this cannot grow without limit: a
+       reaction on a session nobody can see any more stops being counted. */
+    localStorage.setItem(RX_SEEN_KEY, JSON.stringify([...RXSEEN].slice(-800)));
+  } catch (e) { /* a full or blocked store just means no memory of it */ }
+}
+
+/* Every reaction currently pointed at you, as stable keys. */
+function myReactionKeys() {
+  const out = [];
+  (DB.sessions || []).forEach(sn => {
+    const r = DB.reactions[sn.id];
+    if (!r) return;
+    RX_KINDS.forEach(k => (r[k.kind] || []).forEach(by =>
+      out.push({ key: "s:" + sn.id + ":" + by + ":" + k.kind, by: by, kind: k.kind,
+                 what: labelOf(sn) })));
+  });
+  const mineNow = DB.timerReactions[UID];
+  if (mineNow) {
+    const t = (DB.timers || []).find(x => x.user_id === UID);
+    const when = t ? t.started_at : "now";
+    RX_KINDS.forEach(k => (mineNow[k.kind] || []).forEach(by =>
+      out.push({ key: "t:" + when + ":" + by + ":" + k.kind, by: by, kind: k.kind,
+                 what: "your session right now" })));
+  }
+  return out;
+}
+
+function checkReactions() {
+  if (!UID) return;
+  const seen = rxSeenLoad();
+  const live = myReactionKeys();
+  const first = seen.seeding;
+  const fresh = [];
+  live.forEach(r => { if (!seen.has(r.key)) { seen.add(r.key); if (!first) fresh.push(r); } });
+  if (first) { delete seen.seeding; rxSeenSave(); paintReactBar(); return; }
+  if (fresh.length) {
+    /* Yours coming back to you is not news. */
+    RXNEW = RXNEW.concat(fresh.filter(r => r.by !== UID));
+    rxSeenSave();
+  }
+  paintReactBar();
+}
+
+function clearReactNotes() { RXNEW = []; paintReactBar(); }
+
+function paintReactBar() {
+  const bar = $("reactbar");
+  if (!bar) return;
+  /* A poke or a mention is somebody asking for you. This is somebody
+     commenting on work already done, so it waits its turn. */
+  if (!RXNEW.length || POKES.length || MENTIONS.length) {
+    bar.className = "hide"; bar.innerHTML = ""; return;
+  }
+  const kudos = RXNEW.filter(r => r.kind === "kudos");
+  const sus   = RXNEW.filter(r => r.kind === "sus");
+  const who = list => [...new Set(list.map(r => (profileOf(r.by) || {}).display_name || "someone"))];
+  const phrase = (list, verb) => {
+    const names = who(list);
+    const head = names.slice(0, 3).join(", ");
+    const more = names.length - Math.min(3, names.length);
+    return head + (more > 0 ? ` and ${more} more` : "") + " " + verb;
+  };
+  const parts = [];
+  if (kudos.length) parts.push(phrase(kudos, kudos.length === 1 ? "gave you kudos" : "gave you kudos"));
+  if (sus.length)   parts.push(phrase(sus, "called your study sus"));
+  const what = [...new Set(RXNEW.map(r => r.what).filter(Boolean))];
+
+  bar.className = "";
+  bar.innerHTML =
+    `<span class="pb-icon" aria-hidden="true">${sus.length && !kudos.length ? "\ud83e\udd28" : "\ud83d\udc4f"}</span>
+     <div class="pb-text">
+       <strong>${esc(parts.join(" \u00b7 "))}</strong>
+       <span>${esc(what.slice(0, 2).join(" \u00b7 ") || "on your study")}</span>
+     </div>
+     <button class="x" id="rb-hide" title="Dismiss" aria-label="Dismiss">\u00d7</button>`;
+  const x = $("rb-hide");
+  if (x) x.addEventListener("click", clearReactNotes);
+}
+
+/* ---------------------------------------------------------------------------
    The same two answers, aimed at a clock that is still running. Cheering
    somebody on at 9pm is the half the session reactions cannot do, and a
    four-hour timer still going is the most natural thing here to raise an
@@ -1934,6 +2117,7 @@ function absorbTimerReactions(res) {
     (e[r.kind] || []).push(r.user_id);
   });
   DB.timerReactions = next;
+  try { checkReactions(); } catch (e) { /* a missed notice is not worth a crash */ }
 }
 
 const timerRxOf = id => DB.timerReactions[id] || { kudos: [], sus: [] };
@@ -1942,18 +2126,45 @@ const timerRxOf = id => DB.timerReactions[id] || { kudos: [], sus: [] };
    asks people to guess, and guessing wrong on the sus one is worse than the
    space it costs. The tooltip is then free to do the thing a label cannot,
    which is name everybody who pressed it. */
+/* ---------------------------------------------------------------------------
+   "Studied today" on a live card.
+
+   The point of it being here is that you should not have to open somebody's
+   profile to answer the only question the strip makes you ask: is this their
+   first hour or their seventh. The running session counts towards it, because
+   from the outside it plainly is study — it just has not been filed yet.
+   --------------------------------------------------------------------------- */
+function dayChip(t, ms) {
+  const logged = hoursFor(t.user_id, todayISO());
+  /* A timer started before midnight is still measuring today from the app's
+     point of view; the session will be filed against the day it is stopped on,
+     so counting all of it here agrees with where it is about to land. */
+  const total = logged + (ms || 0) / 3600000;
+  const lvl = lvlColour(goalFor(t.user_id, todayISO()) > 0
+    ? total / goalFor(t.user_id, todayISO()) : (total > 0 ? 1 : 0), total > 0);
+  return `<span class="daychip" style="--dc:${esc(lvl === "var(--none)" ? "var(--ink-soft)" : lvl)}"
+    >${f1(total)} h today</span>`;
+}
+
 function timerReactionsHTML(t, big) {
-  if (t.user_id === UID) return "";          /* nothing to press on your own */
+  const own = t.user_id === UID;
   const r = timerRxOf(t.user_id);
-  return `<div class="rx lrx${big ? " big" : ""}">` + RX_KINDS.map(k => {
+  const bits = RX_KINDS.map(k => {
     const ids = r[k.kind] || [];
     const mine = ids.indexOf(UID) > -1;
-    return `<button type="button" class="rxb rx-${k.kind}${mine ? " on" : ""}"
-      data-treact="${k.kind}" data-trxid="${esc(t.user_id)}"
-      title="${esc(ids.length ? rxWho(ids, k.verb) : "Nobody yet \u2014 " + k.label.toLowerCase())}"
+    /* Your own session shows what it has collected but is not pressable —
+       and an empty one is not drawn at all, so a quiet session stays clean
+       rather than carrying two permanent zeroes. */
+    if (own && !ids.length) return "";
+    const title = ids.length ? rxWho(ids, k.verb)
+                             : (own ? "" : "Nobody yet \u2014 " + k.label.toLowerCase());
+    return `<button type="button" class="rxb rx-${k.kind}${mine ? " on" : ""}${own ? " still" : ""}"
+      ${own ? "disabled" : `data-treact="${k.kind}" data-trxid="${esc(t.user_id)}"`}
+      title="${esc(title)}"
       ><span aria-hidden="true">${k.icon}</span><span class="rxn">${ids.length || ""}</span
       ><span class="rxl">${esc(k.label)}</span></button>`;
-  }).join("") + `</div>`;
+  }).join("");
+  return bits ? `<div class="rx lrx${big ? " big" : ""}">${bits}</div>` : "";
 }
 
 /* ---------------------------------------------------------------------------
@@ -1982,7 +2193,8 @@ function profileLiveHTML(id) {
     </div>
     <div class="pfl-time" data-pfclock="${esc(id)}">${hms(ms)}</div>
     <div class="pfl-what"><b>${esc(w.subject)}</b>${w.area ? ` \u00b7 ${esc(w.area)}` : ""}</div>
-    <div class="pfl-sub">${f1(hoursFor(id, todayISO()))} h logged today, before this one</div>
+    <div class="pfl-sub">${f1(hoursFor(id, todayISO()) + ms / 3600000)} h today, this session counted in
+      \u00b7 ${f1(hoursFor(id, todayISO()))} h of it already filed</div>
     ${timerReactionsHTML(t, true)}
   </div>`;
 }
@@ -2053,6 +2265,7 @@ async function loadReactions() {
     next[r.session_id] = { kudos: r.kudos_by || [], sus: r.sus_by || [] };
   });
   DB.reactions = next;
+  try { checkReactions(); } catch (e) { /* a missed notice is not worth a crash */ }
 }
 
 function entryHTML(s, withWho) {
@@ -2571,7 +2784,19 @@ function noteLiveSoon() {
   const bucket = new Date().toISOString().slice(0, 13);
   if (liveNoted === bucket) return;
   liveNoted = bucket;
-  sb.rpc("note_live").catch(() => { liveNoted = ""; });
+  /* NOT .catch(). What sb.rpc() hands back is a thenable, not a Promise: it
+     has then() and nothing else, so .catch on it is undefined and calling it
+     throws a TypeError on the spot rather than returning a rejected promise.
+     This sat inside onSession's try, one line after show("app") — so every
+     sign-in painted the app and then threw itself back to the login screen
+     saying the data would not load, and note_live never ran once, which is
+     why the busyness graph stayed empty. Promise.resolve() makes it a real
+     promise; the await keeps the failure here instead of surfacing as an
+     unhandled rejection. */
+  Promise.resolve(sb.rpc("note_live")).then(
+    res => { if (res && res.error) liveNoted = ""; },
+    ()  => { liveNoted = ""; }
+  );
 }
 
 function drawLiveHistory() {
@@ -4307,8 +4532,15 @@ function withMentions(escaped, ids) {
     const p = profileOf(id);
     if (!p || !p.display_name) return;
     const name = esc("@" + p.display_name);
-    const cls = id === UID ? "mention me" : "mention";
-    escaped = escaped.split(name).join(`<span class="${cls}">${name}</span>`);
+    /* data-profile is what makes it a link: the one delegated listener that
+       opens a profile for every avatar and name in the app picks it up, so a
+       mention behaves like every other way of pointing at a person. Your own
+       is left inert — there is nothing to go and look up about yourself that
+       you are not already looking at. */
+    const me = id === UID;
+    const cls = me ? "mention me" : "mention person";
+    const attr = me ? "" : ` data-profile="${esc(id)}" title="See ${esc(p.display_name)}'s profile"`;
+    escaped = escaped.split(name).join(`<span class="${cls}"${attr}>${name}</span>`);
   });
   return escaped;
 }
@@ -4787,6 +5019,7 @@ async function dismissPokes() {
 function reconcileBars() {
   try { paintNudgeBar(); } catch (e) { /* not wired up yet */ }
   try { paintMentionBar(); } catch (e) { /* not wired up yet */ }
+  try { paintReactBar(); } catch (e) { /* not wired up yet */ }
 }
 
 function paintPokeBar() {
