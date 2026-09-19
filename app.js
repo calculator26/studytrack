@@ -2810,6 +2810,29 @@ async function loadLiveHistory() {
   else if (LHV.to === had) { LHV.to = rows.length; LHV.from = Math.max(0, LHV.to - lhSpan()); }
 }
 
+/* Once an hour at most, and only from a tab that is actually being looked at:
+   the hour's number is a peak, so one client noticing is enough, and every
+   client noticing writes the same value.
+
+   Restored after being removed by accident: the commit that rebuilt the
+   busyness graph dropped this definition while leaving both calls to it, so
+   onSession threw on every sign-in and nobody could get in at all. */
+let liveNoted = "";
+function noteLiveSoon() {
+  if (!sb || !UID || document.hidden) return;
+  const bucket = new Date().toISOString().slice(0, 13);
+  if (liveNoted === bucket) return;
+  liveNoted = bucket;
+  /* NOT .catch(). What sb.rpc() hands back is a thenable, not a Promise: it
+     has then() and nothing else, so .catch on it is undefined and calling it
+     throws a TypeError on the spot rather than returning a rejected promise.
+     Promise.resolve() makes it a real promise. */
+  Promise.resolve(sb.rpc("note_live")).then(
+    res => { if (res && res.error) liveNoted = ""; },
+    ()  => { liveNoted = ""; }
+  );
+}
+
 const lhSpan = () => Math.max(2, LHV.to - LHV.from);
 
 function lhSetRange(hours) {
