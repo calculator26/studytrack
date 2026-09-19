@@ -1486,28 +1486,48 @@ end $fn$;
 revoke execute on function public.note_live() from public, anon;
 grant  execute on function public.note_live() to authenticated;
 
--- The line, plus the record to draw it against. Hours nobody studied come back
--- as zero rather than as gaps, so the line does not lie by joining across them.
-create or replace function public.live_history(hours int default 48)
-returns table (bucket timestamptz, peak int, best int)
+-- Adding a column changes the return type, which create-or-replace will not do,
+-- and a stale three-column version left beside this one is a second way in.
+drop function if exists public.live_history(int);
+
+-- The line, plus the record to draw it against.
+--
+-- Two things worth knowing about the shape of what comes back:
+--
+--   * Hours nobody studied are zeros, not missing rows. A line that joins
+--     across a gap says people were studying through the night when they
+--     were asleep, which is a lie the reader cannot see.
+--   * It never runs back further than the first sample ever taken. Asking
+--     for ninety days of a project that has been recording for two would
+--     otherwise draw eighty-eight days of flat zero and call it data.
+create or replace function public.live_history(hours int default 720)
+returns table (bucket timestamptz, peak int, best int, first_at timestamptz)
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  with span as (
+  with bounds as (
+    select (select min(bucket) from public.live_samples)                       as first_at,
+           date_trunc('hour', now())                                          as last_at,
+           least(greatest(coalesce(hours, 720), 1), 8760)                      as want
+  ),
+  span as (
     select generate_series(
-      date_trunc('hour', now()) - (least(greatest(coalesce(hours, 48), 1), 720) - 1) * interval '1 hour',
-      date_trunc('hour', now()),
-      interval '1 hour') as b
+             greatest(b.last_at - (b.want - 1) * interval '1 hour',
+                      coalesce(b.first_at, b.last_at)),
+             b.last_at,
+             interval '1 hour') as b,
+           (select first_at from bounds) as first_at
+      from bounds b
   )
   select span.b,
          coalesce(s.peak, 0)::int,
-         (select coalesce(max(peak), 0)::int from public.live_samples)
+         (select coalesce(max(peak), 0)::int from public.live_samples),
+         span.first_at
     from span left join public.live_samples s on s.bucket = span.b
    order by span.b
 $$;
-
 revoke execute on function public.live_history(int) from public, anon;
 grant  execute on function public.live_history(int) to authenticated;
 

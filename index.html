@@ -334,10 +334,22 @@
     </div>
 
     <div class="card mb16" id="livegraph-card">
-      <header><div><h2>How busy it gets</h2>
-        <div class="sub" id="livegraph-note">—</div></div></header>
-      <div class="body scrollx">
-        <svg id="livegraph" viewBox="0 0 620 220" style="width:100%;height:auto"></svg>
+      <header>
+        <div><h2>How busy it gets</h2>
+          <div class="sub" id="livegraph-note">—</div></div>
+        <div class="controls" id="livegraph-range"></div>
+      </header>
+      <div class="body">
+        <div class="lh-wrap" id="livegraph-wrap">
+          <!-- tabindex so the keyboard gets the same readout the pointer does -->
+          <svg id="livegraph" viewBox="0 0 900 260" tabindex="0" role="img"
+            aria-label="People studying at once, by hour. Drag to pan, scroll to zoom, arrow keys to move through the hours."
+            style="width:100%;height:auto;touch-action:none"></svg>
+          <div class="lh-tip" id="livegraph-tip" hidden></div>
+        </div>
+        <p class="lh-help">Drag to move · scroll or pinch to zoom · hover for an hour · double-click to reset</p>
+        <div class="lh-live" id="livegraph-live" aria-live="polite"></div>
+        <div class="lh-table scrollx" id="livegraph-table" hidden></div>
       </div>
     </div>
 

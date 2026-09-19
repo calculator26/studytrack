@@ -421,28 +421,48 @@ end $fn$;
 revoke execute on function public.note_live() from public, anon;
 grant  execute on function public.note_live() to authenticated;
 
--- The line, plus the record to draw it against. Hours nobody studied come back
--- as zero rather than as gaps, so the line does not lie by joining across them.
-create or replace function public.live_history(hours int default 48)
-returns table (bucket timestamptz, peak int, best int)
+-- Adding a column changes the return type, which create-or-replace will not do,
+-- and a stale three-column version left beside this one is a second way in.
+drop function if exists public.live_history(int);
+
+-- The line, plus the record to draw it against.
+--
+-- Two things worth knowing about the shape of what comes back:
+--
+--   * Hours nobody studied are zeros, not missing rows. A line that joins
+--     across a gap says people were studying through the night when they
+--     were asleep, which is a lie the reader cannot see.
+--   * It never runs back further than the first sample ever taken. Asking
+--     for ninety days of a project that has been recording for two would
+--     otherwise draw eighty-eight days of flat zero and call it data.
+create or replace function public.live_history(hours int default 720)
+returns table (bucket timestamptz, peak int, best int, first_at timestamptz)
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  with span as (
+  with bounds as (
+    select (select min(bucket) from public.live_samples)                       as first_at,
+           date_trunc('hour', now())                                          as last_at,
+           least(greatest(coalesce(hours, 720), 1), 8760)                      as want
+  ),
+  span as (
     select generate_series(
-      date_trunc('hour', now()) - (least(greatest(coalesce(hours, 48), 1), 720) - 1) * interval '1 hour',
-      date_trunc('hour', now()),
-      interval '1 hour') as b
+             greatest(b.last_at - (b.want - 1) * interval '1 hour',
+                      coalesce(b.first_at, b.last_at)),
+             b.last_at,
+             interval '1 hour') as b,
+           (select first_at from bounds) as first_at
+      from bounds b
   )
   select span.b,
          coalesce(s.peak, 0)::int,
-         (select coalesce(max(peak), 0)::int from public.live_samples)
+         (select coalesce(max(peak), 0)::int from public.live_samples),
+         span.first_at
     from span left join public.live_samples s on s.bucket = span.b
    order by span.b
 $$;
-
 revoke execute on function public.live_history(int) from public, anon;
 grant  execute on function public.live_history(int) to authenticated;
 
@@ -793,26 +813,23 @@ create or replace view public.live_by_hour as
 
 grant select on public.study_spans_done, public.live_by_hour to authenticated;
 
--- -------------------------------------------------------------------------
---  rpc() is answered from a cached picture of the schema, so a function made
---  a second ago can be real in Postgres and still missing from the API.
--- -------------------------------------------------------------------------
 notify pgrst, 'reload schema';
 
--- -------------------------------------------------------------------------
---  Every column should read true. Anything false is the thing to tell me.
--- -------------------------------------------------------------------------
+-- Every column should read true. Anything false is the thing to tell me.
 select
-  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='send_announcement')                 as announcements,
-  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='react')                             as session_reactions,
-  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='react_timer')                       as timer_reactions,
-  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='note_live')                         as busyness_sampler,
-  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='public' and p.proname='live_history')                      as busyness_graph,
+  (select count(*) = 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname='live_history'
+      and pg_get_function_result(p.oid) like '%first_at%')                      as graph_is_current,
   (select count(*) = 2 from information_schema.tables
     where table_schema='public' and table_name in ('events','study_spans'))     as the_record,
-  (select count(*) = 1 from pg_trigger where tgname = 'live_timers_log')         as span_trigger;
+  (select count(*) = 1 from pg_trigger where tgname='live_timers_log')           as span_trigger;

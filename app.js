@@ -2768,129 +2768,488 @@ function renderCrew() {
    in a corner, because the question people actually have is "are we near it",
    and a line answers that without arithmetic.
    --------------------------------------------------------------------------- */
-let LIVEHIST = { rows: [], best: 0, loaded: false };
+let LIVEHIST = { rows: [], best: 0, loaded: false, firstAt: null };
+
+/* What the reader is currently looking at: a window over the rows, in index
+   space. Kept outside the draw so panning and zooming survive a repaint. */
+const LHV = {
+  from: 0, to: 0,          /* index range on show */
+  cursor: -1,              /* the hour under the pointer, or the keyboard one */
+  drag: null,              /* an in-progress pan */
+  table: false,            /* the numbers instead of the picture */
+  wired: false
+};
+
+const LH_RANGES = [
+  { label: "24h",  hours: 24 },
+  { label: "3d",   hours: 72 },
+  { label: "7d",   hours: 168 },
+  { label: "30d",  hours: 720 },
+  { label: "All",  hours: 0 }
+];
 
 async function loadLiveHistory() {
   if (!sb || !UID) return;
-  const { data, error } = await sb.rpc("live_history", { hours: 48 });
-  /* No such function yet means migrate.sql has not been run; the card says so
-     for itself rather than the whole page falling over. */
-  if (error) { LIVEHIST = { rows: [], best: 0, loaded: false }; return; }
+  /* Ninety days is asked for; the function itself will not reach back further
+     than the first hour it ever recorded, so a new project gets a short line
+     rather than a long flat one. Hourly integers — a few kilobytes at most. */
+  const { data, error } = await sb.rpc("live_history", { hours: 2160 });
+  if (error) { LIVEHIST = { rows: [], best: 0, loaded: false, firstAt: null }; return; }
   const rows = data || [];
-  LIVEHIST = { rows: rows, best: rows.length ? Number(rows[0].best || 0) : 0, loaded: true };
+  const had = LIVEHIST.rows.length;
+  LIVEHIST = {
+    rows: rows,
+    best: rows.length ? Number(rows[0].best || 0) : 0,
+    firstAt: rows.length ? rows[0].first_at : null,
+    loaded: true
+  };
+  /* First load, or the span changed underneath us: show the last day or so,
+     which is the part anybody opening this actually wants. Otherwise leave
+     the window where the reader put it. */
+  if (!had || LHV.to > rows.length) lhSetRange(24);
+  else if (LHV.to === had) { LHV.to = rows.length; LHV.from = Math.max(0, LHV.to - lhSpan()); }
 }
 
-/* Once an hour at most, and only from a tab that is actually being looked at:
-   the hour's number is a peak, so one client noticing is enough, and every
-   client noticing writes the same value. */
-let liveNoted = "";
-function noteLiveSoon() {
-  if (!sb || !UID || document.hidden) return;
-  const bucket = new Date().toISOString().slice(0, 13);
-  if (liveNoted === bucket) return;
-  liveNoted = bucket;
-  /* NOT .catch(). What sb.rpc() hands back is a thenable, not a Promise: it
-     has then() and nothing else, so .catch on it is undefined and calling it
-     throws a TypeError on the spot rather than returning a rejected promise.
-     This sat inside onSession's try, one line after show("app") — so every
-     sign-in painted the app and then threw itself back to the login screen
-     saying the data would not load, and note_live never ran once, which is
-     why the busyness graph stayed empty. Promise.resolve() makes it a real
-     promise; the await keeps the failure here instead of surfacing as an
-     unhandled rejection. */
-  Promise.resolve(sb.rpc("note_live")).then(
-    res => { if (res && res.error) liveNoted = ""; },
-    ()  => { liveNoted = ""; }
-  );
+const lhSpan = () => Math.max(2, LHV.to - LHV.from);
+
+function lhSetRange(hours) {
+  const n = LIVEHIST.rows.length;
+  if (!n) { LHV.from = 0; LHV.to = 0; return; }
+  const want = hours > 0 ? Math.min(hours, n) : n;
+  LHV.to = n;
+  LHV.from = Math.max(0, n - want);
+}
+
+/* Zoom about a fixed point, so the hour under the pointer stays under it. */
+function lhZoom(factor, anchorIdx) {
+  const n = LIVEHIST.rows.length;
+  if (n < 3) return;
+  const span = lhSpan();
+  const next = Math.max(3, Math.min(n, Math.round(span * factor)));
+  if (next === span) return;
+  const a = anchorIdx == null ? (LHV.from + LHV.to) / 2 : anchorIdx;
+  const frac = (a - LHV.from) / span;
+  let from = Math.round(a - frac * next);
+  from = Math.max(0, Math.min(n - next, from));
+  LHV.from = from; LHV.to = from + next;
+}
+
+function lhPan(deltaIdx) {
+  const n = LIVEHIST.rows.length, span = lhSpan();
+  let from = Math.max(0, Math.min(n - span, LHV.from + deltaIdx));
+  LHV.from = from; LHV.to = from + span;
+}
+
+const lhHourLabel = d => d.toLocaleTimeString([], { hour: "numeric" }).toLowerCase().replace(" ", "");
+const lhDayLabel  = d => d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+
+/* ---------------------------------------------------------------------------
+   HOW BUSY IT GETS — the drawing
+
+   One series, so no legend box: the card's own title says what is plotted.
+   Every label is ink, never the line's colour — the gold record annotation
+   used to be gold text at 3.04:1, which is the same mistake the day chip had.
+   Gridlines are solid hairlines; the only dashed line on the chart is the
+   record, which is a reference rather than a gridline and has to read as a
+   different kind of thing.
+   --------------------------------------------------------------------------- */
+/* Mutable, because the shape changes with the screen. An SVG scaled by width
+   alone shrinks its own text: at 900 units wide in a 390px column, an 11px
+   label renders at under 5px. So a narrow screen gets a narrower viewBox —
+   fewer units across the same pixels — which makes every label proportionally
+   bigger without changing a single font size. */
+const LH_GEO = { W: 900, H: 260, ml: 40, mr: 16, mt: 18, mb: 42, bh: 26 };
+
+function lhGeo() {
+  const wrap = $("livegraph-wrap");
+  const px = wrap ? wrap.getBoundingClientRect().width : 900;
+  const narrow = px < 560;
+  LH_GEO.W  = narrow ? 420 : 900;
+  LH_GEO.H  = narrow ? 300 : 260;
+  LH_GEO.ml = narrow ? 30 : 40;
+  LH_GEO.mr = narrow ? 10 : 16;
+  LH_GEO.mt = narrow ? 14 : 18;
+  LH_GEO.mb = narrow ? 40 : 42;
+  LH_GEO.bh = narrow ? 30 : 26;
+  const svg = $("livegraph");
+  if (svg) svg.setAttribute("viewBox", `0 0 ${LH_GEO.W} ${LH_GEO.H}`);
+  return narrow;
+}
+
+function lhX(i) {
+  const g = LH_GEO, iw = g.W - g.ml - g.mr, span = lhSpan();
+  return g.ml + ((i - LHV.from) / (span - 1 || 1)) * iw;
+}
+function lhIndexAt(px) {
+  const g = LH_GEO, iw = g.W - g.ml - g.mr, span = lhSpan();
+  return Math.round(LHV.from + ((px - g.ml) / iw) * (span - 1 || 1));
 }
 
 function drawLiveHistory() {
   const svg = $("livegraph");
   if (!svg) return;
   const note = $("livegraph-note");
-  svg.innerHTML = "";
   const rows = LIVEHIST.rows;
+  const narrow = lhGeo();
+
+  lhPaintControls();
+
   if (!rows.length) {
+    svg.innerHTML = "";
     if (note) note.textContent = LIVEHIST.loaded
-      ? "Nothing recorded yet. The first hour somebody studies starts the line."
+      ? "Nothing recorded yet — the first hour somebody studies starts the line."
       : "Run migrate.sql on the database to start recording this.";
+    const t = $("livegraph-table"); if (t) t.innerHTML = "";
     return;
   }
+  if (!LHV.to) lhSetRange(24);
 
-  const vals = rows.map(r => Number(r.peak || 0));
+  const g = LH_GEO, iw = g.W - g.ml - g.mr, ih = g.H - g.mt - g.mb - g.bh;
+  const view = rows.slice(LHV.from, LHV.to);
+  const vals = view.map(r => Number(r.peak || 0));
   const best = Math.max(LIVEHIST.best, 0);
-  const now = vals[vals.length - 1];
-  const peakNow = Math.max(...vals);
+  const shown = Math.max(...vals, 0);
+  const maxY = Math.max(1, shown, best > 0 && best <= shown * 2 ? best : shown) * 1.15;
+  const Y = v => g.mt + ih - (v / maxY) * ih;
+
   if (note) {
-    const when = rows.reduce((a, r) => Number(r.peak || 0) > Number(a.peak || 0) ? r : a, rows[0]);
-    note.textContent = best > 0
-      ? `Most at once in the last two days: ${peakNow}` +
-        (best > peakNow ? ` \u00b7 all-time record ${best}` : ` \u00b7 that is the all-time record`)
-      : "Nothing recorded yet.";
+    const from = new Date(view[0].bucket), to = new Date(view[view.length - 1].bucket);
+    note.textContent =
+      `${lhDayLabel(from)} to ${lhDayLabel(to)} · busiest hour on show: ${shown}` +
+      (best > 0 ? ` · all-time record ${best}` : "");
   }
 
-  const W = 620, H = 220, ml = 34, mr = 14, mt = 16, mb = 30;
-  const iw = W - ml - mr, ih = H - mt - mb;
-  const maxY = Math.max(1, best, ...vals) * 1.12;
-  const X = i => ml + (vals.length < 2 ? iw / 2 : (i / (vals.length - 1)) * iw);
-  const Y = v => mt + ih - (v / maxY) * ih;
+  const N = [];
+  const add = (t, a, txt) => { const e = el(t, a); if (txt != null) e.textContent = txt; N.push(e); return e; };
 
-  for (let i = 0; i <= 4; i++) {
-    const v = maxY * i / 4;
-    svg.appendChild(el("line", { x1: ml, x2: ml + iw, y1: Y(v), y2: Y(v),
-      stroke: "#EDF1F3", "stroke-width": 1 }));
-    const t = el("text", { x: ml - 7, y: Y(v) + 4, "text-anchor": "end", "font-size": 10.5, fill: "#7B8D98" });
-    t.textContent = f0(v); svg.appendChild(t);
+  /* value gridlines — solid hairlines, recessive */
+  const steps = maxY <= 4 ? Math.max(1, Math.ceil(maxY)) : 4;
+  for (let i = 0; i <= steps; i++) {
+    const v = maxY * i / steps;
+    add("line", { x1: g.ml, x2: g.ml + iw, y1: Y(v), y2: Y(v), stroke: "#E2E5EB", "stroke-width": 1 });
+    add("text", { x: g.ml - 8, y: Y(v) + 4, "text-anchor": "end", "font-size": 11,
+                  fill: "#5A6472" }, f0(v));
   }
 
-  /* Midnight lines, so two days of hours can be told apart at a glance. */
-  rows.forEach((r, i) => {
-    if (new Date(r.bucket).getHours() !== 0) return;
-    svg.appendChild(el("line", { x1: X(i), x2: X(i), y1: mt, y2: mt + ih,
-      stroke: "#DFE5E8", "stroke-width": 1, "stroke-dasharray": "3 3" }));
+  /* midnight separators and day names, thinned so they never collide */
+  const dayIdx = [];
+  view.forEach((r, i) => { if (new Date(r.bucket).getHours() === 0) dayIdx.push(i); });
+  const everyNth = Math.max(1, Math.ceil(dayIdx.length / (narrow ? 3 : 7)));
+  /* The top right belongs to the record annotation, and a label started too
+     near the edge runs off it. Both were happening at once: "Sat, Sep 19"
+     clipped by the frame and sitting on top of "record 29". */
+  const labelRoom = g.ml + iw - (narrow ? 72 : 104);
+  dayIdx.forEach((i, n) => {
+    const x = lhX(LHV.from + i);
+    add("line", { x1: x, x2: x, y1: g.mt, y2: g.mt + ih, stroke: "#EDEFF3", "stroke-width": 1 });
+    if (n % everyNth === 0 && x < labelRoom) {
+      const d = new Date(view[i].bucket);
+      add("text", { x: x + 4, y: g.mt + 12, "font-size": 10.5, fill: "#8B94A3" },
+        narrow ? d.toLocaleDateString([], { day: "numeric", month: "short" }) : lhDayLabel(d));
+    }
   });
 
-  if (best > 0) {
-    svg.appendChild(el("line", { x1: ml, x2: ml + iw, y1: Y(best), y2: Y(best),
-      stroke: "#C08A2E", "stroke-width": 1.5, "stroke-dasharray": "5 4" }));
-    const t = el("text", { x: ml + iw, y: Y(best) - 6, "text-anchor": "end",
-      "font-size": 10.5, fill: "#C08A2E", "font-weight": 700 });
-    t.textContent = "record " + best; svg.appendChild(t);
+  /* the area wash, then the line on top of it */
+  const pts = vals.map((v, i) => lhX(LHV.from + i) + "," + Y(v)).join(" ");
+  add("polyline", { points: `${lhX(LHV.from)},${Y(0)} ${pts} ${lhX(LHV.to - 1)},${Y(0)}`,
+                    fill: "rgba(43,97,119,.10)", stroke: "none" });
+  add("polyline", { points: pts, fill: "none", stroke: "#2B6177", "stroke-width": 2,
+                    "stroke-linejoin": "round", "stroke-linecap": "round" });
+
+  /* the record: a reference line, dashed so it is not read as a gridline,
+     with its label in ink and the colour carried by the line itself */
+  if (best > 0 && best <= maxY) {
+    add("line", { x1: g.ml, x2: g.ml + iw, y1: Y(best), y2: Y(best),
+                  stroke: "#C08A2E", "stroke-width": 1.5, "stroke-dasharray": "5 4" });
+    add("text", { x: g.ml + iw, y: Y(best) - 7, "text-anchor": "end", "font-size": 11,
+                  "font-weight": 700, fill: "#12161C" }, "record " + best);
   }
-
-  const pts = vals.map((v, i) => X(i) + "," + Y(v)).join(" ");
-  svg.appendChild(el("polyline", {
-    points: X(0) + "," + Y(0) + " " + pts + " " + X(vals.length - 1) + "," + Y(0),
-    fill: "rgba(43,97,119,.10)", stroke: "none" }));
-  svg.appendChild(el("polyline", { points: pts, fill: "none", stroke: "#2B6177",
-    "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-
-  /* Every hour that touched the record gets a mark; that is what "shows
-     records" has to mean on a line that is mostly not at one. */
+  /* every hour that touched it, ringed in the surface colour so it stays
+     legible where it sits on the line */
   vals.forEach((v, i) => {
     if (best <= 0 || v < best) return;
-    svg.appendChild(el("circle", { cx: X(i), cy: Y(v), r: 4, fill: "#C08A2E",
-      stroke: "#fff", "stroke-width": 1.6 }));
+    add("circle", { cx: lhX(LHV.from + i), cy: Y(v), r: 4.5, fill: "#C08A2E",
+                    stroke: "#fff", "stroke-width": 2 });
   });
 
-  svg.appendChild(el("circle", { cx: X(vals.length - 1), cy: Y(now), r: 4.2,
-    fill: "#fff", stroke: "#2B6177", "stroke-width": 2.4 }));
+  /* where the line ends is now */
+  if (LHV.to === rows.length) {
+    add("circle", { cx: lhX(rows.length - 1), cy: Y(vals[vals.length - 1]), r: 4.5,
+                    fill: "#2B6177", stroke: "#fff", "stroke-width": 2 });
+  }
 
-  /* Two days of hours means the bare hour repeats, so a label that is on a
-     different day to the one before it says which day. "1pm ... 1pm" told
-     nobody anything. */
-  let lastDay = null;
-  [0, Math.floor(rows.length / 2), rows.length - 1].forEach((i, n) => {
-    const d = new Date(rows[i].bucket);
-    const hour = d.toLocaleTimeString([], { hour: "numeric" }).toLowerCase().replace(" ", "");
-    const day = d.toDateString();
-    const label = (day !== lastDay ? d.toLocaleDateString([], { weekday: "short" }) + " " : "") + hour;
-    lastDay = day;
-    const t = el("text", { x: X(i), y: H - 10,
-      "text-anchor": n === 0 ? "start" : (n === 2 ? "end" : "middle"),
-      "font-size": 10.5, fill: "#7B8D98" });
-    t.textContent = label;
-    svg.appendChild(t);
+  /* time axis: first, middle, last, never crowded */
+  [0, Math.floor(view.length / 2), view.length - 1].forEach((i, n) => {
+    const d = new Date(view[i].bucket);
+    add("text", { x: lhX(LHV.from + i), y: g.mt + ih + 18,
+                  "text-anchor": n === 0 ? "start" : (n === 2 ? "end" : "middle"),
+                  "font-size": 11, fill: "#5A6472" },
+      (lhSpan() > 48 ? lhDayLabel(d) : lhHourLabel(d)));
+  });
+
+  /* the crosshair, drawn last so it sits over everything */
+  if (LHV.cursor >= LHV.from && LHV.cursor < LHV.to) {
+    const cx = lhX(LHV.cursor), cv = Number(rows[LHV.cursor].peak || 0);
+    add("line", { x1: cx, x2: cx, y1: g.mt, y2: g.mt + ih, stroke: "#5A6472",
+                  "stroke-width": 1, opacity: .55 });
+    add("circle", { cx: cx, cy: Y(cv), r: 4.5, fill: "#2B6177", stroke: "#fff", "stroke-width": 2 });
+  }
+
+  /* the whole span underneath, with the window marked on it */
+  lhDrawBrush(add, rows, best);
+
+  svg.innerHTML = "";
+  N.forEach(n => svg.appendChild(n));
+  lhPaintTooltip();
+  lhPaintTable();
+  lhWire();
+}
+
+/* A strip of the entire history with the visible window boxed on it, so you
+   can always see how much of the whole you are looking at and jump. */
+function lhDrawBrush(add, rows, best) {
+  const g = LH_GEO, iw = g.W - g.ml - g.mr;
+  const top = g.H - g.bh + 4, h = g.bh - 10;
+  const mx = Math.max(1, ...rows.map(r => Number(r.peak || 0)));
+  const bx = i => g.ml + (i / (rows.length - 1 || 1)) * iw;
+  add("rect", { x: g.ml, y: top, width: iw, height: h, fill: "#F7F8FA",
+                stroke: "#EDEFF3", "stroke-width": 1, rx: 3 });
+  const pts = rows.map((r, i) => bx(i) + "," + (top + h - (Number(r.peak || 0) / mx) * (h - 2))).join(" ");
+  add("polyline", { points: pts, fill: "none", stroke: "#8B94A3", "stroke-width": 1 });
+  const x0 = bx(LHV.from), x1 = bx(Math.max(LHV.from, LHV.to - 1));
+  add("rect", { x: x0, y: top, width: Math.max(2, x1 - x0), height: h,
+                fill: "rgba(43,97,119,.16)", stroke: "#2B6177", "stroke-width": 1, rx: 2 });
+}
+
+/* ---------------------------------------------------------------------------
+   HOW BUSY IT GETS — the interaction
+
+   The tooltip enhances and never gates: every number it shows is also in the
+   table view, and the keyboard gets the same readout as the pointer through
+   an aria-live line. Drag pans, wheel zooms about the pointer, the range
+   chips jump, arrows walk the cursor, and double-click puts it back.
+   --------------------------------------------------------------------------- */
+function lhPaintControls() {
+  const box = $("livegraph-range");
+  if (!box) return;
+  const n = LIVEHIST.rows.length;
+  const span = lhSpan();
+  /* Exactly one chip is pressed, ever. With three weeks of history "30d" and
+     "All" produce the same window, and lighting both up asks the reader to
+     work out which one they are on — so the whole span always belongs to
+     "All" and the presets only claim a window smaller than it. */
+  const whole = n > 0 && LHV.from === 0 && LHV.to === n;
+  box.innerHTML = LH_RANGES.map(r => {
+    const on = r.hours === 0
+      ? whole
+      : (!whole && span === Math.min(r.hours, n) && LHV.to === n);
+    return `<button class="chip" data-lhrange="${r.hours}" aria-pressed="${on}"${
+      n ? "" : " disabled"}>${esc(r.label)}</button>`;
+  }).join("") +
+    `<span class="lh-zoom">
+       <button class="chip" data-lhzoom="out" title="Zoom out" aria-label="Zoom out"${n ? "" : " disabled"}>−</button>
+       <button class="chip" data-lhzoom="in" title="Zoom in" aria-label="Zoom in"${n ? "" : " disabled"}>+</button>
+     </span>
+     <button class="chip" id="lh-table-toggle" aria-pressed="${LHV.table}"${n ? "" : " disabled"}
+       title="Show the numbers instead">Table</button>`;
+}
+
+function lhPaintTooltip() {
+  const tip = $("livegraph-tip"), live = $("livegraph-live");
+  if (!tip) return;
+  const rows = LIVEHIST.rows;
+  const i = LHV.cursor;
+  if (i < LHV.from || i >= LHV.to || !rows[i]) { tip.hidden = true; if (live) live.textContent = ""; return; }
+  const d = new Date(rows[i].bucket);
+  const v = Number(rows[i].peak || 0);
+  const best = LIVEHIST.best;
+  const when = lhDayLabel(d) + ", " + lhHourLabel(d);
+  /* textContent throughout: none of this is ever built by string concatenation
+     into innerHTML, because the values come back from the database. */
+  tip.innerHTML = "";
+  const val = document.createElement("div");
+  val.className = "lh-tipval";
+  val.textContent = v === 1 ? "1 person" : v + " people";
+  const lab = document.createElement("div");
+  lab.className = "lh-tiplab";
+  lab.textContent = when;
+  tip.appendChild(val); tip.appendChild(lab);
+  if (best > 0 && v >= best) {
+    const r = document.createElement("div");
+    r.className = "lh-tiprec";
+    r.textContent = "ties the all-time record";
+    tip.appendChild(r);
+  }
+  tip.hidden = false;
+
+  /* position it against the plot, kept inside the box on both edges */
+  const wrap = $("livegraph-wrap");
+  if (wrap) {
+    const w = wrap.getBoundingClientRect();
+    const frac = (lhX(i) - 0) / LH_GEO.W;
+    const x = frac * w.width;
+    tip.style.left = Math.max(8, Math.min(w.width - tip.offsetWidth - 8, x - tip.offsetWidth / 2)) + "px";
+  }
+  if (live) live.textContent = when + ": " + val.textContent +
+    (best > 0 && v >= best ? ", ties the all-time record" : "");
+}
+
+function lhPaintTable() {
+  const box = $("livegraph-table");
+  if (!box) return;
+  if (!LHV.table || !LIVEHIST.rows.length) { box.hidden = true; box.innerHTML = ""; return; }
+  /* By day rather than by hour: a table of two thousand hours is not a table
+     anybody reads. The busiest hour of each day is the thing the line is
+     making a shape out of, and the hours-with-anybody-on says how long the
+     room was occupied at all. */
+  const byDay = {};
+  LIVEHIST.rows.slice(LHV.from, LHV.to).forEach(r => {
+    const d = new Date(r.bucket), key = isoOf(d);
+    const v = Number(r.peak || 0);
+    const e = byDay[key] || (byDay[key] = { peak: 0, hours: 0, at: null });
+    if (v > e.peak) { e.peak = v; e.at = d; }
+    if (v > 0) e.hours++;
+  });
+  const days = Object.keys(byDay).sort().reverse();
+  box.hidden = false;
+  box.innerHTML =
+    `<table class="adm-t lh-t"><thead><tr>
+       <th class="l">Day</th><th>Busiest hour</th><th>At</th><th>Hours with anyone on</th>
+     </tr></thead><tbody>${days.map(k => {
+       const e = byDay[k];
+       return `<tr><td class="l">${esc(fmtD(k))}</td><td>${e.peak}</td>
+         <td>${esc(e.at ? lhHourLabel(e.at) : "—")}</td><td>${e.hours}</td></tr>`;
+     }).join("")}</tbody></table>`;
+}
+
+function lhWire() {
+  const svg = $("livegraph"), wrap = $("livegraph-wrap");
+  if (!svg || !wrap) return;
+
+  const box = $("livegraph-range");
+  if (box) {
+    box.querySelectorAll("[data-lhrange]").forEach(b => b.onclick = () => {
+      lhSetRange(Number(b.dataset.lhrange)); LHV.cursor = -1; drawLiveHistory();
+    });
+    box.querySelectorAll("[data-lhzoom]").forEach(b => b.onclick = () => {
+      lhZoom(b.dataset.lhzoom === "in" ? 0.6 : 1.7, null); drawLiveHistory();
+    });
+    const t = $("lh-table-toggle");
+    if (t) t.onclick = () => { LHV.table = !LHV.table; drawLiveHistory(); };
+  }
+
+  if (LHV.wired) return;          /* the handlers below outlive a repaint */
+  LHV.wired = true;
+
+  /* The viewBox depends on how wide the column is, so a rotation or a resized
+     window has to redraw. Debounced, because resize fires continuously. */
+  let resizeHandle = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeHandle);
+    resizeHandle = setTimeout(() => { if (LIVEHIST.rows.length) drawLiveHistory(); }, 120);
+  });
+
+  /* the x the pointer is at, in the SVG's own coordinates */
+  const pxOf = e => {
+    const r = svg.getBoundingClientRect();
+    return ((e.clientX - r.left) / r.width) * LH_GEO.W;
+  };
+
+  svg.addEventListener("pointermove", e => {
+    const px = pxOf(e);
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, px);
+    if (pinch && touches.size === 2) {
+      const [a, b2] = [...touches.values()];
+      const gap = Math.abs(a - b2) || 1;
+      /* fingers apart means show less time, which is a smaller span */
+      const want = Math.round(pinch.span * (pinch.gap / gap));
+      const n = LIVEHIST.rows.length;
+      const next = Math.max(3, Math.min(n, want));
+      if (next !== lhSpan()) {
+        lhZoom(next / lhSpan(), pinch.anchor);
+        drawLiveHistory();
+      }
+      return;
+    }
+    if (LHV.drag) {
+      const perIdx = (LH_GEO.W - LH_GEO.ml - LH_GEO.mr) / (lhSpan() - 1 || 1);
+      const moved = Math.round((LHV.drag.px - px) / perIdx);
+      if (moved) {
+        lhPan(moved);
+        LHV.drag.px = px;
+        drawLiveHistory();
+      }
+      return;
+    }
+    const i = Math.max(LHV.from, Math.min(LHV.to - 1, lhIndexAt(px)));
+    if (i !== LHV.cursor) { LHV.cursor = i; drawLiveHistory(); }
+  });
+  svg.addEventListener("pointerleave", () => {
+    if (LHV.drag) return;
+    LHV.cursor = -1; drawLiveHistory();
+  });
+  /* Two fingers on a phone is a pinch, not two drags. Every active pointer is
+     tracked; while there are two of them the gap between them drives the zoom
+     and neither one pans. */
+  const touches = new Map();
+  let pinch = null;
+
+  svg.addEventListener("pointerdown", e => {
+    touches.set(e.pointerId, pxOf(e));
+    svg.setPointerCapture(e.pointerId);
+    if (touches.size === 2) {
+      const [a, b2] = [...touches.values()];
+      pinch = { gap: Math.abs(a - b2) || 1, anchor: lhIndexAt((a + b2) / 2), span: lhSpan() };
+      LHV.drag = null;
+      svg.classList.remove("dragging");
+      return;
+    }
+    LHV.drag = { px: pxOf(e) };
+    svg.classList.add("dragging");
+  });
+
+  const endDrag = e => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) pinch = null;
+    if (LHV.drag) {
+      LHV.drag = null;
+      svg.classList.remove("dragging");
+    }
+    try { svg.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+  };
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("dblclick", () => { lhSetRange(24); LHV.cursor = -1; drawLiveHistory(); });
+
+  svg.addEventListener("wheel", e => {
+    if (!LIVEHIST.rows.length) return;
+    e.preventDefault();
+    /* Sideways on a trackpad pans, which is what the gesture means; up and
+       down zooms about whatever the pointer is over. */
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      lhPan(Math.sign(e.deltaX) * Math.max(1, Math.round(lhSpan() / 24)));
+    } else {
+      lhZoom(e.deltaY > 0 ? 1.18 : 0.85, lhIndexAt(pxOf(e)));
+    }
+    drawLiveHistory();
+  }, { passive: false });
+
+  svg.addEventListener("keydown", e => {
+    const n = LIVEHIST.rows.length;
+    if (!n) return;
+    const step = e.shiftKey ? Math.max(1, Math.round(lhSpan() / 4)) : 1;
+    if (e.key === "ArrowRight") { LHV.cursor = Math.min(n - 1, (LHV.cursor < 0 ? LHV.from : LHV.cursor) + step); }
+    else if (e.key === "ArrowLeft") { LHV.cursor = Math.max(0, (LHV.cursor < 0 ? LHV.to - 1 : LHV.cursor) - step); }
+    else if (e.key === "Home") { LHV.cursor = LHV.from; }
+    else if (e.key === "End") { LHV.cursor = LHV.to - 1; }
+    else if (e.key === "+" || e.key === "=") { lhZoom(0.6, LHV.cursor); }
+    else if (e.key === "-") { lhZoom(1.7, LHV.cursor); }
+    else return;
+    e.preventDefault();
+    /* walking the cursor off the edge brings the window with it */
+    if (LHV.cursor < LHV.from) lhPan(LHV.cursor - LHV.from);
+    if (LHV.cursor >= LHV.to) lhPan(LHV.cursor - LHV.to + 1);
+    drawLiveHistory();
   });
 }
 

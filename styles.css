@@ -1038,6 +1038,46 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 .authseg button[aria-selected="true"]{background:var(--surface);color:var(--ink);
   box-shadow:var(--sh-1)}
 
+/* ---- how busy it gets -------------------------------------------------
+   One series, so no legend: the card title names what is plotted. Every
+   word on it wears a text token rather than the line's colour, which is
+   why the record annotation is ink and only the dashed rule beside it is
+   gold. Axis labels use --ink-mid (6.0:1) and not --ink-soft (3.1:1).
+   ------------------------------------------------------------------------ */
+.lh-wrap{position:relative}
+#livegraph{display:block;cursor:grab;border-radius:var(--r-sm);outline:none}
+#livegraph.dragging{cursor:grabbing}
+#livegraph:focus-visible{box-shadow:0 0 0 2px var(--navy)}
+.lh-tip{
+  position:absolute;top:6px;z-index:5;pointer-events:none;
+  background:var(--ink);color:#fff;border-radius:var(--r-xs);
+  padding:7px 10px;box-shadow:var(--sh-3);min-width:104px;
+}
+/* the value leads and the label follows: the reader already knows the hour
+   they are pointing at, and wants the number */
+.lh-tipval{font-size:14px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums}
+.lh-tiplab{font-size:11px;color:#C6CCD6;margin-top:2px}
+.lh-tiprec{font-size:10.5px;font-weight:700;color:#E9C26A;margin-top:4px;
+  text-transform:uppercase;letter-spacing:.06em}
+.lh-help{margin:10px 0 0;font-size:11.5px;color:var(--ink-soft)}
+.lh-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.lh-zoom{display:inline-flex;gap:4px;margin-left:6px}
+.lh-zoom .chip{min-width:28px;justify-content:center;font-weight:700}
+.lh-table{margin-top:14px;border:1px solid var(--rule-soft);border-radius:var(--r-sm)}
+table.lh-t{width:100%;border-collapse:collapse;font-size:12.5px;min-width:420px}
+table.lh-t th{text-align:right;font-size:10px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-soft);padding:9px 12px;
+  border-bottom:1px solid var(--rule)}
+table.lh-t th.l,table.lh-t td.l{text-align:left}
+table.lh-t td{padding:8px 12px;border-bottom:1px solid var(--rule-soft);text-align:right;
+  font-variant-numeric:tabular-nums;color:var(--ink-mid)}
+table.lh-t td.l{color:var(--ink);font-weight:600}
+table.lh-t tr:last-child td{border-bottom:0}
+@media (max-width:640px){
+  .lh-help{font-size:11px}
+  #livegraph-range{flex-wrap:wrap}
+}
+
 /* ---- countdown -------------------------------------------------------- */
 .countdown{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
 .cdcard{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--surface);
