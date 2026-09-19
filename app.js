@@ -77,6 +77,18 @@ function freeProfileColour() {
 const colourClash = c =>
   DB.profiles.filter(p => p.id !== UID && normColour(p.colour) === normColour(c));
 
+/* Read before the client is made, because creating it with detectSessionInUrl
+   consumes the fragment: by the time anything else looks, "type=recovery" is
+   gone from the address bar. Without this the app would take somebody
+   arriving from a reset link straight into the app still holding the old
+   password, which is the one thing a reset link must not do. */
+const ARRIVED_TO_RESET = (function () {
+  try {
+    const h = String(location.hash || "");
+    return /(^|[#&])type=recovery(&|$)/.test(h);
+  } catch (e) { return false; }
+})();
+
 let sb = null;
 try {
   if (window.supabase && CFG.SUPABASE_URL && !/YOUR-PROJECT/.test(CFG.SUPABASE_URL)) {
@@ -397,31 +409,120 @@ function rangeDays() {
 /* =========================================================================
    AUTH
    ========================================================================= */
+/* in | up | reset (ask for an email) | newpass (set one, after the link) */
 let authMode = "in";
 function authMsg(kind, text) {
   $("au-msg").innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : "";
 }
 function paintAuthMode() {
-  const up = authMode === "up";
-  /* the brand lockup sits right above this, so do not say it twice */
+  const up = authMode === "up", reset = authMode === "reset", fresh = authMode === "newpass";
   const crew = String(CFG.CREW_NAME || "").trim();
   const named = crew && !isGenericName(crew) ? crew : null;
-  $("au-title").textContent = up ? (named ? "Join " + named : "Join the peloton")
-                                 : (named || "Welcome back");
-  $("au-lede").textContent  = up ? "Make an account so the others can see how you are going."
-                                 : "Sign in to see how the peloton is going.";
-  $("au-go").textContent    = up ? "Create account" : "Sign in";
-  $("au-namefield").style.display = up ? "" : "none";
-  $("au-tab-in").setAttribute("aria-selected", String(!up));
+
+  $("au-title").textContent =
+    fresh ? "Choose a new password"
+    : reset ? "Reset your password"
+    : up ? (named ? "Join " + named : "Join the peloton")
+    : (named || "Welcome back");
+
+  $("au-lede").textContent =
+    fresh ? "You are signed in from the link. Pick a password and you are back in."
+    : reset ? "Put in your email and we will send you a link to set a new one."
+    : up ? "Make an account so the others can see how you are going."
+    : "Sign in to see how the peloton is going.";
+
+  $("au-go").textContent =
+    fresh ? "Save and carry on" : reset ? "Send me a link" : up ? "Create account" : "Sign in";
+
+  $("au-namefield").style.display  = up ? "" : "none";
+  /* Resetting asks for an email and nothing else; a password box on that
+     screen is just something to type the forgotten password into again. */
+  $("au-passfield").style.display  = reset ? "none" : "";
+  $("au-pass2field").style.display = fresh ? "" : "none";
+  $("au-email").closest(".field").style.display = fresh ? "none" : "";
+
+  const seg = document.querySelector(".authseg");
+  if (seg) seg.style.display = (reset || fresh) ? "none" : "";
+  $("au-forgot").style.display = authMode === "in" ? "" : "none";
+  $("au-back").style.display   = reset ? "" : "none";
+
+  $("au-tab-in").setAttribute("aria-selected", String(authMode === "in"));
   $("au-tab-up").setAttribute("aria-selected", String(up));
-  $("au-pass").setAttribute("autocomplete", up ? "new-password" : "current-password");
+  $("au-pass").setAttribute("autocomplete", (up || fresh) ? "new-password" : "current-password");
+  $("au-pass").setAttribute("aria-label", fresh ? "New password" : "Password");
+  const lab = document.querySelector('label[for="au-pass"]');
+  if (lab) lab.textContent = fresh ? "New password" : "Password";
 }
 function switchMode(m) { authMode = m; authMsg(); paintAuthMode(); }
 document.querySelectorAll("[data-authmode]").forEach(b =>
   b.addEventListener("click", () => switchMode(b.dataset.authmode)));
 $("au-go").addEventListener("click", doAuth);
-["au-email","au-pass","au-name"].forEach(id =>
+["au-email","au-pass","au-pass2","au-name"].forEach(id =>
   $(id).addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doAuth(); } }));
+$("au-forgot").addEventListener("click", () => {
+  switchMode("reset");
+  $("au-email").focus();
+});
+$("au-back").addEventListener("click", () => { switchMode("in"); $("au-email").focus(); });
+
+/* ---------------------------------------------------------------------------
+   FORGOT PASSWORD
+
+   Two halves, a mailbox apart. This one asks for the address and gets the
+   link sent; enterRecovery() below picks it up when they come back.
+
+   It says the same thing whether or not there is an account on that address,
+   on purpose. An honest "no account here" turns this box into a way to find
+   out who is a member — and with four hundred people on one school's domain,
+   guessing addresses is not hard.
+   --------------------------------------------------------------------------- */
+async function sendReset(email) {
+  /* Back to where they started, which is the page they are standing on. This
+     address has to be on the Redirect URLs list in the Supabase dashboard or
+     the link in the email will refuse to come back here. */
+  const redirectTo = location.origin + location.pathname;
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: redirectTo });
+  if (error && /rate limit|too many|security purposes/i.test(error.message || "")) {
+    authMsg("err", "That is a lot of reset emails in a short time. Give it a minute and try again.");
+    return;
+  }
+  /* Any other error is not shown either: it would leak the same thing. */
+  authMsg("ok", "If there is an account on that address, a link is on its way. " +
+                "It lasts an hour, and it lands in spam more often than it should.");
+}
+
+/* They have come back from the link. Supabase has already put them in a real
+   session — that is what the link is for — so the only thing standing between
+   them and the app is choosing a password. */
+let recovering = false;
+function enterRecovery() {
+  if (recovering) return;
+  recovering = true;
+  show("auth");
+  switchMode("newpass");
+  authMsg("ok", "Link accepted. Set a new password to finish.");
+  const box = $("au-pass");
+  if (box) { box.value = ""; box.focus(); }
+  const two = $("au-pass2"); if (two) two.value = "";
+}
+
+async function saveNewPassword(pass, again) {
+  if (pass.length < 6) { authMsg("err", "Use a password of at least 6 characters."); return; }
+  if (pass !== again)  { authMsg("err", "Those two passwords are not the same."); return; }
+  const { error } = await sb.auth.updateUser({ password: pass });
+  if (error) { authMsg("err", friendlyAuthError(error)); return; }
+  recovering = false;
+  authMode = "in";
+  const { data } = await sb.auth.getSession();
+  if (data && data.session) {
+    /* Already signed in by the link, so there is nothing to sign into. */
+    entering = null;
+    await enterSession(data.session);
+  } else {
+    paintAuthMode();
+    authMsg("ok", "Password changed. Sign in with it.");
+  }
+}
 
 /* Supabase speaks in error strings. Say something a person can act on. */
 function friendlyAuthError(err) {
@@ -448,6 +549,34 @@ async function doAuth() {
   const email = $("au-email").value.trim().toLowerCase();
   const pass  = $("au-pass").value;
   const name  = $("au-name").value.trim();
+
+  /* Setting a new password after following the link: no email to check, and
+     no password to check it against — the link was the proof. */
+  if (authMode === "newpass") {
+    authBusy = true;
+    $("au-go").disabled = true;
+    $("au-go").textContent = "Saving\u2026";
+    authMsg();
+    try { await saveNewPassword(pass, $("au-pass2").value); }
+    catch (err) { authMsg("err", friendlyAuthError(err)); }
+    finally { authBusy = false; $("au-go").disabled = false; paintAuthMode(); }
+    return;
+  }
+
+  /* Asking for the link: an address is the whole of it. */
+  if (authMode === "reset") {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      authMsg("err", "Put in the email address you signed up with."); return;
+    }
+    authBusy = true;
+    $("au-go").disabled = true;
+    $("au-go").textContent = "Sending\u2026";
+    authMsg();
+    try { await sendReset(email); }
+    catch (err) { authMsg("err", friendlyAuthError(err)); }
+    finally { authBusy = false; $("au-go").disabled = false; paintAuthMode(); }
+    return;
+  }
 
   if (!email || !pass) { authMsg("err", "Email and password are both needed."); return; }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { authMsg("err", "That does not look like an email address."); return; }
@@ -517,6 +646,12 @@ function show(which) {
   }
   paintAuthMode();
   const { data } = await sb.auth.getSession();
+
+  /* A reset link hands back a perfectly good session. Entering it would drop
+     them into the app with the password they could not remember still set,
+     and the reason they came would quietly not happen. */
+  if (ARRIVED_TO_RESET) { enterRecovery(); return; }
+
   await enterSession(data.session);
 
   /* This is what actually drives the app after a sign-in or sign-up. Without it
@@ -527,6 +662,13 @@ function show(which) {
     if (event === "SIGNED_OUT") {
       UID = null; ME = null; loadSucceeded(); show("auth"); return;
     }
+
+    /* The other half of the recovery guard. The hash check above catches the
+       implicit flow, where the fragment says type=recovery; this catches the
+       PKCE one, where the address only carries a code and the client tells us
+       what it was for once it has swapped it. Either alone leaves a hole. */
+    if (event === "PASSWORD_RECOVERY") { enterRecovery(); return; }
+    if (recovering) return;               /* they are mid-reset; leave them be */
 
     if (!session) {
       /* Events arrive with no session for reasons that are not a sign-out —
