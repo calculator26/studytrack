@@ -753,12 +753,11 @@ async function onSession(session) {
        that has not re-run schema.sql simply has no console. */
     if (typeof adminBoot === "function") adminBoot();
     loadSucceeded();
-    /* One line in the record saying you were here. Promise.resolve because
-       what rpc() returns only has then() on it — the mistake that was
-       throwing everybody back to the login screen. */
-    try {
-      Promise.resolve(sb.rpc("note", { kind: "open", data: {} })).then(() => {}, () => {});
-    } catch (e) { /* older project without the record: nothing to do */ }
+    /* There used to be a note("open") here, writing a line into the record
+       saying you had arrived. The record was rolled back and note() went with
+       it, so the call had nothing to reach: harmless, because its failure was
+       swallowed twice over, but a doomed request on every single sign-in all
+       the same. It goes back when the record does, not before. */
   } catch (err) {
     console.error(err);
     /* Being unable to read is not being signed out, and it must never look
