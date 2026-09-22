@@ -1879,6 +1879,136 @@ create or replace view public.live_by_hour as
 grant select on public.study_spans_done, public.live_by_hour to authenticated;
 
 -- ============================================================
+--  EMOJI REACTIONS ON CHAT MESSAGES
+--  ------------------------------------------------------------
+--  Unlike the kudos/sus on a session, which is one answer per
+--  person, a chat reaction is the ordinary kind: several people
+--  may pick the same emoji, and one person may pick more than
+--  one. So the key is all three columns, and the cap below is
+--  what stops somebody putting eight of them on one message.
+--
+--  The emoji is checked against a fixed list rather than taken
+--  as free text. A text column somebody can write anything into
+--  is a text column somebody will write something horrible into,
+--  and a list also keeps the picker and the database agreeing on
+--  what exists.
+-- ============================================================
+create table if not exists public.message_reactions (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id    uuid not null references auth.users(id)      on delete cascade,
+  emoji      text not null,
+  created_at timestamptz not null default now(),
+  primary key (message_id, user_id, emoji)
+);
+create index if not exists message_reactions_msg_idx on public.message_reactions(message_id);
+
+alter table public.message_reactions enable row level security;
+drop policy if exists "msgreact read all"   on public.message_reactions;
+drop policy if exists "msgreact delete own" on public.message_reactions;
+
+create policy "msgreact read all" on public.message_reactions
+  for select to authenticated using (true);
+
+-- Yours to take back, and an administrator can clear anyone's.
+create policy "msgreact delete own" on public.message_reactions
+  for delete to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+
+-- No insert or update policy: react_message() is the only way in, so the
+-- emoji list and the cap cannot be stepped over by anyone holding the anon key.
+revoke insert, update on public.message_reactions from anon, authenticated;
+
+-- The list, in one place, so the database and the picker cannot drift apart.
+create or replace function public.chat_emoji()
+returns text[]
+language sql
+immutable
+set search_path = public
+as $$ select array['👍','❤️','😂','🔥','💀','👀','🎉','😭'] $$;
+
+grant execute on function public.chat_emoji() to authenticated;
+
+create or replace function public.react_message(message_id uuid, emoji text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  /* Copied out of the arguments straight away: a parameter sharing a column's
+     name makes "on conflict" ambiguous, and that is an error at call time on
+     the insert path only â it works once and fails the second time. */
+  mid   uuid := react_message.message_id;
+  e     text := react_message.emoji;
+  me    uuid := auth.uid();
+  muted boolean;
+  mine  int;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'why', 'You are not signed in');
+  end if;
+  if e is null or not (e = any(public.chat_emoji())) then
+    return jsonb_build_object('ok', false, 'why', 'Not one of the reactions');
+  end if;
+  if not exists (select 1 from public.messages m where m.id = mid) then
+    return jsonb_build_object('ok', false, 'why', 'That message is gone');
+  end if;
+
+  -- Somebody an administrator has silenced in chat stays silenced here. A
+  -- reaction is a smaller way of talking, but it is still talking.
+  select coalesce(p.chat_muted, false) into muted from public.profiles p where p.id = me;
+  if muted then
+    return jsonb_build_object('ok', false, 'why', 'An administrator has muted you in chat');
+  end if;
+
+  if exists (select 1 from public.message_reactions r
+              where r.message_id = mid and r.user_id = me and r.emoji = e) then
+    delete from public.message_reactions r
+     where r.message_id = mid and r.user_id = me and r.emoji = e;
+    return jsonb_build_object('ok', true, 'on', false);
+  end if;
+
+  select count(*) into mine from public.message_reactions r
+   where r.message_id = mid and r.user_id = me;
+  if mine >= 3 then
+    return jsonb_build_object('ok', false, 'why', 'Three reactions each per message is the limit');
+  end if;
+
+  insert into public.message_reactions (message_id, user_id, emoji)
+  values (mid, me, e)
+  on conflict on constraint message_reactions_pkey do nothing;
+
+  return jsonb_build_object('ok', true, 'on', true);
+end $fn$;
+
+revoke execute on function public.react_message(uuid, text) from public, anon;
+grant  execute on function public.react_message(uuid, text) to authenticated;
+
+-- Asked for by id, for exactly the messages on screen.
+create or replace function public.message_reactions_for(ids uuid[])
+returns table (message_id uuid, emoji text, by_ids uuid[])
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select r.message_id, r.emoji, array_agg(r.user_id order by r.created_at)
+    from public.message_reactions r
+   where r.message_id = any(ids)
+   group by r.message_id, r.emoji
+$$;
+
+revoke execute on function public.message_reactions_for(uuid[]) from public, anon;
+grant  execute on function public.message_reactions_for(uuid[]) to authenticated;
+
+-- So a reaction lands in everybody's open tab without anyone re-reading.
+do $$
+begin
+  begin execute 'alter publication supabase_realtime add table public.message_reactions';
+  exception when others then null; end;
+end $$;
+
+-- ============================================================
 --  TELL THE API ABOUT ALL OF THAT
 --  ------------------------------------------------------------
 --  PostgREST answers sb.rpc() from a cached picture of the schema,

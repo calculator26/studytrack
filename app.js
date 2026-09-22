@@ -1100,6 +1100,8 @@ function subscribeRealtime() {
          speaks, and a socket message costs nothing to receive. */
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, onChatInsert)
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, onChatDelete)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, onMsgReactionChange)
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_reactions" }, onMsgReactionChange)
       .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    },
           () => { crewReloadProfiles = true; refreshSoon(); })
@@ -5131,7 +5133,9 @@ function openImageView(url) {
   });
   document.body.appendChild(ov);
 }
-let CHAT = { loaded: false, rows: [], oldest: null, unread: 0, atBottom: true, busy: false };
+let CHAT = { loaded: false, rows: [], oldest: null, unread: 0, atBottom: true, busy: false,
+             /* message_id -> { emoji: [user_id, ...] }, only for what is loaded */
+             rx: {} };
 /* Mentions waiting to be seen. paintNudgeBar reads this to decide whether to
    stand aside, the same way it reads POKES. */
 let MENTIONS = [];
@@ -5186,7 +5190,106 @@ function annHTML(m) {
         title="Delete this announcement">delete</button>` : ""}
     </div>
     <div class="ann-text">${withMentions(esc(m.body), m.mentions)}</div>
+    ${msgReactionsHTML(m)}
   </div>`;
+}
+
+/* ---------------------------------------------------------------------------
+   REACTING TO A MESSAGE
+
+   The ordinary kind, unlike the one answer each that a session gets: several
+   people may pick the same emoji and one person may pick a few. The list is
+   the database's, fetched once, so the picker and the check inside
+   react_message() cannot drift apart.
+   --------------------------------------------------------------------------- */
+let CHAT_EMOJI = ["\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\ude02", "\ud83d\udd25",
+                  "\ud83d\udc80", "\ud83d\udc40", "\ud83c\udf89", "\ud83d\ude2d"];
+let msgPickerFor = null;          /* the message whose picker is open */
+
+const msgRx = id => CHAT.rx[id] || {};
+
+function msgReactionsHTML(m) {
+  const r = msgRx(m.id);
+  const kinds = CHAT_EMOJI.filter(e => (r[e] || []).length);
+  const chips = kinds.map(e => {
+    const by = r[e] || [];
+    const mine = by.indexOf(UID) > -1;
+    return `<button type="button" class="mrx${mine ? " on" : ""}"
+      data-mrx="${esc(e)}" data-mrxid="${esc(m.id)}"
+      title="${esc(rxWho(by, "reacted " + e))}"
+      ><span class="mrx-e" aria-hidden="true">${esc(e)}</span><span class="mrx-n">${by.length}</span></button>`;
+  }).join("");
+  /* The add button is always there rather than on hover only: hover does not
+     exist on a phone, and this room is mostly read on phones. */
+  return `<div class="mrxrow">${chips}<button type="button" class="mrx add"
+    data-mrxadd="${esc(m.id)}" title="Add a reaction" aria-label="Add a reaction"
+    aria-expanded="${msgPickerFor === m.id}">+</button>${
+    msgPickerFor === m.id ? msgPickerHTML(m.id) : ""}</div>`;
+}
+
+function msgPickerHTML(id) {
+  return `<div class="mrxpick" role="menu">` + CHAT_EMOJI.map(e =>
+    `<button type="button" role="menuitem" data-mrx="${esc(e)}" data-mrxid="${esc(id)}"
+      title="${esc(e)}">${esc(e)}</button>`).join("") + `</div>`;
+}
+
+/* The palette lives in the database so that the check and the picker agree.
+   A project that has not been migrated yet keeps the built-in list, which is
+   the same one — it just cannot be changed without a deploy. */
+async function loadChatEmoji() {
+  if (!sb) return;
+  const { data, error } = await sb.rpc("chat_emoji");
+  if (!error && Array.isArray(data) && data.length) CHAT_EMOJI = data;
+}
+
+async function loadChatReactions() {
+  if (!sb || !UID || !CHAT.rows.length) return;
+  const ids = CHAT.rows.map(m => m.id).filter(Boolean);
+  const { data, error } = await sb.rpc("message_reactions_for", { ids: ids });
+  if (error) return;                       /* not migrated yet: no reactions */
+  const next = {};
+  (data || []).forEach(r => {
+    (next[r.message_id] || (next[r.message_id] = {}))[r.emoji] = r.by_ids || [];
+  });
+  CHAT.rx = next;
+}
+
+async function sendMessageReaction(id, emoji) {
+  const before = JSON.parse(JSON.stringify(msgRx(id)));
+  const now = JSON.parse(JSON.stringify(before));
+  const by = now[emoji] || (now[emoji] = []);
+  const at = by.indexOf(UID);
+  if (at > -1) by.splice(at, 1); else by.push(UID);
+  if (!by.length) delete now[emoji];
+  CHAT.rx[id] = now;
+  msgPickerFor = null;
+  paintChat();
+
+  const { data, error } = await sb.rpc("react_message", { message_id: id, emoji: emoji });
+  if (error || (data && data.ok === false)) {
+    CHAT.rx[id] = before;
+    paintChat();
+    toast((data && data.why) ||
+      (/schema cache|could not find the function/i.test((error && error.message) || "")
+        ? "Reactions are not set up on the database yet"
+        : (error && error.message) || "Could not react"), 4200);
+  }
+}
+
+/* Somebody else reacted. The row carries everything needed, so nothing is
+   re-read — the same trick the message insert already uses. */
+function onMsgReactionChange(payload) {
+  const row = (payload && (payload.new || payload.old)) || null;
+  if (!row || !row.message_id) return;
+  if (!CHAT.rows.some(m => m.id === row.message_id)) return;   /* not on screen */
+  const adding = !!(payload.new && payload.new.message_id);
+  const map = CHAT.rx[row.message_id] || (CHAT.rx[row.message_id] = {});
+  const by = map[row.emoji] || (map[row.emoji] = []);
+  const at = by.indexOf(row.user_id);
+  if (adding && at === -1) by.push(row.user_id);
+  if (!adding && at > -1) by.splice(at, 1);
+  if (!by.length) delete map[row.emoji];
+  if (chatIsOpen()) paintChat();
 }
 
 function msgHTML(m, prev) {
@@ -5212,6 +5315,7 @@ function msgHTML(m, prev) {
         ? `<img class="msgimg" src="${esc(signedFor(m.image_path))}" alt="Picture from ${esc(p.display_name)}"
              loading="lazy" data-full="${esc(m.image_path)}">`
         : `<div class="msgimg pending" style="width:160px;height:110px"></div>`) : ""}
+      ${msgReactionsHTML(m)}
     </div>
   </div>`;
 }
@@ -5235,6 +5339,33 @@ function paintChat() {
   const key = $("chat-key");
   if (key) key.textContent = "The number beside a name is hours logged today";
   wireChatRows();
+  wireChatReactions();
+}
+
+/* Delegated once, on the log, because paintChat rewrites its innerHTML on
+   every message and every reaction — a listener bound to a chip would be
+   thrown away by the very repaint its own click caused. */
+let chatRxWired = false;
+function wireChatReactions() {
+  const log = $("chatlog");
+  if (!log || chatRxWired) return;
+  chatRxWired = true;
+  log.addEventListener("click", e => {
+    const chip = e.target.closest && e.target.closest("[data-mrx]");
+    if (chip) { e.stopPropagation(); sendMessageReaction(chip.dataset.mrxid, chip.dataset.mrx); return; }
+    const add = e.target.closest && e.target.closest("[data-mrxadd]");
+    if (add) {
+      e.stopPropagation();
+      msgPickerFor = msgPickerFor === add.dataset.mrxadd ? null : add.dataset.mrxadd;
+      paintChat();
+      return;
+    }
+    /* a click anywhere else in the room closes an open picker */
+    if (msgPickerFor) { msgPickerFor = null; paintChat(); }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && msgPickerFor) { msgPickerFor = null; paintChat(); }
+  });
 }
 
 function wireChatRows() {
@@ -5295,6 +5426,9 @@ async function loadChat() {
     CHAT.oldest = CHAT.rows.length ? CHAT.rows[0].created_at : null;
     CHAT.loaded = true;
     paintChat();
+    /* After the rows, because it asks by id for exactly the ones just read. */
+    try { await loadChatEmoji(); await loadChatReactions(); paintChat(); }
+    catch (e) { /* the room reads fine without them */ }
     chatScrollBottom(true);
   } finally { CHAT.busy = false; }
 }
@@ -5318,6 +5452,7 @@ async function loadOlderChat() {
     CHAT.rows = older.concat(CHAT.rows);
     CHAT.oldest = CHAT.rows[0].created_at;
     paintChat();
+    try { await loadChatReactions(); paintChat(); } catch (e) { /* not fatal */ }
     if (log) log.scrollTop = log.scrollHeight - was;   /* stay where you were reading */
     if (btn && older.length < CHAT_PAGE) btn.hidden = true;
   } finally {
