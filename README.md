@@ -394,6 +394,39 @@ sessions, because moderation would be impossible otherwise.
 chat go away. Nothing about you changes for anyone else. For when the comparison is more
 pressure than push.
 
+### The cohort view
+`view/` is a read-only page for someone who should be able to see how the year group is
+going without an account, a teacher most obviously. It shows the live strip with running
+clocks, this week's hours against last week's, how many students are active, hours per day,
+hours by subject, the hours of the day the cohort studies most, and the top ten this week.
+It updates every thirty seconds.
+
+**It never shows** chat, session notes, nudges, reactions, goals, marks or email addresses.
+Anybody with *Hide my hours from everyone else* switched on is left out of every figure, the
+totals included, just as they are for their classmates.
+
+There is no login, so the link is the key:
+
+```
+https://YOUR-USERNAME.github.io/studytrack/view/#<token>
+```
+
+`/view/` on its own shows *This link isn't active*. The page passes the token to
+`cohort_view()`, which returns nothing unless it matches a live row in `view_links`, and
+nothing in the browser can read or write that table. The token sits after the `#`, so it
+is never sent to GitHub and never ends up in a Referer header.
+
+Links are made and revoked in the SQL editor. The label is only for you; the page never
+shows it:
+
+```sql
+insert into public.view_links (label) values ('Shared link 2') returning token;
+update public.view_links set revoked_at = now() where label = 'Shared link 1';
+select label, created_at, last_seen, revoked_at from public.view_links;
+```
+
+The tables and functions are in `view.sql`, which is safe to re-run.
+
 ### Countdowns
 Today carries two: **Valedictory**, and **English Paper 1** — the date for which is read
 out of the catalogue rather than typed in a second place, so it cannot drift from NESA's
@@ -533,6 +566,8 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `favicon.svg` | The mark — a track seen from above, with a runner on the lane |
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
 | `admin.js` | The admin console — overview, members, sessions, integrity flags, audit log |
+| `view/` | The read-only cohort view: its own page, stylesheet and script |
+| `view.sql` | The table and functions behind the cohort view. Run once, safe to re-run |
 | `admin.css` | The console's own dark theme, kept apart from the app's design system |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |
 | `sw.js` | Service worker. Handles reminder notifications, and deliberately caches nothing |

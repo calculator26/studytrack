@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- The link is the key, so it should not leak anywhere: not into search
+     results and not into the Referer header of anything this page loads. -->
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Cohort view · Knox Study Track</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="view.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap bar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+        <rect x="7.5" y="10" width="17" height="12" rx="6" fill="none" stroke="#fff" stroke-opacity=".38" stroke-width="2.4"/>
+        <path d="M13.5 10h5a6 6 0 0 1 6 6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="24.5" cy="16" r="2.9" fill="#fff"/>
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#FF7A4D"/><stop offset="1" stop-color="#E8402A"/></linearGradient></defs>
+      </svg>
+      <div>
+        <h1>Knox Study Track</h1>
+        <p>Cohort view · Class of 2026</p>
+      </div>
+    </div>
+    <div class="status">
+      <span class="countdown" id="countdown" hidden></span>
+      <span class="updated" id="updated"><i class="dot"></i><span>Connecting…</span></span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="main" hidden>
+
+  <section class="card live">
+    <div class="head">
+      <div>
+        <h2><i class="dot"></i> Studying right now</h2>
+        <p class="sub" id="live-sub">—</p>
+      </div>
+      <div class="livecount"><span id="live-n">0</span><small>on the clock</small></div>
+    </div>
+    <div class="livegrid" id="live-list"></div>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <div class="head">
+      <div>
+        <h2>Hours studied each day</h2>
+        <p class="sub">The whole cohort, with the number of students who logged anything that day</p>
+      </div>
+      <div class="legend"><span><i class="sw bar"></i>Hours</span><span><i class="sw line"></i>Students</span></div>
+    </div>
+    <div class="chartbox"><svg id="daily" role="img" aria-label="Hours studied each day"></svg></div>
+  </section>
+
+  <div class="two">
+    <section class="card">
+      <div class="head">
+        <div>
+          <h2>Where the hours are going</h2>
+          <p class="sub">By subject, last 7 days, with how many students have logged it</p>
+        </div>
+      </div>
+      <div class="subjects" id="subjects"></div>
+    </section>
+
+    <section class="card">
+      <div class="head">
+        <div>
+          <h2>When the cohort studies</h2>
+          <p class="sub">Average number on the clock at each hour, last 14 days</p>
+        </div>
+      </div>
+      <div class="chartbox"><svg id="hours" role="img" aria-label="Average number studying by hour of day"></svg></div>
+      <p class="note" id="hours-note"></p>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="head">
+      <div>
+        <h2>Most hours this week</h2>
+        <p class="sub">The top ten over the last 7 days — the same board students see</p>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table class="board">
+        <thead><tr><th>#</th><th>Student</th><th class="n">This week</th><th class="n">Days active</th><th class="n wide">All time</th></tr></thead>
+        <tbody id="board"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Read-only. Updates every 30 seconds. Chat, session notes and personal settings are never
+       included, and students who have chosen to keep their hours private are left out of every
+       figure on this page.</p>
+  </footer>
+</main>
+
+<section class="wrap gone" id="gone" hidden>
+  <div class="card">
+    <h2>This link isn't active</h2>
+    <p>Check you have the whole link, including everything after the <code>#</code>. If it has
+       stopped working, ask for a new one.</p>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="../config.js"></script>
+<script src="../catalogue.js"></script>
+<script src="view.js"></script>
+</body>
+</html>
