@@ -180,6 +180,17 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Everything in public is published as an RPC, so without this
+-- /rest/v1/rpc/handle_new_user is callable by anyone, signed in or not.
+-- Calling it outside a trigger errors — there is no NEW row to read — so
+-- nothing could be done with it, but a security definer function has no
+-- business being reachable from the open internet. Revoking cannot break
+-- signing up: the insert into auth.users is made by the auth service under
+-- its own role and the trigger fires from there, which was checked before
+-- this line was written by taking the grant away and watching a new user
+-- still get their profile row.
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
 -- ============================================================
 --  Let someone delete their own account, and everything in it
 -- ------------------------------------------------------------
@@ -1753,13 +1764,17 @@ begin
   if tg_op = 'DELETE' then
     perform public.log_event(tg_table_name || '.remove', old.user_id,
       case when tg_table_name = 'timer_reactions' then old.owner_id else null end,
-      case when tg_table_name = 'session_reactions' then old.session_id else null end,
-      jsonb_build_object('kind', old.kind));
+      case when tg_table_name = 'session_reactions' then old.session_id
+           when tg_table_name = 'message_reactions' then old.message_id else null end,
+      jsonb_build_object('kind', case when tg_table_name = 'message_reactions'
+                                      then old.emoji else old.kind end));
   else
     perform public.log_event(tg_table_name || '.' || lower(tg_op), new.user_id,
       case when tg_table_name = 'timer_reactions' then new.owner_id else null end,
-      case when tg_table_name = 'session_reactions' then new.session_id else null end,
-      jsonb_build_object('kind', new.kind));
+      case when tg_table_name = 'session_reactions' then new.session_id
+           when tg_table_name = 'message_reactions' then new.message_id else null end,
+      jsonb_build_object('kind', case when tg_table_name = 'message_reactions'
+                                      then new.emoji else new.kind end));
   end if;
   return null;
 exception when others then return null;
@@ -1774,6 +1789,30 @@ drop trigger if exists timer_reactions_log on public.timer_reactions;
 create trigger timer_reactions_log
   after insert or update or delete on public.timer_reactions
   for each row execute function public.trg_reactions_log();
+
+drop trigger if exists message_reactions_log on public.message_reactions;
+create trigger message_reactions_log
+  after insert or delete on public.message_reactions
+  for each row execute function public.trg_reactions_log();
+
+-- Messages deleted: the room's own history loses them entirely otherwise.
+create or replace function public.trg_messages_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+begin
+  perform public.log_event('message.delete', auth.uid(), old.user_id, old.id,
+    jsonb_build_object('row', to_jsonb(old)));
+  return null;
+exception when others then return null;
+end $fn$;
+
+drop trigger if exists messages_log on public.messages;
+create trigger messages_log
+  after delete on public.messages
+  for each row execute function public.trg_messages_log();
 
 -- ------------------------------------------------------------
 --  Profile changes, which is where private mode, display names
