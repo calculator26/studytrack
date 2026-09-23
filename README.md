@@ -395,37 +395,37 @@ chat go away. Nothing about you changes for anyone else. For when the comparison
 pressure than push.
 
 ### The cohort view
-`view/` is a read-only page for someone who should be able to see how the year group is
-going without an account, a teacher most obviously. It shows the live strip with running
-clocks, this week's hours against last week's, how many students are active, hours per day,
-hours by subject, the hours of the day the cohort studies most, and the top ten this week.
-It updates every thirty seconds.
-
-**It never shows** chat, session notes, nudges, reactions, goals, marks or email addresses.
-Anybody with *Hide my hours from everyone else* switched on is left out of every figure, the
-totals included, just as they are for their classmates.
-
-There is no login, so the link is the key:
+`view/` is the year group, read-only, for somebody without an account. A teacher, most
+obviously. There is no login and no key: the address is the whole thing.
 
 ```
-https://YOUR-USERNAME.github.io/studytrack/view/#<token>
+https://YOUR-USERNAME.github.io/studytrack/view/
 ```
 
-`/view/` on its own shows *This link isn't active*. The page passes the token to
-`cohort_view()`, which returns nothing unless it matches a live row in `view_links`, and
-nothing in the browser can read or write that table. The token sits after the `#`, so it
-is never sent to GitHub and never ends up in a Referer header.
+It is built to work like the app itself, in three tabs:
 
-Links are made and revoked in the SQL editor. The label is only for you; the page never
-shows it:
+- **Now** — the live strip, with each person's name, subject and area stacked and the clock
+  ticking; hours today, this week against last week, how many are active and the all-time
+  total; *Today across the peloton* against each person's own goal; hours per day for the
+  last month; and the activity feed.
+- **Peloton** — the leaderboard with the same ranges, subject filter and rankings as the app
+  (hours, sessions, longest day, goal-hit rate, streak), a podium, a name search, the race,
+  daily output, how busy it gets, when in the day the cohort studies, and head to head.
+- **Subjects** — every subject with how many take it and the hours on it this week and all
+  time, and the HSC timetable with how many students sit each paper. Click a subject and the
+  leaderboard narrows to it.
 
-```sql
-insert into public.view_links (label) values ('Shared link 2') returning token;
-update public.view_links set revoked_at = now() where label = 'Shared link 1';
-select label, created_at, last_seen, revoked_at from public.view_links;
-```
+Click any name for that person's profile: totals, streak, goal-hit rate, the last five weeks
+coloured by goal, hours by subject and area, and every session they have logged.
 
-The tables and functions are in `view.sql`, which is safe to re-run.
+**It never shows** chat, session notes, nudges, reactions, marks or email addresses. Anybody
+with *Hide my hours from everyone else* on is left out of every figure, the totals included,
+just as they are for their classmates. Those rules live in the database, in the four
+functions in `view.sql`, not in the page.
+
+It is open on purpose. Signing up is open too, and a member sees all of this and more, so a
+key on this page would protect nothing that is not one sign-up away. It asks search engines
+not to index it.
 
 ### Countdowns
 Today carries two: **Valedictory**, and **English Paper 1** — the date for which is read
@@ -567,7 +567,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
 | `admin.js` | The admin console — overview, members, sessions, integrity flags, audit log |
 | `view/` | The read-only cohort view: its own page, stylesheet and script |
-| `view.sql` | The table and functions behind the cohort view. Run once, safe to re-run |
+| `view.sql` | The four read-only functions behind the cohort view. Safe to re-run |
 | `admin.css` | The console's own dark theme, kept apart from the app's design system |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |
 | `sw.js` | Service worker. Handles reminder notifications, and deliberately caches nothing |

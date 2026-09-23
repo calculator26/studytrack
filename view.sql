@@ -1,157 +1,218 @@
 -- =========================================================================
---  COHORT VIEW — a read-only window on the year group, with no account
+--  COHORT VIEW — the year group, read-only, with no account
 --  -----------------------------------------------------------------------
 --  view/ in the site renders this. It exists for people who should be able
---  to see how the cohort is going without joining — a teacher, most
+--  to follow how the cohort is going without joining — a teacher, most
 --  obviously, who does not want students to feel watched in the app itself.
 --
---  HOW THE DOOR WORKS
---  There is no login, so the link is the key. Each link carries a
---  random token after the # (never sent to GitHub, never in a referrer).
---  The page hands it to cohort_view(), which returns nothing unless the
---  token is in view_links and not revoked. Without a token, /view/ is an
---  empty page. Anyone can find the URL; nobody can guess a 122-bit token.
+--  It is open: anybody with the address can load it. That is a choice, not
+--  an oversight. Signing up is open too, and a member already sees all of
+--  this and more, so a key on this page would protect nothing that is not
+--  one sign-up away.
 --
---  view_links has row level security on and no policies, so the anon and
---  authenticated keys can neither read nor write it. Tokens are made and
---  revoked here, in the SQL editor:
+--  WHAT IT SHOWS
+--  What a member sees on the Peloton tab and on somebody's profile: names,
+--  hours, sessions, goals, streaks, subjects and areas, live timers, the
+--  activity feed and how busy it gets.
 --
---    insert into public.view_links (label) values ('Shared link 2') returning token;
---    update public.view_links set revoked_at = now() where label = 'Shared link 1';
+--  WHAT IT NEVER SHOWS
+--  Chat, session notes, nudges, reactions, marks (current_pct), emails and
+--  avatars. And anybody with hide_hours on is not in any of it — not the
+--  board, not the totals, not the live strip — exactly as for members.
 --
---  The label is only for you, here. The page never shows it.
---
---  WHAT IT SHOWS, AND WHAT IT NEVER DOES
---  Hours, sessions, subjects, the live strip and the top of the leaderboard:
---  the same things every student already sees on the Peloton page.
---  Never: chat, session notes, nudges, reactions, emails, marks, goals.
---  Anyone with hide_hours on is left out of every figure, the totals
---  included, exactly as they are for their classmates.
+--  Every function is security definer, because anon can read none of the
+--  tables underneath, and each one filters hide_hours itself for the same
+--  reason: row level security is not there to do it for them.
 --
 --  Safe to re-run.
 -- =========================================================================
 
-create table if not exists public.view_links (
-  token       uuid primary key default gen_random_uuid(),
-  label       text not null,
-  created_at  timestamptz not null default now(),
-  revoked_at  timestamptz,
-  last_seen   timestamptz
-);
-alter table public.view_links enable row level security;
-revoke all on public.view_links from anon, authenticated;
+-- The first version handed out keyed links. Gone: the page no longer asks.
+drop function if exists public.cohort_view(uuid);
+drop function if exists public.cohort_seen(uuid);
+drop table    if exists public.view_links;
 
-create or replace function public.cohort_view(token uuid)
+-- ------------------------------------------------------------------------
+--  Everything the page needs to draw itself once. Heavier than the poll
+--  below, so the page reads it every few minutes rather than every thirty
+--  seconds.
+-- ------------------------------------------------------------------------
+create or replace function public.cohort_view()
 returns jsonb
-language plpgsql
+language sql
 stable
 security definer
 set search_path = public
 as $fn$
-declare
-  today date := (now() at time zone 'Australia/Sydney')::date;
-  out   jsonb;
-begin
-  if token is null or not exists (
-       select 1 from public.view_links l
-        where l.token = cohort_view.token and l.revoked_at is null) then
-    return null;
-  end if;
-
   with
   people as (
-    select p.id, p.display_name as name, p.colour
+    select p.id, p.display_name, p.colour, p.default_goal, p.weekday_goals, p.created_at
       from public.profiles p
      where not p.hide_hours
   ),
-  s as (
-    select s.user_id, s.day, s.minutes, s.subject_id
+  per_day as (
+    select s.user_id, s.day, sum(s.minutes)::int as mins, count(*)::int as n
       from public.sessions s
       join people on people.id = s.user_id
+     where s.day > (now() at time zone 'Australia/Sydney')::date - 400
+     group by s.user_id, s.day
   ),
-  per_day as (
-    select d::date as day,
-           coalesce(sum(s.minutes), 0)::int        as minutes,
-           count(distinct s.user_id)::int          as students,
-           count(s.user_id)::int                   as sessions
-      from generate_series(today - 29, today, interval '1 day') d
-      left join s on s.day = d::date
-     group by d
-     order by d
+  daily as (
+    select user_id, jsonb_object_agg(day::text, jsonb_build_array(mins, n)) as days
+      from per_day group by user_id
+  ),
+  goals as (
+    select g.user_id, g.day, g.hours
+      from public.goals g
+      join people on people.id = g.user_id
+     where g.day > (now() at time zone 'Australia/Sydney')::date - 400
+  ),
+  subj_rows as (
+    select s.id, s.user_id, btrim(s.name) as name,
+           lower(btrim(regexp_replace(s.name, '\s+', ' ', 'g'))) as key
+      from public.subjects s
+      join people on people.id = s.user_id
+  ),
+  subj_mins as (
+    select r.key,
+           sum(x.minutes) filter (where x.day > (now() at time zone 'Australia/Sydney')::date - 7)::int as m7,
+           sum(x.minutes)::int as mall
+      from public.sessions x
+      join subj_rows r on r.id = x.subject_id
+     group by r.key
   ),
   subj as (
-    select mode() within group (order by btrim(sub.name))           as label,
-           sum(s.minutes) filter (where s.day > today - 7)::int     as m7,
-           sum(s.minutes)::int                                      as mall,
-           count(distinct s.user_id)::int                           as students
-      from s
-      join public.subjects sub on sub.id = s.subject_id
-     group by lower(btrim(regexp_replace(sub.name, '\s+', ' ', 'g')))
-  ),
-  leaders as (
-    select people.name, people.colour,
-           sum(s.minutes) filter (where s.day > today - 7)::int        as m7,
-           sum(s.minutes)::int                                         as mall,
-           count(distinct s.day) filter (where s.day > today - 7)::int as days7
-      from s join people on people.id = s.user_id
-     group by people.id, people.name, people.colour
-  ),
-  live as (
-    select people.name, people.colour, t.label, t.running, t.started_at, t.acc_ms
-      from public.live_timers t
-      join people on people.id = t.user_id
-     where t.updated_at > now() - interval '5 minutes'
-  ),
-  by_hour as (
-    select extract(hour from bucket at time zone 'Australia/Sydney')::int as hour,
-           round(avg(peak), 1) as avg_peak, max(peak) as max_peak
-      from public.live_samples
-     where bucket > now() - interval '14 days'
-     group by 1
+    select r.key,
+           mode() within group (order by r.name) as label,
+           array_agg(distinct r.user_id)         as takers,
+           coalesce(max(m.m7), 0)                as m7,
+           coalesce(max(m.mall), 0)              as mall
+      from subj_rows r
+      left join subj_mins m on m.key = r.key
+     group by r.key
   )
   select jsonb_build_object(
-    'now',   now(),
-    'today', today,
-    'totals', jsonb_build_object(
-      'members',       (select count(*) from people),
-      'ever_studied',  (select count(distinct user_id) from s),
-      'minutes_all',   (select coalesce(sum(minutes), 0) from s),
-      'sessions_all',  (select count(*) from s),
-      'minutes_7d',    (select coalesce(sum(minutes), 0) from s where day > today - 7),
-      'minutes_prev7', (select coalesce(sum(minutes), 0) from s where day > today - 14 and day <= today - 7),
-      'active_7d',     (select count(distinct user_id) from s where day > today - 7),
-      'minutes_today', (select coalesce(sum(minutes), 0) from s where day = today),
-      'active_today',  (select count(distinct user_id) from s where day = today),
-      'first_day',     (select min(day) from s),
-      'live_record',   (select coalesce(max(peak), 0) from public.live_samples)
-    ),
-    'daily',    (select coalesce(jsonb_agg(per_day), '[]') from per_day),
-    'subjects', (select coalesce(jsonb_agg(x order by x.mall desc), '[]')
-                   from (select * from subj where mall > 0 order by mall desc limit 16) x),
-    'leaders',  (select coalesce(jsonb_agg(x order by x.m7 desc), '[]')
-                   from (select * from leaders where m7 > 0 order by m7 desc limit 10) x),
-    'live',     (select coalesce(jsonb_agg(live order by live.running desc, live.started_at), '[]') from live),
-    'by_hour',  (select coalesce(jsonb_agg(by_hour order by hour), '[]') from by_hour)
-  ) into out;
+    'now',      now(),
+    'today',    (now() at time zone 'Australia/Sydney')::date,
+    'people',   (select coalesce(jsonb_agg(people order by display_name), '[]') from people),
+    'daily',    (select coalesce(jsonb_object_agg(user_id, days), '{}') from daily),
+    'goals',    (select coalesce(jsonb_agg(goals), '[]') from goals),
+    'subjects', (select coalesce(jsonb_agg(subj order by cardinality(takers) desc), '[]') from subj),
+    'history',  (select coalesce(jsonb_agg(jsonb_build_array(bucket, peak) order by bucket), '[]')
+                   from public.live_samples where bucket > now() - interval '30 days'),
+    'record',   (select coalesce(max(peak), 0) from public.live_samples)
+  )
+$fn$;
 
-  return out;
-end $fn$;
-
--- A separate, volatile function for "last seen", because cohort_view is
--- stable and is called every thirty seconds; one write per page load is plenty.
-create or replace function public.cohort_seen(token uuid)
-returns void
+-- ------------------------------------------------------------------------
+--  What moves: who is on the clock, and the newest forty sessions. Small,
+--  so the page can ask every thirty seconds.
+--
+--  Freshness is the app's own rule: a running timer must have checked in
+--  within five minutes, a paused one is shown for half an hour after the
+--  pause and then goes quiet.
+-- ------------------------------------------------------------------------
+create or replace function public.cohort_live()
+returns jsonb
 language sql
+stable
 security definer
 set search_path = public
-as $$
-  update public.view_links set last_seen = now()
-   where view_links.token = cohort_seen.token and revoked_at is null;
-$$;
+as $fn$
+  with
+  people as (select id from public.profiles where not hide_hours),
+  live as (
+    select t.user_id, t.running, t.started_at, t.acc_ms, t.label,
+           sj.name as subject, sj.colour as subject_colour, ar.name as area
+      from public.live_timers t
+      join people on people.id = t.user_id
+      left join public.subjects sj on sj.id = t.subject_id
+      left join public.areas    ar on ar.id = t.area_id
+     where t.updated_at > now() - case when t.running then interval '5 minutes'
+                                                      else interval '30 minutes' end
+  ),
+  feed as (
+    select s.id, s.user_id, s.day, s.minutes, s.created_at,
+           sj.name as subject, sj.colour as subject_colour, ar.name as area
+      from public.sessions s
+      join people on people.id = s.user_id
+      left join public.subjects sj on sj.id = s.subject_id
+      left join public.areas    ar on ar.id = s.area_id
+     order by s.created_at desc
+     limit 40
+  )
+  select jsonb_build_object(
+    'now',  now(),
+    'live', (select coalesce(jsonb_agg(live), '[]') from live),
+    'feed', (select coalesce(jsonb_agg(feed order by created_at desc), '[]') from feed)
+  )
+$fn$;
 
-revoke execute on function public.cohort_view(uuid) from public;
-revoke execute on function public.cohort_seen(uuid) from public;
-grant  execute on function public.cohort_view(uuid) to anon, authenticated;
-grant  execute on function public.cohort_seen(uuid) to anon, authenticated;
+-- ------------------------------------------------------------------------
+--  The board narrowed to one subject, matched on the normalised name the
+--  same way crew_daily_by_subject() does it for members.
+-- ------------------------------------------------------------------------
+create or replace function public.cohort_subject_daily(subject_key text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $fn$
+  with per_day as (
+    select s.user_id, s.day, sum(s.minutes)::int as mins, count(*)::int as n
+      from public.sessions s
+      join public.subjects sub on sub.id = s.subject_id
+      join public.profiles p   on p.id = s.user_id and not p.hide_hours
+     where lower(btrim(regexp_replace(sub.name, '\s+', ' ', 'g'))) = subject_key
+       and s.day > (now() at time zone 'Australia/Sydney')::date - 400
+     group by s.user_id, s.day
+  ),
+  daily as (
+    select user_id, jsonb_object_agg(day::text, jsonb_build_array(mins, n)) as days
+      from per_day group by user_id
+  )
+  select coalesce(jsonb_object_agg(user_id, days), '{}') from daily
+$fn$;
+
+-- ------------------------------------------------------------------------
+--  One person's profile: their subjects, areas and every session, without
+--  the notes. Nothing at all for somebody who has hidden their hours.
+-- ------------------------------------------------------------------------
+create or replace function public.cohort_profile(uid uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $fn$
+  select case when not exists (select 1 from public.profiles where id = uid and not hide_hours)
+    then null
+    else jsonb_build_object(
+      'subjects', (select coalesce(jsonb_agg(jsonb_build_object(
+                     'id', id, 'name', name, 'colour', colour, 'exam_date', exam_date)
+                     order by position, created_at), '[]')
+                     from public.subjects where user_id = uid),
+      'areas',    (select coalesce(jsonb_agg(jsonb_build_object(
+                     'id', id, 'subject_id', subject_id, 'name', name, 'target_hours', target_hours)
+                     order by position), '[]')
+                     from public.areas where user_id = uid),
+      'sessions', (select coalesce(jsonb_agg(jsonb_build_object(
+                     'id', id, 'day', day, 'minutes', minutes, 'subject_id', subject_id,
+                     'area_id', area_id, 'created_at', created_at)
+                     order by day desc, created_at desc), '[]')
+                     from public.sessions where user_id = uid)
+    )
+  end
+$fn$;
+
+revoke execute on function public.cohort_view()                from public;
+revoke execute on function public.cohort_live()                from public;
+revoke execute on function public.cohort_subject_daily(text)   from public;
+revoke execute on function public.cohort_profile(uuid)         from public;
+grant  execute on function public.cohort_view()                to anon, authenticated;
+grant  execute on function public.cohort_live()                to anon, authenticated;
+grant  execute on function public.cohort_subject_daily(text)   to anon, authenticated;
+grant  execute on function public.cohort_profile(uuid)         to anon, authenticated;
 
 notify pgrst, 'reload schema';

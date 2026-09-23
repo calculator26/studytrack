@@ -3,10 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<!-- The link is the key, so it should not leak anywhere: not into search
-     results and not into the Referer header of anything this page loads. -->
 <meta name="robots" content="noindex, nofollow">
-<meta name="referrer" content="no-referrer">
 <title>Cohort view · Knox Study Track</title>
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,7 +14,7 @@
 <body>
 
 <header class="top">
-  <div class="wrap bar">
+  <div class="wrap topbar">
     <div class="brand">
       <svg class="logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
         <rect width="32" height="32" rx="9" fill="url(#lg)"/>
@@ -37,86 +34,178 @@
       <span class="updated" id="updated"><i class="dot"></i><span>Connecting…</span></span>
     </div>
   </div>
+  <nav class="wrap tabs" id="tabs" role="tablist">
+    <button role="tab" data-tab="now" aria-selected="true">Now</button>
+    <button role="tab" data-tab="peloton">Peloton</button>
+    <button role="tab" data-tab="subjects">Subjects</button>
+  </nav>
 </header>
 
-<main class="wrap" id="main" hidden>
+<main class="wrap" id="main">
 
-  <section class="card live">
-    <div class="head">
-      <div>
-        <h2><i class="dot"></i> Studying right now</h2>
-        <p class="sub" id="live-sub">—</p>
-      </div>
-      <div class="livecount"><span id="live-n">0</span><small>on the clock</small></div>
-    </div>
-    <div class="livegrid" id="live-list"></div>
-  </section>
-
-  <section class="kpis" id="kpis"></section>
-
-  <section class="card">
-    <div class="head">
-      <div>
-        <h2>Hours studied each day</h2>
-        <p class="sub">The whole cohort, with the number of students who logged anything that day</p>
-      </div>
-      <div class="legend"><span><i class="sw bar"></i>Hours</span><span><i class="sw line"></i>Students</span></div>
-    </div>
-    <div class="chartbox"><svg id="daily" role="img" aria-label="Hours studied each day"></svg></div>
-  </section>
-
-  <div class="two">
-    <section class="card">
+  <!-- ================================================================ NOW -->
+  <section class="panel on" id="p-now">
+    <div class="card live">
       <div class="head">
         <div>
-          <h2>Where the hours are going</h2>
-          <p class="sub">By subject, last 7 days, with how many students have logged it</p>
+          <h2><i class="dot"></i> Studying right now</h2>
+          <p class="sub" id="live-sub">—</p>
         </div>
+        <div class="bignum"><span id="live-n">0</span><small>on the clock</small></div>
       </div>
-      <div class="subjects" id="subjects"></div>
-    </section>
+      <div class="livegrid" id="live-list"></div>
+    </div>
 
-    <section class="card">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="card">
       <div class="head">
-        <div>
-          <h2>When the cohort studies</h2>
-          <p class="sub">Average number on the clock at each hour, last 14 days</p>
+        <div><h2>Today across the peloton</h2>
+          <p class="sub" id="today-sub">Hours logged today, against each person's own goal</p></div>
+        <div class="legend ramp" id="ramp"></div>
+      </div>
+      <div class="todaygrid" id="today"></div>
+      <div id="today-more"></div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <div><h2>Hours studied each day</h2>
+          <p class="sub">The whole cohort, with the number of students who logged anything that day</p></div>
+        <div class="legend"><span><i class="sw bar"></i>Hours</span><span><i class="sw line"></i>Students</span></div>
+      </div>
+      <div class="chartbox"><svg id="daily" role="img" aria-label="Hours studied each day"></svg></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><div><h2>Activity</h2><p class="sub">The last 40 sessions logged by anyone</p></div></div>
+      <div class="feed" id="feed"></div>
+      <div id="feed-more"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ PELOTON -->
+  <section class="panel" id="p-peloton">
+    <div class="card">
+      <div class="head">
+        <div><h2>Leaderboard</h2><p class="sub" id="lb-sub">—</p></div>
+        <div class="chips" id="range">
+          <button data-r="1">Today</button>
+          <button data-r="7" aria-pressed="true">7 days</button>
+          <button data-r="30">30 days</button>
+          <button data-r="0">All time</button>
         </div>
       </div>
-      <div class="chartbox"><svg id="hours" role="img" aria-label="Average number studying by hour of day"></svg></div>
-      <p class="note" id="hours-note"></p>
-    </section>
-  </div>
+      <div class="filters">
+        <label>Subject<select id="lb-subject"></select></label>
+        <label>Ranked by<select id="lb-metric"></select></label>
+        <label class="grow">Find a student<input id="lb-find" type="search" placeholder="Type a name" autocomplete="off"></label>
+      </div>
+      <div class="podium" id="podium"></div>
+      <div class="tablewrap">
+        <table class="board" id="board">
+          <thead><tr>
+            <th>#</th><th>Student</th><th class="n">Hours</th><th class="n wide">Sessions</th>
+            <th class="n wide">Avg / day</th><th class="n wide">Longest day</th><th class="n">Goal hit</th>
+            <th class="n">Streak</th><th class="wide">Last 7 days</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="lb-more"></div>
+    </div>
 
-  <section class="card">
-    <div class="head">
-      <div>
-        <h2>Most hours this week</h2>
-        <p class="sub">The top ten over the last 7 days — the same board students see</p>
+    <div class="two">
+      <div class="card">
+        <div class="head"><div><h2>The race</h2><p class="sub" id="race-sub">Cumulative hours, top eight</p></div></div>
+        <div class="chartbox"><svg id="race" role="img" aria-label="Cumulative hours of the top eight"></svg></div>
+        <div class="keys" id="race-keys"></div>
+      </div>
+      <div class="card">
+        <div class="head"><div><h2>Daily output</h2><p class="sub" id="stack-sub">Every day, stacked by student</p></div></div>
+        <div class="chartbox"><svg id="stack" role="img" aria-label="Hours per day stacked by student"></svg></div>
+        <div class="keys" id="stack-keys"></div>
       </div>
     </div>
-    <div class="tablewrap">
-      <table class="board">
-        <thead><tr><th>#</th><th>Student</th><th class="n">This week</th><th class="n">Days active</th><th class="n wide">All time</th></tr></thead>
-        <tbody id="board"></tbody>
-      </table>
+
+    <div class="card">
+      <div class="head">
+        <div><h2>How busy it gets</h2><p class="sub" id="busy-sub">Most people on the clock at once, each hour</p></div>
+        <div class="chips" id="busy-range">
+          <button data-h="24">24h</button>
+          <button data-h="72">3d</button>
+          <button data-h="168" aria-pressed="true">7d</button>
+          <button data-h="720">30d</button>
+        </div>
+      </div>
+      <div class="chartbox"><svg id="busy" role="img" aria-label="People studying at once, by hour"></svg></div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <div class="head"><div><h2>When the cohort studies</h2>
+          <p class="sub">Average number on the clock at each hour of the day</p></div></div>
+        <div class="chartbox"><svg id="hours" role="img" aria-label="Average number studying by hour of day"></svg></div>
+        <p class="note" id="hours-note"></p>
+      </div>
+      <div class="card">
+        <div class="head">
+          <div><h2>Head to head</h2><p class="sub">Any two students, side by side</p></div>
+        </div>
+        <div class="h2hpick"><select id="h2h-a"></select><span>vs</span><select id="h2h-b"></select></div>
+        <div id="h2h"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== SUBJECTS -->
+  <section class="panel" id="p-subjects">
+    <div class="card">
+      <div class="head">
+        <div><h2>Hours by subject</h2>
+          <p class="sub">Every subject in the cohort. Click one to see its leaderboard.</p></div>
+      </div>
+      <div class="tablewrap">
+        <table class="board subj" id="subj">
+          <thead><tr>
+            <th>Subject</th><th class="n">Students</th><th class="n">This week</th>
+            <th class="wide"></th><th class="n wide">Per student</th><th class="n">All time</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <div><h2>HSC timetable</h2>
+          <p class="sub">Every written paper someone in the cohort sits, from NESA's 2026 timetable</p></div>
+      </div>
+      <div class="tablewrap">
+        <table class="board" id="exams">
+          <thead><tr><th>Date</th><th>Paper</th><th class="n wide">Time</th><th class="n">Students</th><th class="n">In</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
   <footer class="foot">
-    <p>Read-only. Updates every 30 seconds. Chat, session notes and personal settings are never
-       included, and students who have chosen to keep their hours private are left out of every
-       figure on this page.</p>
+    <p>Read-only. Live timers and activity update every 30 seconds, everything else every few
+       minutes. Chat, session notes, reactions and marks are never included, and students who have
+       chosen to keep their hours private are left out of every figure on this page.</p>
   </footer>
 </main>
 
-<section class="wrap gone" id="gone" hidden>
-  <div class="card">
-    <h2>This link isn't active</h2>
-    <p>Check you have the whole link, including everything after the <code>#</code>. If it has
-       stopped working, ask for a new one.</p>
+<!-- ============================================================ PROFILE -->
+<div class="ov" id="ov" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pf-name">
+    <header class="pfhead" id="pf-head"></header>
+    <div class="pfbody" id="pf-body"></div>
   </div>
-</section>
+</div>
+
+<div class="tip" id="tip" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="../config.js"></script>
