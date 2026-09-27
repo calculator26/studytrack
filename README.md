@@ -394,6 +394,29 @@ sessions, because moderation would be impossible otherwise.
 chat go away. Nothing about you changes for anyone else. For when the comparison is more
 pressure than push.
 
+### Larp reports
+"Larp" is what the year group calls faking your hours, so there is a way to say so. It is
+banter: nothing it does touches anybody's hours or flags them anywhere real.
+
+- **Everybody gets one report a day.** Open somebody's profile and press **🤥 Report LARP**.
+  The same button turns up under a live study, or one of today's sessions, once five people
+  have called it 🤨 sus.
+- **Five reports on one person in a day** and a **LARP ALERT** drops into chat with their
+  numbers (studied today, this week, where they sit on the board), and the room votes
+  **Legit** or **Larp**. Voting closes after two hours and the verdict stays on the card.
+- **Who reported is not a secret, but it is not announced.** Hover the count on a profile, or
+  "5 people" on an alert, to see the names. The same goes for who voted which way.
+- **The rules** — one a day, never yourself, never somebody in private mode, and only somebody
+  on **four hours or more today** (a running session counts) — are enforced by
+  `report_larp()` in `larp.sql`, not by the page. The four hour line means an accusation is
+  always a backhanded compliment, never a way of telling the year group somebody did twenty
+  minutes.
+- **The accused cannot delete the alert** from chat. An administrator can.
+- **None of it is on the cohort view.**
+
+`larp.sql` holds the tables and functions and is safe to re-run. `_test/index.html?larp=1`
+sets up a scene to try it locally.
+
 ### The cohort view
 `view/` is the year group, read-only, for somebody without an account. A teacher, most
 obviously. There is no login and no key: the address is the whole thing.
@@ -567,6 +590,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
 | `admin.js` | The admin console — overview, members, sessions, integrity flags, audit log |
 | `view/` | The read-only cohort view: its own page, stylesheet and script |
+| `larp.sql` | Larp reports: the tables, the rules and the vote. Safe to re-run |
 | `view.sql` | The four read-only functions behind the cohort view. Safe to re-run |
 | `admin.css` | The console's own dark theme, kept apart from the app's design system |
 | `schema.sql` | Tables, RLS policies, trigger, storage bucket |

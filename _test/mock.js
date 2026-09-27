@@ -7,7 +7,8 @@
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
   const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [],
               notification_prefs: [], push_subscriptions: [], notification_log: [],
-              nudges: [], messages: [] };
+              nudges: [], messages: [], timer_reactions: [], session_reactions: [],
+              larp_reports: [], larp_trials: [], larp_votes: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
@@ -146,6 +147,42 @@
   T.live_timers.push({ user_id: uid(2), label: "Finance · Drill", subject_id: null, area_id: null,
     started_at: new Date().toISOString(), acc_ms: 47 * 60000, running: false,
     updated_at: new Date().toISOString() });
+
+  /* ?larp=1 sets the scene for larp reports: more people (five reporters are
+     needed), Priya over four hours today with five sus on her live timer and
+     three reports already in, and two alerts in chat — Tom's open for voting,
+     Sam's from yesterday with its verdict in. */
+  if (/larp=1/.test(location.search)) {
+    const extra = [["Jack Nolan", "#1f7ea1"], ["Mia Chen", "#831199"], ["Oli Park", "#1a8649"],
+                   ["Zac Ford", "#804913"], ["Ben Ng", "#5918d4"]];
+    extra.forEach(([n, c], i) => T.profiles.push({ id: uid(5 + i), display_name: n, colour: c, onboarded: true,
+      default_goal: 3, weekday_goals: null, hide_hours: false, hide_others: false, created_at: joined(20) }));
+    const pri = uid(3), tom = uid(4), sam = uid(2);
+    T.sessions.push({ id: uid(ssid++), user_id: pri, subject_id: null, area_id: null, day: today(), minutes: 250,
+      note: "Past paper then flashcards", created_at: new Date(Date.now() - 50 * 60000).toISOString() });
+    const t = T.live_timers.find(r => r.user_id === pri);
+    [4, 5, 6, 7, 8].forEach(n => T.timer_reactions.push({ owner_id: pri, user_id: uid(n), kind: "sus",
+      for_started_at: t.started_at, created_at: new Date().toISOString() }));
+    [4, 5, 6].forEach((n, i) => T.larp_reports.push({ id: 700 + i, reporter: uid(n), target: pri, day: today(),
+      created_at: new Date(Date.now() - (30 - i) * 60000).toISOString() }));
+    const open = { id: uid(800), target: tom, day: today(), created_at: new Date(Date.now() - 40 * 60000).toISOString(),
+      closes_at: new Date(Date.now() + 80 * 60000).toISOString(), today_minutes: 312, week_minutes: 1530, week_rank: 2, week_of: 9 };
+    const shut = { id: uid(801), target: sam, day: add(today(), -1), created_at: new Date(Date.now() - 26 * 3600e3).toISOString(),
+      closes_at: new Date(Date.now() - 24 * 3600e3).toISOString(), today_minutes: 421, week_minutes: 1902, week_rank: 1, week_of: 9 };
+    T.larp_trials.push(open, shut);
+    [5, 6, 7, 8, 9].forEach(n => T.larp_reports.push({ id: 710 + n, reporter: uid(n), target: sam, day: shut.day,
+      created_at: shut.created_at }));
+    [[5, "larp"], [6, "larp"], [7, "legit"], [2, "legit"], [8, "larp"]].forEach(([n, v]) =>
+      T.larp_votes.push({ trial_id: open.id, user_id: uid(n), vote: v, created_at: new Date().toISOString() }));
+    [[4, "legit"], [5, "larp"], [6, "larp"], [7, "larp"]].forEach(([n, v]) =>
+      T.larp_votes.push({ trial_id: shut.id, user_id: uid(n), vote: v, created_at: shut.created_at }));
+    T.messages.push(
+      { id: uid(1290), user_id: sam, body: "LARP ALERT: 5 people think Sam Whitfield is larping.", mentions: [sam],
+        image_path: null, created_at: shut.created_at, larp_trial: shut.id },
+      { id: uid(1291), user_id: tom, body: "LARP ALERT: 5 people think Tom Beckett is larping.", mentions: [tom],
+        image_path: null, created_at: open.created_at, larp_trial: open.id });
+    T.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  }
 
   function builder(table) {
     /* pretend the other members' tabs are still open and still beating */
@@ -314,6 +351,40 @@
            then never appear, and openAdmin() should refuse. */
         rpc: (name, args) => {
           if (name === "delete_own_account") return Promise.resolve({ data: null, error: null });
+          /* The larp rules, mirrored so the button can be exercised locally.
+             The real ones are in larp.sql. */
+          if (name === "report_larp") {
+            const say = why => Promise.resolve({ data: { ok: false, why }, error: null });
+            const target = args && args.target, p = T.profiles.find(x => x.id === target);
+            if (target === ME) return say("You cannot report yourself. Nice try");
+            if (!p || p.hide_hours) return say("They are in private mode, so they cannot be reported");
+            if (T.larp_reports.some(r => r.reporter === ME && r.day === today())) return say("You have used your report for today");
+            const lt = T.live_timers.find(r => r.user_id === target);
+            const mins = T.sessions.filter(r => r.user_id === target && r.day === today()).reduce((a, r) => a + r.minutes, 0)
+              + (lt ? (lt.acc_ms + (lt.running ? Date.now() - new Date(lt.started_at).getTime() : 0)) / 60000 : 0);
+            if (mins < 240) return say(p.display_name + " needs 4 hours today before anyone can call it larp");
+            T.larp_reports.push({ id: 900 + T.larp_reports.length, reporter: ME, target, day: today(), created_at: new Date().toISOString() });
+            const n = T.larp_reports.filter(r => r.target === target && r.day === today()).length;
+            let trial = null;
+            if (n >= 5 && !T.larp_trials.some(t => t.target === target && t.day === today())) {
+              trial = uid(820 + T.larp_trials.length);
+              T.larp_trials.push({ id: trial, target, day: today(), created_at: new Date().toISOString(),
+                closes_at: new Date(Date.now() + 2 * 3600e3).toISOString(), today_minutes: Math.round(mins),
+                week_minutes: Math.round(mins) + 600, week_rank: 3, week_of: 9 });
+              T.messages.push({ id: uid(1350 + T.messages.length), user_id: target, body: "LARP ALERT", mentions: [target],
+                image_path: null, created_at: new Date().toISOString(), larp_trial: trial });
+            }
+            return Promise.resolve({ data: { ok: true, count: n, trial }, error: null });
+          }
+          if (name === "vote_larp") {
+            const t = T.larp_trials.find(x => x.id === args.trial);
+            if (!t || Date.now() >= new Date(t.closes_at).getTime())
+              return Promise.resolve({ data: { ok: false, why: "Voting has closed. The verdict stands" }, error: null });
+            const had = T.larp_votes.find(v => v.trial_id === t.id && v.user_id === ME);
+            T.larp_votes = T.larp_votes.filter(v => !(v.trial_id === t.id && v.user_id === ME));
+            if (!had || had.vote !== args.vote) T.larp_votes.push({ trial_id: t.id, user_id: ME, vote: args.vote });
+            return Promise.resolve({ data: { ok: true }, error: null });
+          }
           /* Mirrors nudge_mate() so the button can be exercised locally. The
              real rules live in the database; these are only for the harness. */
           if (name === "nudge_mate") {
