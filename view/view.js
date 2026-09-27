@@ -125,7 +125,7 @@ function cell(uid, day, src) {
   const t = (L.live || []).find(x => x.user_id === uid);
   if (!t) return v;
   if (src && src !== DAILY && subjKey(liveParts(t).subject) !== UI.subject) return v;
-  return [v[0] + Math.min(elapsed(t), 5 * 36e5) / 60000, v[1]];
+  return [v[0] + Math.min(elapsed(t), 6 * 36e5) / 60000, v[1]];
 }
 const minutesOn = (uid, day) => cell(uid, day)[0];
 

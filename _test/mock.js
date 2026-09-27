@@ -149,7 +149,7 @@
     updated_at: new Date().toISOString() });
 
   /* ?larp=1 sets the scene for larp reports: more people (five reporters are
-     needed), Priya over four hours today with five sus on her live timer and
+     needed), Priya over four hours today with ten sus on her live timer and
      three reports already in, and two alerts in chat — Tom's open for voting,
      Sam's from yesterday with its verdict in. */
   if (/larp=1/.test(location.search)) {
@@ -161,8 +161,13 @@
     T.sessions.push({ id: uid(ssid++), user_id: pri, subject_id: null, area_id: null, day: today(), minutes: 250,
       note: "Past paper then flashcards", created_at: new Date(Date.now() - 50 * 60000).toISOString() });
     const t = T.live_timers.find(r => r.user_id === pri);
-    [4, 5, 6, 7, 8].forEach(n => T.timer_reactions.push({ owner_id: pri, user_id: uid(n), kind: "sus",
+    /* ten sus on Priya, who is over four hours, so her live card gets the
+       button; ten on Sam too, who is under four, so his must not */
+    const st = T.live_timers.find(r => r.user_id === sam);
+    [2, 4, 5, 6, 7, 8, 9, 10, 11, 12].forEach(n => T.timer_reactions.push({ owner_id: pri, user_id: uid(n), kind: "sus",
       for_started_at: t.started_at, created_at: new Date().toISOString() }));
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 12].forEach(n => T.timer_reactions.push({ owner_id: sam, user_id: uid(n), kind: "sus",
+      for_started_at: st.started_at, created_at: new Date().toISOString() }));
     [4, 5, 6].forEach((n, i) => T.larp_reports.push({ id: 700 + i, reporter: uid(n), target: pri, day: today(),
       created_at: new Date(Date.now() - (30 - i) * 60000).toISOString() }));
     const open = { id: uid(800), target: tom, day: today(), created_at: new Date(Date.now() - 40 * 60000).toISOString(),

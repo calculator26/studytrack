@@ -1304,3 +1304,18 @@ table.lh-t tr:last-child td{border-bottom:0}
   .larp-pf .larpbtn{width:100%}
 }
 @media (prefers-reduced-motion:reduce){ .larp-badge{animation:none} }
+
+/* the are-you-sure, with a buzzer and a shake */
+.larpconfirm{max-width:400px;padding:26px 24px 22px;text-align:center;border-top:5px solid #E8402A}
+.larpconfirm .lc-siren{font-size:40px;line-height:1;margin-bottom:10px}
+.larpconfirm h2{font-size:19px;margin-bottom:8px}
+.larpconfirm p{margin:0 0 20px;color:var(--ink-mid);font-size:14px;line-height:1.55}
+.larpconfirm p b{color:var(--ink)}
+.lc-acts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.lc-acts .btn,.lc-acts .larpbtn{min-width:130px}
+.larpconfirm.shake{animation:larpshake .45s var(--ease)}
+@keyframes larpshake{
+  0%,100%{transform:translateX(0)} 15%{transform:translateX(-9px) rotate(-1deg)} 30%{transform:translateX(8px) rotate(1deg)}
+  45%{transform:translateX(-6px)} 60%{transform:translateX(5px)} 75%{transform:translateX(-2px)}
+}
+@media (prefers-reduced-motion:reduce){ .larpconfirm.shake{animation:none} }

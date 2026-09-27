@@ -103,7 +103,7 @@ as $$
   select (
     coalesce((select sum(minutes) from public.sessions
                where user_id = uid and day = (now() at time zone 'Australia/Sydney')::date), 0)
-    + coalesce((select least(5 * 60,
+    + coalesce((select least(6 * 60,   -- a timer pauses itself at six hours
                   (t.acc_ms + case when t.running
                      then extract(epoch from now() - t.started_at) * 1000 else 0 end) / 60000)
                   from public.live_timers t

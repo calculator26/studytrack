@@ -399,8 +399,8 @@ pressure than push.
 banter: nothing it does touches anybody's hours or flags them anywhere real.
 
 - **Everybody gets one report a day.** Open somebody's profile and press **🤥 Report LARP**.
-  The same button turns up under a live study, or one of today's sessions, once five people
-  have called it 🤨 sus.
+  The same button turns up under a live study, or one of today's sessions, once ten people
+  have called it 🤨 sus. It never appears on anybody under four hours today.
 - **Five reports on one person in a day** and a **LARP ALERT** drops into chat with their
   numbers (studied today, this week, where they sit on the board), and the room votes
   **Legit** or **Larp**. Voting closes after two hours and the verdict stays on the card.
@@ -458,7 +458,7 @@ space says the HSC is underway.
 
 ### Timers that look after themselves
 A timer left running overnight is the commonest way this app produces a wrong number, so
-one that has been going **five hours** pauses itself and clamps to that figure — past any
+one that has been going **six hours** pauses itself and clamps to that figure — past any
 real unbroken sitting, well short of a night's sleep, and still editable before you save.
 
 A paused timer stops checking in, which is what makes it fade off the **Studying right

@@ -1612,7 +1612,7 @@ function goToTimer() {
 
    A timer left running overnight is the commonest way this app produces a
    wrong number: fourteen hours appears on the board, the leaderboard believes
-   it, and the person has to notice and fix it. Five hours is past any real
+   it, and the person has to notice and fix it. Six hours is past any real
    unbroken sitting and well short of a night's sleep, so that is where it
    stops itself — paused, not discarded, and clamped to the cap so the figure
    waiting for you is a plausible one you can still adjust before saving.
@@ -1622,7 +1622,7 @@ function goToTimer() {
    it by itself after a while, instead of a session paused yesterday lunchtime
    still sitting between two people who are actually working.
    --------------------------------------------------------------------------- */
-const TIMER_CAP_MS    = 5 * 60 * 60e3;   /* auto-pause a run this long */
+const TIMER_CAP_MS    = 6 * 60 * 60e3;   /* auto-pause a run this long */
 const PAUSED_FRESH_MS = 30 * 60e3;       /* how long a pause stays on the strip */
 
 function autoPauseIfStale() {
@@ -1632,7 +1632,7 @@ function autoPauseIfStale() {
   localTimer.running = false;
   paintTimer();
   pushTimer();
-  toast("Timer paused itself at five hours. Adjust the minutes when you save it.", 6000);
+  toast("Timer paused itself at six hours. Adjust the minutes when you save it.", 6000);
   return true;
 }
 
@@ -2227,10 +2227,10 @@ function reactionsHTML(s) {
       title="${esc(title)}"><span aria-hidden="true">${k.icon}</span><span class="rxn">${
         ids.length || ""}</span><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("");
-  /* Five people calling it sus is the room asking the question. The answer is
+  /* Ten people calling it sus is the room asking the question. The answer is
      one tap away, under the session itself. Today's only: a larp report is
      about today's hours, and a week-old session is not evidence of those. */
-  const larp = (r.sus || []).length >= LARP_NEEDED && s.day === todayISO() ? larpSlot(s.user_id, "sx") : "";
+  const larp = (r.sus || []).length >= LARP_SUS_NEEDED && s.day === todayISO() ? larpSlot(s.user_id, "sx") : "";
   return bits || larp ? `<div class="rx">${bits}</div>${larp}` : "";
 }
 
@@ -2461,7 +2461,7 @@ function timerReactionsHTML(t, big) {
       ><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("");
   /* not in the profile's own live panel: the profile has the big button already */
-  const larp = !big && (r.sus || []).length >= LARP_NEEDED ? larpSlot(t.user_id, "live") : "";
+  const larp = !big && (r.sus || []).length >= LARP_SUS_NEEDED ? larpSlot(t.user_id, "live") : "";
   return bits || larp ? `<div class="rx lrx${big ? " big" : ""}">${bits}</div>${larp}` : "";
 }
 
@@ -2479,10 +2479,12 @@ function timerReactionsHTML(t, big) {
    you press it. Who reported is not a secret — it is on the hover — but it
    is never said in chat.
 
-   The button turns up in three places: on a profile, always; and under a
-   live study or a session of today's once five people have called it sus.
+   The button turns up in three places: on a profile; and under a live study
+   or a session of today's once ten people have called it sus. Never on
+   anybody under four hours today, anywhere.
    ========================================================================= */
-const LARP_NEEDED = 5;
+const LARP_NEEDED = 5;            /* reports in a day to call a trial */
+const LARP_SUS_NEEDED = 10;       /* sus on a live study or session to put the button under it */
 const LARP_MIN_HOURS = 4;
 
 function absorbLarpReports(res) {
@@ -2524,6 +2526,9 @@ function larpBoxHTML(uid, ctx) {
 
   /* Your own profile gets the count and nothing to press. */
   if (uid === UID) return ctx === "pf" && n ? `<div class="larpbox mine">${status}</div>` : "";
+  /* Under four hours today there is nothing to accuse anybody of, so there is
+     no button at all — just the count on a profile, if anybody got one in. */
+  if (hoursFor(uid, todayISO()) < LARP_MIN_HOURS) return ctx === "pf" && n ? `<div class="larpbox mine">${status}</div>` : "";
 
   const why = larpBlockedBecause(uid);
   const h = hoursFor(uid, todayISO());
@@ -2693,10 +2698,80 @@ setInterval(() => {
   if (Object.values(DB.larpTrials).some(t => Math.abs(new Date(t.closes_at).getTime() - Date.now()) < 3 * 36e5)) paintChat();
 }, 60000);
 
+/* ---------------------------------------------------------------------------
+   Are you sure. You only get one a day, so the button asks first — with a
+   game-show buzzer, because a plain confirm() box is no fun at all. The sound
+   is made on the spot with Web Audio, so there is no file to load, and it is
+   quiet: a phone in a library should not announce the accusation.
+   --------------------------------------------------------------------------- */
+function larpBuzzer() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = larpBuzzer.ctx || (larpBuzzer.ctx = new AC());
+    if (ctx.state === "suspended") ctx.resume();
+    const t0 = ctx.currentTime, gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02);
+    gain.gain.setValueAtTime(0.12, t0 + 0.42);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+    gain.connect(ctx.destination);
+    /* two detuned saws a semitone apart: the "wrong answer" honk */
+    [110, 116.5].forEach(f => {
+      const o = ctx.createOscillator();
+      o.type = "sawtooth"; o.frequency.setValueAtTime(f, t0);
+      o.connect(gain); o.start(t0); o.stop(t0 + 0.56);
+    });
+  } catch (e) { /* no sound is fine */ }
+}
+
+function confirmLarp(uid) {
+  return new Promise(resolve => {
+    let ov = $("ov-larp");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.className = "ov"; ov.id = "ov-larp";
+      ov.innerHTML = `<div class="modal larpconfirm" role="alertdialog" aria-modal="true" aria-labelledby="lc-title" aria-describedby="lc-text">
+        <div class="lc-siren" aria-hidden="true">🚨</div>
+        <h2 id="lc-title">Are you sure you want to report LARP?</h2>
+        <p id="lc-text"></p>
+        <div class="lc-acts">
+          <button type="button" class="btn ghost" id="lc-no">Cancel</button>
+          <button type="button" class="larpbtn" id="lc-yes">🤥 Yes, report LARP</button>
+        </div>
+      </div>`;
+      document.body.appendChild(ov);
+    }
+    const name = profileOf(uid).display_name;
+    $("lc-text").innerHTML = `This is your <b>only</b> LARP report today.<br>It goes on <b>${esc(name)}</b>, and they will be able to see it was you.`;
+    const done = ok => {
+      ov.classList.remove("on");
+      document.removeEventListener("keydown", onKey, true);
+      ov.onclick = null; $("lc-yes").onclick = null; $("lc-no").onclick = null;
+      resolve(ok);
+    };
+    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
+    ov.onclick = e => { if (e.target === ov) done(false); };
+    $("lc-yes").onclick = () => done(true);
+    $("lc-no").onclick = () => done(false);
+    document.addEventListener("keydown", onKey, true);
+    ov.classList.add("on");
+    const m = ov.querySelector(".larpconfirm");
+    m.classList.remove("shake"); void m.offsetWidth; m.classList.add("shake");
+    larpBuzzer();
+    setTimeout(() => $("lc-no").focus(), 30);   /* the safe answer is the default */
+  });
+}
+
 /* One listener for every copy of the button and every vote. */
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest("[data-larp]");
-  if (b && !b.disabled) { e.stopPropagation(); reportLarp(b.dataset.larp); return; }
+  if (b && !b.disabled) {
+    e.stopPropagation();
+    const uid = b.dataset.larp;
+    confirmLarp(uid).then(ok => { if (ok) reportLarp(uid); });
+    return;
+  }
   const v = e.target.closest && e.target.closest("[data-larpvote]");
   if (v && !v.disabled) { e.stopPropagation(); voteLarp(v.dataset.trial, v.dataset.larpvote); }
 }, true);
