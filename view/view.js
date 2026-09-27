@@ -67,6 +67,13 @@ function ago(ts) {
   if (s < 86400) return Math.floor(s / 3600) + " h ago";
   return Math.floor(s / 86400) + " d ago";
 }
+/* "3:42pm" in Sydney time, whatever the viewer's device is set to */
+function clock(ts) {
+  const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", hour: "numeric", minute: "2-digit", hour12: true })
+    .formatToParts(new Date(ts));
+  const get = k => (parts.find(p => p.type === k) || {}).value || "";
+  return get("hour") + ":" + get("minute") + get("dayPeriod").toLowerCase().replace(/\./g, "").replace(/\s/g, "");
+}
 const avatar = (p, cls) =>
   `<span class="av${cls ? " " + cls : ""}" style="background:${colourOk(p && p.colour)}">${esc(initials(p && p.display_name))}</span>`;
 
@@ -109,9 +116,16 @@ const today = () => D ? D.today : iso(Date.now());
 const profileOf = id => PEOPLE.get(id) || { id, display_name: "Someone", colour: "#8B94A3" };
 
 /* ------------------------------------------------------------ the maths */
+/* Today counts a session running now, the same as it does in the app: it is
+   study, just not filed yet. Under a subject filter only when that is the
+   subject on the clock. */
 function cell(uid, day, src) {
-  const e = (src || DAILY).get(uid); const v = e && e[day];
-  return v || [0, 0];
+  const e = (src || DAILY).get(uid); const v = (e && e[day]) || [0, 0];
+  if (day !== today()) return v;
+  const t = (L.live || []).find(x => x.user_id === uid);
+  if (!t) return v;
+  if (src && src !== DAILY && subjKey(liveParts(t).subject) !== UI.subject) return v;
+  return [v[0] + Math.min(elapsed(t), 5 * 36e5) / 60000, v[1]];
 }
 const minutesOn = (uid, day) => cell(uid, day)[0];
 
@@ -264,6 +278,7 @@ function renderAll() {
 function renderLiveBits() {
   if (!D) return;
   markFresh(); renderLive(); renderKpis(); renderToday(); renderFeed();
+  if (UI.tab === "peloton") renderBoard();   /* running sessions move the board */
   if (openId) paintProfileLive(openId);
 }
 
@@ -333,7 +348,8 @@ function renderKpis() {
     : "First full week of data";
   const first = rangeDays(0)[0];
   const cards = [
-    { k: "Hours today", v: f1(hrs(mT)), d: `${aT} student${aT === 1 ? "" : "s"} so far · ${hitT} hit their goal` },
+    { k: "Studied today", v: f1(hrs(mT)) + "<small>h</small>",
+      d: `${aT} student${aT === 1 ? "" : "s"} · ${hitT} hit their goal` + ((L.live || []).length ? " · running sessions counted in" : "") },
     { k: "Hours this week", v: f0(hrs(m7)), d: delta },
     { k: "Active this week", v: f0(a7) + `<small>/ ${f0(members)}</small>`,
       d: (members ? f0(a7 / members * 100) + "% of the cohort" : "") + (a7 ? " · " + f1(hrs(m7) / a7) + " h each" : "") },
@@ -349,8 +365,8 @@ function renderToday() {
     .filter(r => r.h > 0 || r.live)
     .sort((a, b) => b.h - a.h || (b.live - a.live));
   $("today-sub").textContent = rows.length
-    ? `${rows.length} student${rows.length === 1 ? "" : "s"} on the board today, against each person's own goal`
-    : "Hours logged today, against each person's own goal";
+    ? `${rows.length} student${rows.length === 1 ? "" : "s"} on the board today, against each person's own goal. A session running now is counted in, marked with a green dot.`
+    : "Studied today, against each person's own goal";
   $("ramp").innerHTML = [["var(--l5)", "120%+"], ["var(--l4)", "Goal met"], ["var(--l2)", "60–99%"], ["var(--l0)", "Under 60%"]]
     .map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join("");
   const cT = capped("today", rows);
@@ -412,7 +428,7 @@ function renderFeed() {
       ${avatar(p, "sm")}
       <div class="what">
         <div class="l1"><b data-profile="${esc(s.user_id)}">${esc(p.display_name)}</b> · <span style="color:${colourOk(s.subject_colour)};font-weight:600">${esc(s.subject || "Study")}</span></div>
-        <div class="l2">${s.area ? esc(s.area) + " · " : ""}${s.day === today() ? "today" : fmtD(s.day)}</div>
+        <div class="l2">${s.area ? esc(s.area) + " · " : ""}${s.day === today() ? "today" : fmtD(s.day)} · logged ${esc(clock(s.created_at))}</div>
       </div>
       <div class="h">${f1(s.minutes / 60)} h<small>${ago(s.created_at)}</small></div>
     </div>`;
@@ -451,7 +467,8 @@ function renderBoard() {
   const active = rows.filter(r => r.hours > 0);
   const rangeTxt = UI.range === 1 ? "today" : UI.range ? "the last " + UI.range + " days" : "all time";
   const subj = UI.subject ? ((D.subjects || []).find(s => s.key === UI.subject) || {}).label : "";
-  $("lb-sub").textContent = `${active.length} of ${rows.length} ${subj ? "taking " + subj + " " : ""}logged something ${rangeTxt} · ranked by ${m.label.toLowerCase()}`;
+  $("lb-sub").textContent = `${active.length} of ${rows.length} ${subj ? "taking " + subj + " " : ""}studied ${rangeTxt} · ranked by ${m.label.toLowerCase()}` +
+    ((L.live || []).length ? " · sessions running now counted in" : "");
 
   const podium = active.slice(0, 3);
   const order = [1, 0, 2].filter(i => podium[i]);
@@ -769,7 +786,7 @@ function renderProfile(id) {
         <div class="pflog">${sess.length ? [...byDay.entries()].map(([d, list]) => `
           <div class="dg">${fmtD(d)} · ${f1(list.reduce((a, s) => a + s.minutes, 0) / 60)} h${goalFor(id, d) > 0 ? " of " + f1(goalFor(id, d)) : ""}</div>
           ${list.map(s => { const sj = subOf(s.subject_id), ar = areaOf(s.area_id);
-            return `<div class="en"><span><b style="color:${colourOk(sj && sj.colour)}">${esc(sj ? sj.name : "Study")}</b>${ar ? " · " + esc(ar.name) : ""}</span><span>${f1(s.minutes / 60)} h</span></div>`;
+            return `<div class="en"><span><b style="color:${colourOk(sj && sj.colour)}">${esc(sj ? sj.name : "Study")}</b>${ar ? " · " + esc(ar.name) : ""}${s.created_at ? `<small class="at"> · logged ${esc(clock(s.created_at))}</small>` : ""}</span><span>${f1(s.minutes / 60)} h</span></div>`;
           }).join("")}`).join("") : `<p class="empty" style="padding:14px">Nothing logged yet.</p>`}</div></div>`;
   }
 

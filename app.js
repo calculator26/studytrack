@@ -253,11 +253,68 @@ const DB = {
 const CREW_WINDOW_DAYS = 180;
 const crewSince = () => addDays(todayISO(), -CREW_WINDOW_DAYS);
 
-/* The one lookup everything else is built on. */
+/* What the live-hours repaint last saw: when it last ran, and who was on the
+   clock (everyone's timers, and yours), so it can tell a real change from a
+   heartbeat. Up here because paintTimer can run before the code below it. */
+let liveHoursAt = 0, timersSig = "", myTimerSig = "";
+
+/* The one lookup everything else is built on.
+
+   Today includes whatever session the person has running now. It used to be
+   filed sessions only here and filed-plus-running on the live cards, so the
+   same person could be "2.1 h today" on the strip and "0.9 h" on the board a
+   few centimetres below it. One definition, everywhere: a session on the clock
+   is study, it just has not been filed yet. Where it is counted in, the screen
+   says so. */
 function dayCell(uid, day) {
   const e = DB.daily.get(uid);
+  const v = (e && e.days && e.days[day]) || [0, 0];
+  if (day !== todayISO()) return v;
+  const live = liveMsFor(uid);
+  return live ? [v[0] + live / 60000, v[1]] : v;
+}
+/* Filed sessions only — for the one place that has to show both halves. */
+const filedMinutesOn = (uid, day) => {
+  const e = DB.daily.get(uid);
   const v = e && e.days && e.days[day];
-  return v || [0, 0];
+  return v ? v[0] : 0;
+};
+
+/* The session somebody has on the clock right now, running or paused, in ms.
+   Yours comes from this tab, which is exact to the second; everybody else's
+   from their live_timers row, on the same freshness rule the live strip uses.
+   While a finished session is being saved it is about to arrive as a filed
+   row, so it stops counting here rather than being counted twice. */
+function liveMsFor(uid) {
+  const cap = ms => Math.max(0, Math.min(ms, TIMER_CAP_MS));
+  if (uid === UID) return localTimer && !savingSession ? cap(elapsedMs()) : 0;
+  const t = (DB.timers || []).find(x => x.user_id === uid);
+  if (!t) return 0;
+  const now = Date.now();
+  if (now - new Date(t.updated_at || 0).getTime() >= (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS)) return 0;
+  return cap(t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0));
+}
+
+/* The subject on somebody's clock, in the same normalised form the subject
+   filter uses. The label is "Subject · Area" for everyone, so it serves for
+   people whose subject rows this client does not hold. */
+function liveSubjectKey(uid) {
+  const t = uid === UID ? localTimer : (DB.timers || []).find(x => x.user_id === uid);
+  return t ? subjKey(splitLabel(t.label).subject) : null;
+}
+
+/* Times of day are always 12-hour, whatever the device is set to. A school
+   laptop on 24-hour time turned the busyness graph into "14", "17", "20". */
+function clockOf(d, withMinutes) {
+  const h = d.getHours(), m = d.getMinutes();
+  return (h % 12 || 12) + (withMinutes || m ? ":" + pad(m) : "") + (h < 12 ? "am" : "pm");
+}
+/* "1h 25m", for the hours you have done today — a figure that moves while a
+   timer runs, so tenths of an hour would sit still for six minutes at a time. */
+function hm(hours) {
+  const mins = Math.floor(hours * 60 + 1e-6);
+  if (mins < 1 && hours > 0) return "<1m";
+  return mins < 60 ? mins + "m" : Math.floor(mins / 60) + "h " + pad(mins % 60) + "m";
 }
 const minutesOn  = (uid, day) => dayCell(uid, day)[0];
 const sessionsOn = (uid, day) => dayCell(uid, day)[1];
@@ -1024,6 +1081,10 @@ async function pollTimers() {
     if (error) return;
     if (!applyTimers(data, ticket, readAt)) return;   /* stale by the time it arrived */
     paintLive();          /* the signature decides whether the DOM actually changes */
+    /* Heartbeats arrive from every running client each minute and change
+       nothing worth a repaint. A start, pause, resume or stop does. */
+    const sig = (DB.timers || []).map(t => [t.user_id, t.running ? 1 : 0, t.started_at, t.acc_ms].join("~")).sort().join("|");
+    if (sig !== timersSig) { timersSig = sig; liveHoursTick(true); }
   } catch (e) { /* a dropped poll is not worth bothering anyone about */ }
 }
 
@@ -1321,6 +1382,11 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("cl
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
   $("p-" + b.dataset.p).classList.add("on"); hideTT(); window.scrollTo(0, 0);
   paintNowPill();          /* appear or disappear straight away, not a second later */
+  /* The busyness graph sizes itself to its box, and a box on a hidden tab has
+     no width. Drawn at load while Peloton was hidden, it came out in its phone
+     layout — huge labels, three of them — on every laptop, and stayed that way
+     until something else happened to redraw it. So it is redrawn on arrival. */
+  if (b.dataset.p === "crew" && LIVEHIST.rows.length) drawLiveHistory();
   /* Chat costs nothing until somebody actually looks at it. */
   if (b.dataset.p === "chat") {
     initChat();
@@ -1448,6 +1514,55 @@ function paintTimer() {
   paintFavicon();
   paintNowPill();
   paintLive();
+  paintTodayChip();
+  /* your own start, pause, resume or finish repaints at once; otherwise the
+     minute tick carries it */
+  const mine = localTimer ? [localTimer.running ? 1 : 0, localTimer.started_at, localTimer.acc_ms].join("~") : "";
+  if (mine !== myTimerSig) { myTimerSig = mine; liveHoursTick(true); } else liveHoursTick();
+}
+
+/* ---------------------------------------------------------------------------
+   "Studied today", in the masthead.
+
+   The one number on the page anybody can change right now, so it gets the
+   most prominent place there is, on every tab. It counts a running session
+   in, like every other "today" in the app, climbs with the clock while one
+   runs, and says so with the green dot and the tooltip. Painted on the one
+   second tick; it only touches the DOM when what it would draw has changed.
+   --------------------------------------------------------------------------- */
+function paintTodayChip() {
+  const el = $("todaychip");
+  if (!el) return;
+  if (!UID || !ME) { el.hidden = true; return; }
+  const day = todayISO(), h = hoursFor(UID, day), g = goalFor(UID, day);
+  const live = liveMsFor(UID) / 3600000;
+  const pct = g > 0 ? Math.min(1, h / g) : (h > 0 ? 1 : 0);
+  const col = lvlColour(g > 0 ? h / g : (h > 0 ? 1 : null), h > 0);
+  const html =
+    `<span class="tc-k">${live ? `<i class="tc-live" aria-hidden="true"></i>` : ""}Studied today</span>
+     <span class="tc-v">${esc(hm(h))}${g > 0 ? `<small> / ${esc(f1(g))}h</small>` : ""}</span>
+     <span class="tc-bar" aria-hidden="true"><i style="width:${(pct * 100).toFixed(1)}%;background:${col}"></i></span>`;
+  if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+  const title = live
+    ? `${hm(h)} studied today, including the ${hm(live)} on your timer now` +
+      (g > 0 ? ` · goal ${f1(g)} h` : "")
+    : (h > 0 ? `${hm(h)} studied today` : "Nothing studied yet today") + (g > 0 ? ` · goal ${f1(g)} h` : " · rest day");
+  if (el.title !== title) { el.title = title; el.setAttribute("aria-label", title); }
+  el.hidden = false;
+}
+
+/* Everything that shows "today" has somebody's running session inside it, so
+   it moves on its own. Once a minute is plenty for a figure shown to the tenth
+   of an hour, and nothing repaints at all while nobody is on the clock. */
+function liveHoursTick(force) {
+  if (!UID || !ME || document.hidden) return;
+  if (!force && Date.now() - liveHoursAt < 60000) return;
+  const anyone = !!localTimer || (DB.timers || []).some(t => liveMsFor(t.user_id) > 0);
+  if (!anyone && !force) return;
+  liveHoursAt = Date.now();
+  try { renderHome(); } catch (e) { console.error(e); }
+  if ($("p-crew") && $("p-crew").classList.contains("on")) { try { renderCrew(); } catch (e) { console.error(e); } }
+  try { paintNudgeBar(); } catch (e) { console.error(e); }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1642,6 +1757,10 @@ $("tm-pause").addEventListener("click", () => {
   localTimer.acc_ms = elapsedMs(); localTimer.running = false;
   paintTimer(); pushTimer();
 });
+if ($("todaychip")) $("todaychip").addEventListener("click", () => {
+  const tab = document.querySelector('nav.tabs button[data-p="home"]');
+  if (tab) tab.click();
+});
 $("tm-cancel").addEventListener("click", () => {
   if (elapsedMs() > 60000 && !confirm("Discard this session without logging it?")) return;
   localTimer = null; paintTimer(); pushTimer();
@@ -1732,6 +1851,7 @@ function renderAll() {
 }
 function renderShell() {
   $("crewname").textContent = APP_NAME;
+  paintTodayChip();
   const crew = String(CFG.CREW_NAME || "").trim();
   const chip = $("crewchip");
   if (crew && !isGenericName(crew)) { chip.textContent = crew; chip.hidden = false; }
@@ -1819,7 +1939,7 @@ function paintLive(force) {
       /* The day total has the running session inside it, so it climbs with
          the clock. Same in-place path — rebuilding would flicker the avatars. */
       const d = box.querySelector('[data-today="' + t.user_id + '"]');
-      if (d) d.innerHTML = dayChip(t, msOf(t));
+      if (d) d.innerHTML = dayChip(t);
     });
     paintProfileLive();
     return;
@@ -1841,7 +1961,7 @@ function paintLive(force) {
       <div class="lc-subj">${esc(w.subject)}</div>
       ${w.area ? `<div class="lc-area">${esc(w.area)}</div>` : ""}
       <div class="lc-today" data-today="${esc(t.user_id)}"
-        title="Everything logged today, with this session counted in">${dayChip(t, msOf(t))}</div>
+        title="Everything studied today, with this session counted in">${dayChip(t)}</div>
       ${timerReactionsHTML(t)}
     </div>`;
   }).join("");
@@ -1976,19 +2096,24 @@ function paintCountdown() {
 function renderHome() {
   paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
-  $("h-date").value = CUR;
-  $("h-goal").value = goalFor(UID, CUR);
+  if (document.activeElement !== $("h-date")) $("h-date").value = CUR;
+  /* This repaints every minute while anybody is on the clock, so it must not
+     snatch a value out from under somebody typing into it. */
+  if (document.activeElement !== $("h-goal")) $("h-goal").value = goalFor(UID, CUR);
 
   const g = goalFor(UID, CUR), h = hoursFor(UID, CUR), r = ratioFor(UID, CUR), col = lvlColour(r, h > 0);
+  /* The running session is in h already; this is only so the page can say so. */
+  const liveH = CUR === todayISO() ? liveMsFor(UID) / 3600000 : 0;
   const R = 78, C = 2 * Math.PI * R, pct = g > 0 ? h / g : (h > 0 ? 1 : 0);
   $("ring").innerHTML =
     `<circle cx="100" cy="100" r="${R}" fill="none" stroke="#E8EDEF" stroke-width="17"/>
      <circle cx="100" cy="100" r="${R}" fill="none" stroke="${col}" stroke-width="17" stroke-linecap="round"
        stroke-dasharray="${(C * Math.min(1, pct)).toFixed(1)} ${C}" transform="rotate(-90 100 100)"/>
-     <text x="100" y="94" text-anchor="middle" font-size="37" font-weight="700" fill="#12232E">${f1(h)}</text>
+     <text x="100" y="94" text-anchor="middle" font-size="${hm(h).length > 4 ? 30 : 37}" font-weight="700" fill="#12232E">${esc(hm(h))}</text>
      <text x="100" y="116" text-anchor="middle" font-size="12.5" fill="#7B8D98">of ${f1(g)} hours</text>
      <text x="100" y="140" text-anchor="middle" font-size="13" font-weight="600"
-       fill="${col === "var(--none)" ? "#7B8D98" : "#12232E"}">${g > 0 ? f0(h / g * 100) + "%" : (h > 0 ? "logged" : "rest day")}</text>`;
+       fill="${col === "var(--none)" ? "#7B8D98" : "#12232E"}">${g > 0 ? f0(h / g * 100) + "%" : (h > 0 ? "logged" : "rest day")}</text>
+     ${liveH ? `<text x="100" y="159" text-anchor="middle" font-size="10.5" font-weight="600" fill="#12855C">▶ ${esc(hm(liveH))} running</text>` : ""}`;
 
   const v = $("h-verdict");
   if (g <= 0) v.textContent = h > 0 ? `Rest day, and you studied anyway. ${f1(h)} hours banked.` : "Rest day. Skipping it will not break your streak.";
@@ -1996,15 +2121,17 @@ function renderHome() {
   else if (h >= g) v.textContent = "Goal met. Streak intact.";
   else if (h > 0)  v.textContent = `${f1(g - h)} hours to go.`;
   else v.textContent = `Nothing logged yet. Goal is ${f1(g)} hours.`;
+  if (liveH) v.textContent += ` Includes the ${hm(liveH)} on your timer, which is not logged until you finish it.`;
 
   const es = DB.sessions.filter(s => s.user_id === UID && s.day === CUR);
   $("h-count").textContent = es.length ? `${es.length} session${es.length === 1 ? "" : "s"} · ${f1(h)} hours` : "Nothing yet";
   $("h-entries").innerHTML = es.length ? es.map(entryHTML).join("") : `<div class="empty">Nothing logged for this day.</div>`;
   wireEntryActions($("h-entries"));
 
-  $("k-today").textContent = f1(h);
+  $("k-today").textContent = hm(h);
   $("k-today").style.color = col === "var(--none)" ? "var(--ink)" : col;
-  $("k-today-d").textContent = g > 0 ? (h >= g ? "Goal met" : f1(g - h) + " short of " + f1(g)) : "Rest day";
+  $("k-today-d").textContent = (g > 0 ? (h >= g ? "Goal met" : hm(g - h) + " short of " + f1(g) + " h") : "Rest day") +
+    (liveH ? " · incl. " + hm(liveH) + " running" : "");
 
   const dayBoard = visiblePeople().map(p => ({ id: p.id, h: hoursFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
   const idx = dayBoard.findIndex(x => x.id === UID);
@@ -2029,7 +2156,8 @@ function renderHome() {
   $("todayrail").innerHTML = rows.map(x => {
     const rr = x.g > 0 ? x.h / x.g : (x.h > 0 ? 1 : null);
     return `<div class="rowbar" style="grid-template-columns:190px 1fr 108px">
-      <div class="who">${avatarHTML(x.p, "sm")}<span class="nm" style="${x.p.id === UID ? "text-decoration:underline" : ""}">${esc(x.p.display_name)}</span></div>
+      <div class="who">${avatarHTML(x.p, "sm")}<span class="nm" style="${x.p.id === UID ? "text-decoration:underline" : ""}">${esc(x.p.display_name)}</span>${
+        CUR === todayISO() && liveMsFor(x.p.id) ? `<i class="railive" title="On the clock now, counted in"></i>` : ""}</div>
       <div class="track" style="height:22px">
         <div style="position:absolute;left:${(x.g / mx * 100).toFixed(1)}%;top:0;bottom:0;width:2px;background:#4A6572"></div>
         <div class="fill" style="width:${(x.h / mx * 100).toFixed(1)}%;background:${lvlColour(rr, x.h > 0)}"></div>
@@ -2278,12 +2406,13 @@ const timerRxOf = id => DB.timerReactions[id] || { kudos: [], sus: [] };
    first hour or their seventh. The running session counts towards it, because
    from the outside it plainly is study — it just has not been filed yet.
    --------------------------------------------------------------------------- */
-function dayChip(t, ms) {
-  const logged = hoursFor(t.user_id, todayISO());
-  /* A timer started before midnight is still measuring today from the app's
-     point of view; the session will be filed against the day it is stopped on,
-     so counting all of it here agrees with where it is about to land. */
-  const total = logged + (ms || 0) / 3600000;
+function dayChip(t) {
+  /* hoursFor() already counts the running session in for today, the same as
+     every other "today" in the app. A timer started before midnight is still
+     measuring today from the app's point of view; the session will be filed
+     against the day it is stopped on, so counting all of it here agrees with
+     where it is about to land. */
+  const total = hoursFor(t.user_id, todayISO());
   const goal = goalFor(t.user_id, todayISO());
   const lvl = lvlColour(goal > 0 ? total / goal : (total > 0 ? 1 : 0), total > 0);
   /* The colour is on a dot, not on the number. The attainment ramp is a set of
@@ -2292,7 +2421,7 @@ function dayChip(t, ms) {
      contrast, the yellow at 1.3:1 to the point of being invisible. Ink reads
      at 16:1; the dot carries the same meaning it carries everywhere else. */
   return `<span class="daychip"><i class="dcdot" style="background:${esc(lvl)}"
-    aria-hidden="true"></i>${f1(total)} h today</span>`;
+    aria-hidden="true"></i>${hm(total)} today</span>`;
 }
 
 function timerReactionsHTML(t, big) {
@@ -2342,8 +2471,8 @@ function profileLiveHTML(id) {
     </div>
     <div class="pfl-time" data-pfclock="${esc(id)}">${hms(ms)}</div>
     <div class="pfl-what"><b>${esc(w.subject)}</b>${w.area ? ` \u00b7 ${esc(w.area)}` : ""}</div>
-    <div class="pfl-sub">${f1(hoursFor(id, todayISO()) + ms / 3600000)} h today, this session counted in
-      \u00b7 ${f1(hoursFor(id, todayISO()))} h of it already filed</div>
+    <div class="pfl-sub">${hm(hoursFor(id, todayISO()))} studied today, this session counted in
+      \u00b7 ${hm(filedMinutesOn(id, todayISO()) / 60)} of it already logged</div>
     ${timerReactionsHTML(t, true)}
   </div>`;
 }
@@ -2417,12 +2546,25 @@ async function loadReactions() {
   try { checkReactions(); } catch (e) { /* a missed notice is not worth a crash */ }
 }
 
+/* When a session was logged. For a timed one that is when it finished; for one
+   added by hand, when it was typed in. Either way it is the only clue to when
+   in the day the work happened, so it goes on every row. A session filed
+   against a different day from the one it was logged on says which. */
+function loggedAt(s) {
+  if (!s.created_at) return "";
+  const d = new Date(s.created_at);
+  const same = isoOf(d) === s.day;
+  return (same ? "" : d.toLocaleDateString("en-AU", { weekday: "short" }) + " ") + clockOf(d, true);
+}
+
 function entryHTML(s, withWho) {
   const p = profileOf(s.user_id);
+  const at = loggedAt(s);
   return `<div class="entry" data-sid="${esc(s.id)}"><div class="top">
     <div>${withWho ? `<span class="wholink" data-profile="${esc(s.user_id)}" title="See ${esc(p.display_name)}'s full profile">${esc(p.display_name)}</span><span style="color:var(--ink-soft);font-size:11.5px"> · </span>` : ""}
       <strong style="color:${colourOf(s)}">${esc(labelOf(s))}</strong>
-      ${withWho ? `<span style="color:var(--ink-soft);font-size:11.5px"> · ${fmtD(s.day)}</span>` : ""}</div>
+      ${withWho ? `<span class="etime"> · ${fmtD(s.day)}${at ? " · " + esc(at) : ""}</span>`
+                : (at ? `<span class="etime" title="When this was logged"> · logged ${esc(at)}</span>` : "")}</div>
     <div style="text-align:right;font-weight:600">${f1(s.minutes / 60)} h</div>
     ${s.user_id === UID ? `<span class="acts">
       <button class="x pencil" data-edit="${s.id}" title="Edit this session" aria-label="Edit this session">✎</button>
@@ -2666,7 +2808,16 @@ function leaderboard(rangeOverride, opts) {
   /* Under a subject filter the numbers come from a rollup of that subject
      alone, fetched when the picker changes; the whole-crew rollup otherwise. */
   const src = subject ? (SUBJECT_DAILY.key === subject ? SUBJECT_DAILY.map : new Map()) : DB.daily;
-  const cell = (uid, day) => { const e = src.get(uid); const v = e && e.days[day]; return v || [0, 0]; };
+  /* Today counts a running session here too, the same as everywhere else —
+     under a subject filter only when that is the subject on the clock. */
+  const today = todayISO();
+  const cell = (uid, day) => {
+    const e = src.get(uid); const v = (e && e.days[day]) || [0, 0];
+    if (day !== today) return v;
+    const live = liveMsFor(uid);
+    if (!live || (subject && liveSubjectKey(uid) !== subject)) return v;
+    return [v[0] + live / 60000, v[1]];
+  };
 
   let takers = null;
   if (subject) {
@@ -2808,7 +2959,8 @@ function renderCrew() {
     : (RANGE === 1 ? "Today only" : `The last ${RANGE} days`);
   $("lb-sub").textContent = period +
     (group ? ` · ${group.label} only, ${group.takers.size} ${group.takers.size === 1 ? "person takes" : "take"} it` : "") +
-    (LB_METRIC === "hours" ? "" : ` · ranked on ${M.label.toLowerCase()}`);
+    (LB_METRIC === "hours" ? "" : ` · ranked on ${M.label.toLowerCase()}`) +
+    (days.indexOf(todayISO()) > -1 && board.some(r => liveMsFor(r.id)) ? " · sessions running now counted in" : "");
 
   /* podium */
   const top = board.slice(0, 3);
@@ -3007,8 +3159,16 @@ function lhPan(deltaIdx) {
   LHV.from = from; LHV.to = from + span;
 }
 
-const lhHourLabel = d => d.toLocaleTimeString([], { hour: "numeric" }).toLowerCase().replace(" ", "");
-const lhDayLabel  = d => d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+/* Always "2pm", never "14". toLocaleTimeString([]) follows the device, and a
+   device set to 24-hour time drew an axis of bare numbers nobody could read. */
+const lhHourLabel = d => clockOf(d);
+/* the hour a bucket covers: "2–3pm", "11am–12pm" */
+const lhHourSpan  = d => {
+  const e = new Date(d.getTime() + 36e5);
+  const a = clockOf(d), b = clockOf(e);
+  return (a.slice(-2) === b.slice(-2) ? a.slice(0, -2) : a) + "–" + b;
+};
+const lhDayLabel  = d => d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
 
 /* ---------------------------------------------------------------------------
    HOW BUSY IT GETS — the drawing
@@ -3030,7 +3190,8 @@ const LH_GEO = { W: 900, H: 260, ml: 40, mr: 16, mt: 18, mb: 42, bh: 26 };
 function lhGeo() {
   const wrap = $("livegraph-wrap");
   const px = wrap ? wrap.getBoundingClientRect().width : 900;
-  const narrow = px < 560;
+  /* hidden: no width to go on, so keep whatever it was last drawn at */
+  const narrow = px === 0 ? LH_GEO.W === 420 : px < 560;
   LH_GEO.W  = narrow ? 420 : 900;
   LH_GEO.H  = narrow ? 300 : 260;
   LH_GEO.ml = narrow ? 30 : 40;
@@ -3097,23 +3258,14 @@ function drawLiveHistory() {
     add("text", { x: g.ml - 8, y: Y(v) + 4, "text-anchor": "end", "font-size": 11,
                   fill: "#5A6472" }, f0(v));
   }
+  add("text", { x: g.ml + 4, y: g.mt + 11, "font-size": 10.5, fill: "#8B94A3" }, "people studying at once");
 
-  /* midnight separators and day names, thinned so they never collide */
-  const dayIdx = [];
-  view.forEach((r, i) => { if (new Date(r.bucket).getHours() === 0) dayIdx.push(i); });
-  const everyNth = Math.max(1, Math.ceil(dayIdx.length / (narrow ? 3 : 7)));
-  /* The top right belongs to the record annotation, and a label started too
-     near the edge runs off it. Both were happening at once: "Sat, Sep 19"
-     clipped by the frame and sitting on top of "record 29". */
-  const labelRoom = g.ml + iw - (narrow ? 72 : 104);
-  dayIdx.forEach((i, n) => {
+  /* midnight separators. The day names live on the time axis below, where
+     each one sits under its own midnight rather than floating at the top. */
+  view.forEach((r, i) => {
+    if (new Date(r.bucket).getHours() !== 0) return;
     const x = lhX(LHV.from + i);
-    add("line", { x1: x, x2: x, y1: g.mt, y2: g.mt + ih, stroke: "#EDEFF3", "stroke-width": 1 });
-    if (n % everyNth === 0 && x < labelRoom) {
-      const d = new Date(view[i].bucket);
-      add("text", { x: x + 4, y: g.mt + 12, "font-size": 10.5, fill: "#8B94A3" },
-        narrow ? d.toLocaleDateString([], { day: "numeric", month: "short" }) : lhDayLabel(d));
-    }
+    add("line", { x1: x, x2: x, y1: g.mt, y2: g.mt + ih, stroke: "#E2E5EB", "stroke-width": 1 });
   });
 
   /* the area wash, then the line on top of it */
@@ -3145,13 +3297,28 @@ function drawLiveHistory() {
                     fill: "#2B6177", stroke: "#fff", "stroke-width": 2 });
   }
 
-  /* time axis: first, middle, last, never crowded */
-  [0, Math.floor(view.length / 2), view.length - 1].forEach((i, n) => {
-    const d = new Date(view[i].bucket);
-    add("text", { x: lhX(LHV.from + i), y: g.mt + ih + 18,
-                  "text-anchor": n === 0 ? "start" : (n === 2 ? "end" : "middle"),
-                  "font-size": 11, fill: "#5A6472" },
-      (lhSpan() > 48 ? lhDayLabel(d) : lhHourLabel(d)));
+  /* Time axis: a tick every few hours, on round hours, so any point on the
+     line can be read off against a real time of day. Midnight is labelled
+     with the day instead, which is where one day turns into the next. Past a
+     week the hours are too dense to be useful and only the days are marked. */
+  const span = lhSpan();
+  const step = span <= 30 ? (narrow ? 6 : 3) : span <= 80 ? (narrow ? 12 : 6)
+             : span <= 170 ? (narrow ? 24 : 12) : 24;
+  const minGap = narrow ? 46 : 58;       /* units between labels, so none collide */
+  let lastX = -Infinity;
+  view.forEach((r, i) => {
+    const d = new Date(r.bucket), h = d.getHours();
+    if (h % step) return;
+    const x = lhX(LHV.from + i);
+    if (x - lastX < minGap || x > g.ml + iw - 14) return;
+    lastX = x;
+    add("line", { x1: x, x2: x, y1: g.mt + ih, y2: g.mt + ih + 4, stroke: "#8B94A3", "stroke-width": 1 });
+    const label = h === 0
+      ? (step >= 24 || narrow ? d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })
+                              : d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric" }))
+      : lhHourLabel(d);
+    add("text", { x: x, y: g.mt + ih + 18, "text-anchor": "middle", "font-size": 11,
+                  "font-weight": h === 0 ? 650 : 400, fill: h === 0 ? "#12161C" : "#5A6472" }, label);
   });
 
   /* the crosshair, drawn last so it sits over everything */
@@ -3230,7 +3397,7 @@ function lhPaintTooltip() {
   const d = new Date(rows[i].bucket);
   const v = Number(rows[i].peak || 0);
   const best = LIVEHIST.best;
-  const when = lhDayLabel(d) + ", " + lhHourLabel(d);
+  const when = lhDayLabel(d) + " · " + lhHourSpan(d);
   /* textContent throughout: none of this is ever built by string concatenation
      into innerHTML, because the values come back from the database. */
   tip.innerHTML = "";
@@ -3285,7 +3452,7 @@ function lhPaintTable() {
      </tr></thead><tbody>${days.map(k => {
        const e = byDay[k];
        return `<tr><td class="l">${esc(fmtD(k))}</td><td>${e.peak}</td>
-         <td>${esc(e.at ? lhHourLabel(e.at) : "—")}</td><td>${e.hours}</td></tr>`;
+         <td>${esc(e.at ? lhHourSpan(e.at) : "—")}</td><td>${e.hours}</td></tr>`;
      }).join("")}</tbody></table>`;
 }
 
@@ -4699,7 +4866,7 @@ function nudgeState() {
   const now = new Date();
   const due = now.getHours() * 60 + now.getMinutes() >=
               Number(at.slice(0, 2)) * 60 + Number(at.slice(3, 5));
-  return { goal, hours, due, at, short: goal - hours };
+  return { goal, hours, due, at, short: goal - hours, live: liveMsFor(UID) / 3600000 };
 }
 
 /* Declared, not assigned to a const: paintTimer calls into this from far
@@ -4725,12 +4892,13 @@ function paintNudgeBar() {
   bar.innerHTML =
     `<span class="nb-dot"></span>
      <div class="nb-text">
-       <strong>${s.hours > 0 ? f1(s.hours) + " h of " + f1(s.goal) + " h today"
-                             : "Nothing logged today"}</strong>
-       <span>${s.due ? `${f1(s.short)} h short, and it is past ${s.at}. Twenty minutes still counts.`
-                     : `${f1(s.short)} h to go.`}</span>
+       <strong>${s.hours > 0 ? "Studied " + hm(s.hours) + " of " + f1(s.goal) + " h today"
+                             : "Nothing studied today"}</strong>
+       <span>${s.live ? `Includes the ${hm(s.live)} on your timer. ` : ""}${
+              s.due ? `${hm(s.short)} short, and it is past ${s.at}. Twenty minutes still counts.`
+                    : `${hm(s.short)} to go.`}</span>
      </div>
-     <button class="btn sm" id="nb-go">Start a session</button>
+     <button class="btn sm" id="nb-go">${s.live ? "Back to the timer" : "Start a session"}</button>
      <button class="x" id="nb-hide" title="Hide until tomorrow" aria-label="Hide until tomorrow">×</button>`;
 
   $("nb-go").addEventListener("click", () => {
@@ -5202,8 +5370,10 @@ function annHTML(m) {
    the database's, fetched once, so the picker and the check inside
    react_message() cannot drift apart.
    --------------------------------------------------------------------------- */
+/* 🤨 is "sus" — the same face the sus reaction on sessions and timers wears,
+   so it means the same thing in the room as it does on the board. */
 let CHAT_EMOJI = ["\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\ude02", "\ud83d\udd25",
-                  "\ud83d\udc80", "\ud83d\udc40", "\ud83c\udf89", "\ud83d\ude2d"];
+                  "\ud83d\udc80", "\ud83e\udd28", "\ud83d\udc40", "\ud83c\udf89", "\ud83d\ude2d"];
 let msgPickerFor = null;          /* the message whose picker is open */
 
 const msgRx = id => CHAT.rx[id] || {};

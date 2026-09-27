@@ -337,6 +337,19 @@
           }
           /* The rollups the app now reads instead of the whole sessions table.
              Same shape as the SQL: days is {"2026-09-14":[minutes,sessions]}. */
+          /* A week of hourly peaks shaped like a school day, so the busyness
+             graph has something to draw. Same columns as live_history(). */
+          if (name === "live_history") {
+            const now = Math.floor(Date.now() / 36e5) * 36e5, rows = [];
+            for (let h = 24 * 7; h >= 0; h--) {
+              const t = new Date(now - h * 36e5), hr = t.getHours();
+              const peak = hr < 7 ? 0 : Math.max(0, Math.round(9 - Math.abs(16 - hr) * 0.9 + ((h * 7) % 3)));
+              rows.push({ bucket: t.toISOString(), peak });
+            }
+            const best = Math.max(...rows.map(r => r.peak));
+            return Promise.resolve({ error: null, data: rows.map(r =>
+              Object.assign(r, { best, first_at: rows[0].bucket })) });
+          }
           if (name === "crew_daily" || name === "crew_daily_by_subject") {
             const since = String((args && args.since) || "0000-01-01");
             const key = args && args.subject_key;

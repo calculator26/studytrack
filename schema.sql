@@ -1963,7 +1963,7 @@ returns text[]
 language sql
 immutable
 set search_path = public
-as $$ select array['👍','❤️','😂','🔥','💀','👀','🎉','😭'] $$;
+as $$ select array['👍','❤️','😂','🔥','💀','🤨','👀','🎉','😭'] $$;
 
 grant execute on function public.chat_emoji() to authenticated;
 

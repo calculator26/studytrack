@@ -233,6 +233,7 @@ table.board{width:100%;border-collapse:collapse}
 .pflog .en{display:flex;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid var(--rule-soft)}
 .pflog .en span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pflog .en b{font-weight:650}
+.pflog .en .at{color:var(--ink-soft);font-size:11.5px}
 .loading{color:var(--ink-mid);padding:30px 0;text-align:center}
 
 .more{display:block;margin:12px auto 0;background:var(--surface-2);border:1px solid var(--rule);border-radius:999px;

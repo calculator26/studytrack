@@ -169,6 +169,9 @@
         <span class="crewchip" id="crewchip" hidden></span>
       </div>
       <div class="mastright">
+        <!-- What you have done today, always in view. It is the one number on
+             the whole page you can change right now. -->
+        <button type="button" class="todaychip" id="todaychip" hidden></button>
         <div class="nowbar" id="nowbar"></div>
         <div class="meblock" id="meblock" data-profile="" title="See your profile">
           <div id="me-av" class="av lg">?</div>
@@ -279,7 +282,7 @@
     </div>
 
     <div class="grid g4 mb16">
-      <div class="kpi"><div class="v" id="k-today">0.0</div><div class="k">Your hours today</div><div class="d" id="k-today-d">—</div></div>
+      <div class="kpi kpi-today"><div class="v" id="k-today">0m</div><div class="k">Studied today</div><div class="d" id="k-today-d">—</div></div>
       <div class="kpi"><div class="v" id="k-rank">—</div><div class="k">Your place today</div><div class="d" id="k-rank-d">—</div></div>
       <div class="kpi"><div class="v" id="k-streak">0</div><div class="k">Day streak</div><div class="d" id="k-streak-d">—</div></div>
       <div class="kpi"><div class="v" id="k-week">0.0</div><div class="k">Your last 7 days</div><div class="d" id="k-week-d">—</div></div>
@@ -291,7 +294,7 @@
     </div>
 
     <div class="card">
-      <header><h2>Today across the peloton</h2><div class="sub">Hours logged today, against each person's own goal</div></header>
+      <header><h2>Today across the peloton</h2><div class="sub">Studied today against each person's own goal. A session running now is counted in, marked <i class="railive" aria-hidden="true"></i></div></header>
       <div class="body"><div class="rail" id="todayrail"></div></div>
     </div>
   </section>

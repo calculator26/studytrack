@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Knox Study Track</title>
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../favicon.svg">
+<link rel="manifest" href="../manifest.json">
 <meta name="theme-color" content="#12161C">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -46,11 +48,20 @@
       <label class="fl" for="au-email">Email</label>
       <input type="email" id="au-email" autocomplete="email">
     </div>
-    <div class="field">
+    <div class="field" id="au-passfield">
       <label class="fl" for="au-pass">Password</label>
       <input type="password" id="au-pass" autocomplete="current-password">
     </div>
+    <!-- Only on the way back in from a reset link. -->
+    <div class="field" id="au-pass2field" style="display:none">
+      <label class="fl" for="au-pass2">New password again</label>
+      <input type="password" id="au-pass2" autocomplete="new-password">
+    </div>
     <button class="btn" id="au-go" style="width:100%;margin-top:6px">Sign in</button>
+    <div class="authalt">
+      <button type="button" class="linkbtn" id="au-forgot">Forgot your password?</button>
+      <button type="button" class="linkbtn" id="au-back" style="display:none">Back to signing in</button>
+    </div>
   </div>
 </div>
 
@@ -158,6 +169,9 @@
         <span class="crewchip" id="crewchip" hidden></span>
       </div>
       <div class="mastright">
+        <!-- What you have done today, always in view. It is the one number on
+             the whole page you can change right now. -->
+        <button type="button" class="todaychip" id="todaychip" hidden></button>
         <div class="nowbar" id="nowbar"></div>
         <div class="meblock" id="meblock" data-profile="" title="See your profile">
           <div id="me-av" class="av lg">?</div>
@@ -187,28 +201,19 @@
        the same kind of thing: a person asking for your attention. -->
   <div id="mentionbar" class="hide"></div>
 
+  <!-- Somebody gave your study kudos, or called it sus. -->
+  <div id="reactbar" class="hide"></div>
+
   <!-- A nudge that needs no permission, because it is just the page. Where
        notifications are blocked by policy this is the only channel left. -->
   <div id="nudgebar" class="hide"></div>
 
   <!-- ---------- HOME ---------- -->
   <section class="panel on" id="p-home">
-    <!-- The loudest thing on the page, and the shortest-lived: it takes itself
-         down at 3:15pm and does not come back for the rest of the day. -->
-    <div class="classwarn mb16" id="classwarn" role="alert" hidden>
-      <div class="cw-sign" aria-hidden="true">⚠️</div>
-      <div class="cw-text">
-        <div class="cw-head">Don't log class time as study</div>
-        <div class="cw-shout">or you will be banished</div>
-        <div class="cw-fine">Sitting in a lesson is not a study block · this sign self-destructs at 3:15pm</div>
-      </div>
-      <div class="cw-sign cw-sign-r" aria-hidden="true">⚠️</div>
-    </div>
-
     <div class="countdown mb16" id="countdown" hidden></div>
 
     <div class="card mb16" id="live-card">
-      <header><div><h2>Studying right now</h2><div class="sub">Live across the peloton. Timers update as they run.</div></div></header>
+      <header><div><h2>Studying right now</h2><div class="sub" id="live-sub">Live across the peloton. Timers update as they run.</div></div></header>
       <div class="body"><div class="livestrip" id="livestrip"></div></div>
     </div>
 
@@ -277,7 +282,7 @@
     </div>
 
     <div class="grid g4 mb16">
-      <div class="kpi"><div class="v" id="k-today">0.0</div><div class="k">Your hours today</div><div class="d" id="k-today-d">—</div></div>
+      <div class="kpi kpi-today"><div class="v" id="k-today">0m</div><div class="k">Studied today</div><div class="d" id="k-today-d">—</div></div>
       <div class="kpi"><div class="v" id="k-rank">—</div><div class="k">Your place today</div><div class="d" id="k-rank-d">—</div></div>
       <div class="kpi"><div class="v" id="k-streak">0</div><div class="k">Day streak</div><div class="d" id="k-streak-d">—</div></div>
       <div class="kpi"><div class="v" id="k-week">0.0</div><div class="k">Your last 7 days</div><div class="d" id="k-week-d">—</div></div>
@@ -289,7 +294,7 @@
     </div>
 
     <div class="card">
-      <header><h2>Today across the peloton</h2><div class="sub">Hours logged today, against each person's own goal</div></header>
+      <header><h2>Today across the peloton</h2><div class="sub">Studied today against each person's own goal. A session running now is counted in, marked <i class="railive" aria-hidden="true"></i></div></header>
       <div class="body"><div class="rail" id="todayrail"></div></div>
     </div>
   </section>
@@ -337,6 +342,26 @@
       <div class="card">
         <header><h2>Daily output</h2><div class="sub">Every day in the range, stacked by member</div></header>
         <div class="body scrollx"><svg id="stack" viewBox="0 0 620 350" style="width:100%;height:auto"></svg></div>
+      </div>
+    </div>
+
+    <div class="card mb16" id="livegraph-card">
+      <header>
+        <div><h2>How busy it gets</h2>
+          <div class="sub" id="livegraph-note">—</div></div>
+        <div class="controls" id="livegraph-range"></div>
+      </header>
+      <div class="body">
+        <div class="lh-wrap" id="livegraph-wrap">
+          <!-- tabindex so the keyboard gets the same readout the pointer does -->
+          <svg id="livegraph" viewBox="0 0 900 260" tabindex="0" role="img"
+            aria-label="People studying at once, by hour. Drag to pan, scroll to zoom, arrow keys to move through the hours."
+            style="width:100%;height:auto;touch-action:none"></svg>
+          <div class="lh-tip" id="livegraph-tip" hidden></div>
+        </div>
+        <p class="lh-help">Drag to move · scroll or pinch to zoom · hover for an hour · double-click to reset</p>
+        <div class="lh-live" id="livegraph-live" aria-live="polite"></div>
+        <div class="lh-table scrollx" id="livegraph-table" hidden></div>
       </div>
     </div>
 

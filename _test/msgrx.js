@@ -1,7 +1,7 @@
 const { chromium } = require('/opt/node22/lib/node_modules/playwright');
 const UID = "11111111-1111-1111-1111-111111111111";
 const OTHER = "22222222-2222-2222-2222-222222222222";
-const EMOJI = ["\u{1F44D}","❤️","\u{1F602}","\u{1F525}","\u{1F480}","\u{1F440}","\u{1F389}","\u{1F62D}"];
+const EMOJI = ["\u{1F44D}","❤️","\u{1F602}","\u{1F525}","\u{1F480}","\u{1F928}","\u{1F440}","\u{1F389}","\u{1F62D}"];
 
 const STUB = `
 window.__rpc = []; window.__fail = false; window.__rt = {};
@@ -59,7 +59,8 @@ window.supabase = { createClient: () => {
   console.log('\n--- the picker ---');
   await p.click('[data-msg="m2"] [data-mrxadd]'); await p.waitForTimeout(200);
   ok('opens', await p.locator('[data-msg="m2"] .mrxpick').isVisible());
-  ok('with all eight', await p.locator('[data-msg="m2"] .mrxpick button').count() === 8);
+  ok('with all nine, sus included', await p.locator('[data-msg="m2"] .mrxpick button').count() === 9 &&
+     await p.locator('[data-msg="m2"] .mrxpick button[data-mrx="\u{1F928}"]').count() === 1);
   await p.keyboard.press('Escape'); await p.waitForTimeout(200);
   ok('Escape closes it', await p.locator('.mrxpick').count() === 0);
 
