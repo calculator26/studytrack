@@ -2,7 +2,7 @@
    and walks every tab. Catches "X is not defined" in the code paths that only
    run once somebody is actually signed in — which a component harness never
    reaches, and which is exactly how noteLiveSoon got shipped missing. */
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const { setup } = require('./browser');
 
 const UID = "11111111-1111-1111-1111-111111111111";
 const STUB = `
@@ -37,7 +37,7 @@ window.supabase = {
 `;
 
 (async () => {
-  const b = await chromium.launch();
+  const b = await setup();
   const p = await b.newPage({ viewport: { width: 1280, height: 900 } });
   const errs = [];
   p.on('pageerror', e => errs.push(e.message));
@@ -45,7 +45,7 @@ window.supabase = {
     if (!/Failed to load resource|ERR_|net::/.test(t)) errs.push('console: ' + t); } });
 
   await p.addInitScript(STUB);
-  await p.goto('http://127.0.0.1:8899/index.html', { waitUntil: 'networkidle' });
+  await p.goto(b.base + '/index.html', { waitUntil: 'networkidle' });
   await p.waitForTimeout(1500);
 
   const shown = await p.evaluate(() => ({

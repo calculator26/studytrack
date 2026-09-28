@@ -610,6 +610,23 @@ Discard path can be tested from a cold load.
 To try it locally without a Supabase project at all, open `_test/index.html` in a browser.
 It runs the whole interface against four fake members and three weeks of invented sessions.
 
+`?carry=1` gives you a timer of your own that has been paused and resumed, with reactions on it,
+for checking they survive the resume and carry onto the session when it is saved.
+
+### Running the tests
+
+Three browser tests load the real app against a stubbed Supabase and fail on any error:
+
+```sh
+npm i -g playwright-core      # once
+node _test/smoke.js           # signs in and walks every tab — run before pushing app.js
+node _test/msgrx.js           # chat emoji reactions
+node _test/reset.js           # forgot password
+```
+
+Each serves the repository itself and blocks the Supabase CDN so the stub cannot be replaced
+by the real library. With `playwright-core` they use your installed Google Chrome.
+
 ---
 
 ## Troubleshooting

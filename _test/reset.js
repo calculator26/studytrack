@@ -1,4 +1,4 @@
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const { setup } = require('./browser');
 const UID = "11111111-1111-1111-1111-111111111111";
 
 /* A stub that records what the app asks Supabase to do, and can pretend to be
@@ -37,11 +37,13 @@ window.supabase = { createClient: () => {
   };
 }};`;
 
-const url = (mode) => 'http://127.0.0.1:8899/index.html' +
+let BASE = '';
+const url = (mode) => BASE + '/index.html' +
   (mode === 'recovery-hash' ? '#access_token=fake&refresh_token=fake&token_type=bearer&type=recovery' : '');
 
 (async () => {
-  const b = await chromium.launch();
+  const b = await setup();
+  BASE = b.base;
   let fail = 0;
   const ok = (label, cond, extra) => {
     console.log(`  ${cond ? 'PASS' : '** FAIL **'}  ${label}${extra !== undefined ? '  -> ' + JSON.stringify(extra) : ''}`);

@@ -1,4 +1,4 @@
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const { setup } = require('./browser');
 const UID = "11111111-1111-1111-1111-111111111111";
 const OTHER = "22222222-2222-2222-2222-222222222222";
 const EMOJI = ["\u{1F44D}","❤️","\u{1F602}","\u{1F525}","\u{1F480}","\u{1F928}","\u{1F440}","\u{1F389}","\u{1F62D}"];
@@ -37,14 +37,14 @@ window.supabase = { createClient: () => {
 }};`;
 
 (async () => {
-  const b = await chromium.launch();
+  const b = await setup();
   const p = await b.newPage({ viewport:{width:900,height:760}, deviceScaleFactor:2 });
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   let fail = 0;
   const ok = (l, c, x) => { console.log(`  ${c?'PASS':'** FAIL **'}  ${l}${x!==undefined?'  -> '+JSON.stringify(x):''}`); if(!c) fail++; };
 
   await p.addInitScript(STUB);
-  await p.goto('http://127.0.0.1:8899/index.html', { waitUntil:'networkidle' });
+  await p.goto(b.base + '/index.html', { waitUntil:'networkidle' });
   await p.waitForTimeout(1200);
   await p.evaluate(() => document.querySelector('nav.tabs button[data-p="chat"]').click());
   await p.waitForTimeout(900);
