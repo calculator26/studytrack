@@ -141,6 +141,19 @@
       updated_at: new Date(Date.now() - 25 * 3600e3).toISOString() });
   }
 
+  /* ?carry=1: your own timer, begun forty minutes ago and resumed after a
+     pause ten minutes ago, so started_at has moved but began_at has not. Two
+     sus and a kudos on it, aimed at began_at. They must still show, and must
+     land on the session when it is saved. */
+  if (/carry=1/.test(location.search)) {
+    const began = new Date(Date.now() - 40 * 60000).toISOString();
+    T.live_timers.push({ user_id: ME, label: "English Advanced", subject_id: null, area_id: null,
+      began_at: began, started_at: new Date(Date.now() - 10 * 60000).toISOString(), acc_ms: 20 * 60000,
+      running: true, updated_at: new Date().toISOString() });
+    [[2, "sus"], [3, "sus"], [4, "kudos"]].forEach(([n, k]) => T.timer_reactions.push({ owner_id: ME,
+      user_id: uid(n), kind: k, for_started_at: began, created_at: new Date().toISOString() }));
+  }
+
   T.live_timers.push({ user_id: uid(3), label: "Module B — Eliot · Write to time", subject_id: null, area_id: null,
     started_at: new Date(Date.now() - 22 * 60000).toISOString(), acc_ms: 0, running: true,
     updated_at: new Date().toISOString() });
@@ -356,8 +369,29 @@
            then never appear, and openAdmin() should refuse. */
         rpc: (name, args) => {
           if (name === "delete_own_account") return Promise.resolve({ data: null, error: null });
+          /* Mirrors carry_timer_reactions(): the live timer's reactions copied
+             onto the session just saved from it. */
+          if (name === "carry_timer_reactions") {
+            const sid = args && args.session_id, t = T.live_timers.find(r => r.user_id === ME);
+            T.session_reactions = T.session_reactions || [];
+            if (!t || !T.sessions.some(r => r.id === sid && r.user_id === ME))
+              return Promise.resolve({ data: [], error: null });
+            const began = t.began_at || t.started_at;
+            const made = T.timer_reactions.filter(r => r.owner_id === ME && r.for_started_at === began && r.user_id !== ME)
+              .map(r => ({ session_id: sid, user_id: r.user_id, kind: r.kind }));
+            T.session_reactions.push(...made);
+            return Promise.resolve({ data: made.map(r => ({ user_id: r.user_id, kind: r.kind })), error: null });
+          }
           /* The larp rules, mirrored so the button can be exercised locally.
              The real ones are in larp.sql. */
+          if (name === "reactions_for") {
+            const ids = (args && args.ids) || [], by = {};
+            (T.session_reactions || []).filter(r => ids.includes(r.session_id)).forEach(r => {
+              const e = by[r.session_id] || (by[r.session_id] = { session_id: r.session_id, kudos_by: [], sus_by: [] });
+              e[r.kind + "_by"].push(r.user_id);
+            });
+            return Promise.resolve({ data: Object.values(by), error: null });
+          }
           if (name === "report_larp") {
             const say = why => Promise.resolve({ data: { ok: false, why }, error: null });
             const target = args && args.target, p = T.profiles.find(x => x.id === target);

@@ -1802,7 +1802,7 @@ $("ms-save").addEventListener("click", async () => {
   savingSession = true;
   $("ms-save").disabled = true;
   let saved = false;
-  try { saved = await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim()); }
+  try { saved = await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim(), true); }
   finally { savingSession = false; $("ms-save").disabled = false; }
 
   /* Nothing was written, so the timer stays exactly as it was and the sheet
@@ -1818,15 +1818,33 @@ $("ms-save").addEventListener("click", async () => {
    about to throw away the timer it came from have to know: binning a running
    timer on the strength of a save that never happened loses the hours for
    good, and there is nowhere to get them back from. */
-async function addSession(day, target, minutes, note) {
+async function addSession(day, target, minutes, note, fromTimer) {
   if (!minutes || minutes < 1) { toast("Minutes needs to be at least 1"); return false; }
-  const { error } = await sb.from("sessions").insert({
+  const { data, error } = await sb.from("sessions").insert({
     user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
-    day, minutes, note: note || null });
+    day, minutes, note: note || null }).select("id").single();
   if (error) { toast("Could not save — " + error.message, 4600); return false; }
+  if (fromTimer && data && data.id) await carryTimerReactions(data.id);
   toast("Logged " + f1(minutes / 60) + " h");
   await refresh();
   return true;
+}
+
+/* The kudos and sus somebody got while the clock was running stay with the
+   session once it is logged, rather than vanishing with the timer. Has to run
+   while the timer row still exists — the save sheet only removes it after
+   this — and the database only copies onto a session of yours made in the
+   last few minutes. You were already told about each of these while they
+   were live, so the copies are marked seen instead of announced again. A
+   failure here costs the reactions, never the session. */
+async function carryTimerReactions(sessionId) {
+  try {
+    const { data, error } = await sb.rpc("carry_timer_reactions", { session_id: sessionId });
+    if (error || !Array.isArray(data) || !data.length) return;
+    const seen = rxSeenLoad();
+    data.forEach(r => seen.add("s:" + sessionId + ":" + r.user_id + ":" + r.kind));
+    rxSeenSave();
+  } catch (e) { /* see above */ }
 }
 
 /* ---------- manual add ---------- */
@@ -2321,7 +2339,7 @@ function myReactionKeys() {
   const mineNow = DB.timerReactions[UID];
   if (mineNow) {
     const t = (DB.timers || []).find(x => x.user_id === UID);
-    const when = t ? t.started_at : "now";
+    const when = t ? (t.began_at || t.started_at) : "now";
     RX_KINDS.forEach(k => (mineNow[k.kind] || []).forEach(by =>
       out.push({ key: "t:" + when + ":" + by + ":" + k.kind, by: by, kind: k.kind,
                  what: "your session right now" })));
@@ -2387,11 +2405,13 @@ function paintReactBar() {
    four-hour timer still going is the most natural thing here to raise an
    eyebrow at.
 
-   Reactions are stamped with the started_at they were aimed at, so a person
-   who stops and starts again does not inherit the last run's: the read drops
-   anything that no longer matches, and the database sweeps them on the next
-   press. Stopping a timer removes the row and the foreign key takes these
-   with it, so nothing has to remember to tidy up.
+   Reactions are stamped with the began_at they were aimed at — when the run
+   first started, which a pause and resume leave alone, unlike started_at — so
+   a person who stops and starts again does not inherit the last run's: the
+   read drops anything that no longer matches, and the database sweeps them on
+   the next press. Saving the session copies them onto the logged row first
+   (carry_timer_reactions), then stopping removes the timer and the foreign
+   key takes these with it.
    --------------------------------------------------------------------------- */
 function absorbTimerReactions(res) {
   /* A project that has not run migrate.sql yet has no such table. That is not
@@ -2402,7 +2422,7 @@ function absorbTimerReactions(res) {
     const t = (DB.timers || []).find(x => x.user_id === r.owner_id);
     /* Aimed at a run that has since been restarted: no longer about what is
        on the screen, so it is not drawn. */
-    if (!t || +new Date(t.started_at) !== +new Date(r.for_started_at)) return;
+    if (!t || +new Date(t.began_at || t.started_at) !== +new Date(r.for_started_at)) return;
     const e = next[r.owner_id] || (next[r.owner_id] = { kudos: [], sus: [] });
     (e[r.kind] || []).push(r.user_id);
   });

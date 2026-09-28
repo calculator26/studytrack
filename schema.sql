@@ -1407,7 +1407,7 @@ begin
     return jsonb_build_object('ok', false, 'why', 'You cannot react to your own timer');
   end if;
 
-  select t.started_at into began from public.live_timers t where t.user_id = own;
+  select t.began_at into began from public.live_timers t where t.user_id = own;
   if began is null then
     return jsonb_build_object('ok', false, 'why', 'They are not running a timer');
   end if;
@@ -1436,6 +1436,55 @@ end $fn$;
 
 revoke execute on function public.react_timer(uuid, text) from public, anon;
 grant  execute on function public.react_timer(uuid, text) to authenticated;
+
+-- ------------------------------------------------------------
+--  began_at: when this run of the timer first started. started_at
+--  moves on every resume, so reactions aimed at it vanished the
+--  moment somebody came back from a break; began_at is set once,
+--  when the row is created, and nothing the app sends touches it
+--  (an upsert leaves columns it does not name alone). Reactions
+--  are stamped with this instead.
+-- ------------------------------------------------------------
+alter table public.live_timers add column if not exists began_at timestamptz not null default now();
+
+-- Saving the session copies what the live timer got onto the logged row,
+-- so the kudos and sus are still there in the log once the clock is gone.
+-- Called by the save sheet after the insert and before the timer row is
+-- deleted (the foreign key takes the timer reactions with it). Only onto a
+-- session of your own made in the last fifteen minutes; running it twice
+-- copies nothing new. Returns what it copied so the app can mark those as
+-- already seen rather than announce them a second time.
+create or replace function public.carry_timer_reactions(session_id uuid)
+returns table (user_id uuid, kind text)
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  sid   uuid := carry_timer_reactions.session_id;
+  me    uuid := auth.uid();
+  began timestamptz;
+begin
+  if me is null then return; end if;
+  if not exists (select 1 from public.sessions s
+                  where s.id = sid and s.user_id = me
+                    and s.created_at > now() - interval '15 minutes') then
+    return;
+  end if;
+  select t.began_at into began from public.live_timers t where t.user_id = me;
+  if began is null then return; end if;
+
+  return query
+  insert into public.session_reactions as sr (session_id, user_id, kind)
+  select sid, r.user_id, r.kind
+    from public.timer_reactions r
+   where r.owner_id = me and r.for_started_at = began and r.user_id <> me
+  on conflict on constraint session_reactions_pkey do nothing
+  returning sr.user_id, sr.kind;
+end $fn$;
+
+revoke execute on function public.carry_timer_reactions(uuid) from public, anon;
+grant  execute on function public.carry_timer_reactions(uuid) to authenticated;
 
 -- ============================================================
 --  HOW MANY PEOPLE WERE ON THE CLOCK AT ONCE
