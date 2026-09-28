@@ -104,7 +104,9 @@ window.supabase = { createClient: () => {
   ok('  with the reason shown', /limit/i.test(toastTxt), toastTxt.trim().slice(0,50));
 
   await p.evaluate(() => { __fail = false; });
-  await p.locator('#chatlog').screenshot({ path: process.argv[2] + '/msgrx.png' });
+  /* Only when asked for: node _test/msgrx.js <folder>. Without one this used
+     to write into a folder literally called "undefined", which got committed. */
+  if (process.argv[2]) await p.locator('#chatlog').screenshot({ path: process.argv[2] + '/msgrx.png' });
   console.log('\npage errors: ' + (errs.length ? [...new Set(errs)].join(' | ') : 'none'));
   if (errs.length) fail++;
   console.log(fail ? `\nRESULT: ** ${fail} FAILED **` : '\nRESULT: ALL PASSED');
