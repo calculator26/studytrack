@@ -245,13 +245,7 @@ const DB = {
   reactions: {},
   /* owner_id -> { kudos:[uid], sus:[uid], at:started_at }. Bounded by who is
      actually running a timer, so unlike the session ones this is read whole. */
-  timerReactions: {},
-  /* Larp: today's reports (who reported whom), and for the alerts in chat,
-     each trial and its votes — trial_id -> { legit:[uid], larp:[uid] }. */
-  larpReports: [],
-  larpTrials: {},
-  larpVotes: {},
-  larpTrialReports: {}       /* trial_id -> [reporter uid], for the alert's hover */
+  timerReactions: {}
 };
 
 /* How far back the rollup reaches. Long enough for any streak anyone will
@@ -958,7 +952,7 @@ function normaliseProfiles() {
 async function loadAll() {
   const ticket = timersTicket(), readAt = Date.now();
   const since = crewSince();
-  const [pr, su, ar, se, go, ti, cd, cs, fe, tr, lr] = await Promise.all([
+  const [pr, su, ar, se, go, ti, cd, cs, fe, tr] = await Promise.all([
     sb.from("profiles").select("*"),
     sb.from("subjects").select("*").eq("user_id", UID).order("position"),
     sb.from("areas").select("*").eq("user_id", UID).order("position"),
@@ -972,9 +966,7 @@ async function loadAll() {
     sb.from("sessions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(40),
     /* Errors rather than throws on a project that has not run migrate.sql yet,
        which absorbTimerReactions reads as "nobody has reacted". */
-    sb.from("timer_reactions").select("*"),
-    /* today's larp reports: one per person at most, so a few hundred rows */
-    sb.from("larp_reports").select("*").eq("day", todayISO())
+    sb.from("timer_reactions").select("*")
   ]);
   /* Set off before the last write landed, so it cannot know about it. Throwing
      it away costs one more read; believing it un-deletes things. */
@@ -990,7 +982,6 @@ async function loadAll() {
      previous read's timers and drops every reaction on a timer that has just
      been started or restarted. */
   absorbTimerReactions(tr);
-  absorbLarpReports(lr);
   normaliseProfiles();
   return true;
 }
@@ -1019,11 +1010,10 @@ async function loadCrew() {
     sb.rpc("crew_daily", { since, only_active: true }),
     sb.from("live_timers").select("*"),
     feedJob,
-    sb.from("timer_reactions").select("*"),
-    sb.from("larp_reports").select("*").eq("day", todayISO())
+    sb.from("timer_reactions").select("*")
   ];
   if (crewReloadProfiles) jobs.push(sb.from("profiles").select("*"));
-  const [cd, ti, fe, tr, lr, pr] = await Promise.all(jobs);
+  const [cd, ti, fe, tr, pr] = await Promise.all(jobs);
   if (readAt <= dataTouched) return false;
   absorbDaily(cd.data, true);            /* merged, so older days are kept */
   if (LB_SUBJECT) { SUBJECT_DAILY.key = null; await loadSubjectDaily(LB_SUBJECT); }
@@ -1039,7 +1029,6 @@ async function loadCrew() {
      previous read's timers and drops every reaction on a timer that has just
      been started or restarted. */
   absorbTimerReactions(tr);
-  absorbLarpReports(lr);
   return true;
 }
 /* A refresh asked for while one is already running used to be dropped on the
@@ -1175,8 +1164,6 @@ function subscribeRealtime() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, onMsgReactionChange)
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_reactions" }, onMsgReactionChange)
       .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "larp_reports" }, onLarpReport)
-      .on("postgres_changes", { event: "*", schema: "public", table: "larp_votes" }, onLarpVote)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    },
           () => { crewReloadProfiles = true; refreshSoon(); })
       .subscribe();
@@ -1576,7 +1563,6 @@ function liveHoursTick(force) {
   try { renderHome(); } catch (e) { console.error(e); }
   if ($("p-crew") && $("p-crew").classList.contains("on")) { try { renderCrew(); } catch (e) { console.error(e); } }
   try { paintNudgeBar(); } catch (e) { console.error(e); }
-  try { repaintLarp(); } catch (e) { console.error(e); }   /* the 4 hour line moves with the clock */
 }
 
 /* ---------------------------------------------------------------------------
@@ -2245,11 +2231,7 @@ function reactionsHTML(s) {
       title="${esc(title)}"><span aria-hidden="true">${k.icon}</span><span class="rxn">${
         ids.length || ""}</span><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("");
-  /* Ten people calling it sus is the room asking the question. The answer is
-     one tap away, under the session itself. Today's only: a larp report is
-     about today's hours, and a week-old session is not evidence of those. */
-  const larp = (r.sus || []).length >= LARP_SUS_NEEDED && s.day === todayISO() ? larpSlot(s.user_id, "sx") : "";
-  return bits || larp ? `<div class="rx">${bits}</div>${larp}` : "";
+  return bits ? `<div class="rx">${bits}</div>` : "";
 }
 
 /* One press. The row is moved locally first so the button answers instantly,
@@ -2480,336 +2462,8 @@ function timerReactionsHTML(t, big) {
       ><span aria-hidden="true">${k.icon}</span><span class="rxn">${ids.length || ""}</span
       ><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("");
-  /* not in the profile's own live panel: the profile has the big button already */
-  const larp = !big && (r.sus || []).length >= LARP_SUS_NEEDED ? larpSlot(t.user_id, "live") : "";
-  return bits || larp ? `<div class="rx lrx${big ? " big" : ""}">${bits}</div>${larp}` : "";
+  return bits ? `<div class="rx lrx${big ? " big" : ""}">${bits}</div>` : "";
 }
-
-/* =========================================================================
-   LARP REPORTS
-
-   Banter, not moderation. Everybody gets one report a day to spend on
-   somebody they think is faking their hours. Five on one person in a day
-   and a LARP ALERT drops into chat with their numbers, and the room votes
-   legit or larp. Nothing happens either way.
-
-   Every rule lives in report_larp() and vote_larp() in larp.sql: one a day,
-   never yourself, never somebody in private mode, never somebody under four
-   hours today. The page only mirrors them so the button can say why before
-   you press it. Who reported is not a secret — it is on the hover — but it
-   is never said in chat.
-
-   The button turns up in three places: on a profile; and under a live study
-   or a session of today's once ten people have called it sus. Under four
-   hours today it is not under anything, and on the profile it is greyed out
-   with the reason on hover and on a press.
-   ========================================================================= */
-const LARP_NEEDED = 5;            /* reports in a day to call a trial */
-const LARP_SUS_NEEDED = 10;       /* sus on a live study or session to put the button under it */
-const LARP_MIN_HOURS = 4;
-const LARP_LOCKED_MSG = `${LARP_MIN_HOURS} hours of study needed to report LARP`;
-
-function absorbLarpReports(res) {
-  if (!res || res.error) return;          /* not migrated yet: nobody has reported */
-  DB.larpReports = res.data || [];
-  try { repaintLarp(); } catch (e) { /* page not built yet */ }
-}
-const larpReportsOn = uid => DB.larpReports.filter(r => r.target === uid && r.day === todayISO());
-const myLarpReport  = () => DB.larpReports.find(r => r.reporter === UID && r.day === todayISO()) || null;
-const larpTrialToday = uid => Object.values(DB.larpTrials).find(t => t.target === uid && t.day === todayISO()) || null;
-
-/* Why the button cannot be pressed right now, in words, or null if it can. */
-function larpBlockedBecause(uid) {
-  const p = profileOf(uid);
-  if (uid === UID) return "self";
-  if (p.hide_hours) return "private";
-  const mine = myLarpReport();
-  if (mine) return mine.target === uid ? "done" : "spent";
-  if (hoursFor(uid, todayISO()) < LARP_MIN_HOURS) return "short";
-  return null;
-}
-
-/* A slot, so a report landing anywhere can repaint every copy of the button
-   for that person without rebuilding the card it sits in. */
-const larpSlot = (uid, ctx) =>
-  `<div class="larpslot larp-${ctx}" data-larpfor="${esc(uid)}" data-larpctx="${esc(ctx)}">${larpBoxHTML(uid, ctx)}</div>`;
-
-function larpBoxHTML(uid, ctx) {
-  if (!UID) return "";
-  const p = profileOf(uid);
-  if (p.hide_hours && uid !== UID) return "";
-  const list = larpReportsOn(uid), n = list.length;
-  const who = n ? rxWho(list.map(r => r.reporter), "reported " + (uid === UID ? "you" : "them")) : "Nobody has reported them today";
-  const trial = larpTrialToday(uid);
-  const count = `<span class="larpn" title="${esc(who)}" tabindex="0">🤥 ${n} of ${LARP_NEEDED} larp report${n === 1 ? "" : "s"} today</span>`;
-  const status = trial || n >= LARP_NEEDED
-    ? `<span class="larpn trial" title="${esc(who)}" tabindex="0">🚨 On trial in chat · ${n} reports</span>`
-    : count;
-
-  /* Your own profile gets the count and nothing to press. */
-  if (uid === UID) return ctx === "pf" && n ? `<div class="larpbox mine">${status}</div>` : "";
-  /* Under four hours today there is nothing to accuse anybody of. Under a live
-     study or a session there is no button at all. On the profile it stays in
-     its usual place, greyed out and quiet, so people can see the rule rather
-     than wonder where the button went. Not a real disabled button: those show
-     no tooltip and swallow the click in some browsers, and both are how the
-     rule gets explained. */
-  if (hoursFor(uid, todayISO()) < LARP_MIN_HOURS) {
-    if (ctx !== "pf") return "";
-    return `<div class="larpbox locked">
-      <button type="button" class="larpbtn" aria-disabled="true" data-larplocked="1"
-        title="${esc(LARP_LOCKED_MSG)}">🤥 Report LARP</button>
-      <div class="larpmeta"><span class="larpwhy" title="${esc(LARP_LOCKED_MSG)}">${LARP_MIN_HOURS} hours needed</span>${n ? status : ""}</div>
-    </div>`;
-  }
-
-  const why = larpBlockedBecause(uid);
-  const h = hoursFor(uid, todayISO());
-  const whyText = {
-    done:  "You reported them today",
-    spent: "You have used your report for today",
-    short: `Needs ${LARP_MIN_HOURS}h today to be accused · ${hm(h)} so far`
-  }[why] || "";
-  return `<div class="larpbox">
-    <button type="button" class="larpbtn" data-larp="${esc(uid)}"${why ? " disabled" : ""}
-      title="${esc(why ? whyText : `Spend your one report today on ${p.display_name}`)}">🤥 Report LARP</button>
-    <div class="larpmeta">${status}${whyText ? `<span class="larpwhy">${esc(whyText)}</span>` : ""}</div>
-  </div>`;
-}
-
-function repaintLarp() {
-  document.querySelectorAll(".larpslot[data-larpfor]").forEach(el => {
-    el.innerHTML = larpBoxHTML(el.dataset.larpfor, el.dataset.larpctx);
-  });
-}
-
-let larpBusy = false;
-async function reportLarp(uid) {
-  if (larpBusy || !sb) return;
-  larpBusy = true;
-  try {
-    const { data, error } = await sb.rpc("report_larp", { target: uid });
-    if (error) { toast("Could not report — " + error.message, 4600); return; }
-    if (!data || !data.ok) { toast((data && data.why) || "Could not report", 4600); return; }
-    /* put it on screen now; the socket echo is ignored as a duplicate */
-    if (!DB.larpReports.some(r => r.reporter === UID && r.day === todayISO()))
-      DB.larpReports.push({ reporter: UID, target: uid, day: todayISO(), created_at: new Date().toISOString() });
-    const name = profileOf(uid).display_name;
-    toast(data.trial ? `🚨 That was the fifth. ${name} is on trial in chat.`
-                     : `🤥 Reported ${name} for larp · ${data.count} of ${LARP_NEEDED}`, 4200);
-    repaintLarp();
-  } finally { larpBusy = false; }
-}
-
-function onLarpReport(payload) {
-  const r = payload && payload.new;
-  if (!r || r.day !== todayISO()) return;
-  if (DB.larpReports.some(x => x.reporter === r.reporter && x.day === r.day)) return;
-  DB.larpReports.push(r);
-  repaintLarp();
-}
-
-/* ---------------------------------------------------------------------------
-   The alert in chat, and the vote.
-   --------------------------------------------------------------------------- */
-async function loadLarpTrials(ids) {
-  const want = [...new Set(ids)].filter(id => id && !DB.larpTrials[id]);
-  if (!want.length || !sb) return;
-  const [tr, vo] = await Promise.all([
-    sb.from("larp_trials").select("*").in("id", want),
-    sb.from("larp_votes").select("*").in("trial_id", want)
-  ]);
-  if (tr.error) return;
-  (tr.data || []).forEach(t => { DB.larpTrials[t.id] = t; DB.larpVotes[t.id] = { legit: [], larp: [] }; });
-  (vo.data || []).forEach(v => { const b = DB.larpVotes[v.trial_id]; if (b) b[v.vote].push(v.user_id); });
-  /* who reported, for the hover on "5 people" — asked per trial day */
-  const trials = (tr.data || []);
-  if (trials.length) {
-    const rp = await sb.from("larp_reports").select("*")
-      .in("target", trials.map(t => t.target)).in("day", [...new Set(trials.map(t => t.day))]);
-    trials.forEach(t => {
-      DB.larpTrialReports[t.id] = (rp.data || []).filter(r => r.target === t.target && r.day === t.day)
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(r => r.reporter);
-    });
-  }
-}
-
-function onLarpVote(payload) {
-  const row = (payload && (payload.new && payload.new.trial_id ? payload.new : payload.old)) || null;
-  if (!row || !DB.larpVotes[row.trial_id]) return;
-  const b = DB.larpVotes[row.trial_id];
-  b.legit = b.legit.filter(u => u !== row.user_id);
-  b.larp  = b.larp.filter(u => u !== row.user_id);
-  if (payload.eventType !== "DELETE" && payload.new && payload.new.vote) b[payload.new.vote].push(payload.new.user_id);
-  if (chatIsOpen()) paintChat();
-}
-
-const larpOpen = t => t && Date.now() < new Date(t.closes_at).getTime();
-function larpVerdict(t) {
-  const v = DB.larpVotes[t.id] || { legit: [], larp: [] };
-  const a = v.legit.length, b = v.larp.length;
-  if (!a && !b) return { word: "No verdict", cls: "v-none", line: "Nobody voted. The case is dropped." };
-  if (a === b)  return { word: "Hung jury", cls: "v-hung", line: `${a}–${b}. The peloton cannot decide.` };
-  return b > a ? { word: "LARP", cls: "v-larp", line: `Found guilty of larping, ${b}–${a}.` }
-               : { word: "LEGIT", cls: "v-legit", line: `Cleared. Legit, ${a}–${b}.` };
-}
-
-function larpAlertHTML(m) {
-  const t = DB.larpTrials[m.larp_trial];
-  const p = profileOf(m.user_id);
-  const canDelete = typeof IS_ADMIN !== "undefined" && IS_ADMIN;
-  const head = `<div class="larp-top">
-      <span class="larp-badge">🚨 LARP ALERT 🚨</span>
-      <span class="larp-time">${esc(chatTimeLabel(m.created_at))}</span>
-      ${canDelete ? `<button class="ann-del" data-msgdel="${esc(m.id)}" title="Delete this alert">delete</button>` : ""}
-    </div>`;
-  /* Not loaded yet, or a client that has never heard of trials: the row's own
-     text says everything, just without the buttons. */
-  if (!t) return `<div class="larpalert" data-msg="${esc(m.id)}">${head}<div class="larp-body">${esc(m.body)}</div></div>`;
-
-  const v = DB.larpVotes[t.id] || { legit: [], larp: [] };
-  const reporters = DB.larpTrialReports[t.id] || [];
-  const mineV = v.legit.indexOf(UID) > -1 ? "legit" : v.larp.indexOf(UID) > -1 ? "larp" : null;
-  const open = larpOpen(t);
-  const left = Math.max(0, new Date(t.closes_at).getTime() - Date.now());
-  const leftTxt = left >= 36e5 ? `${Math.floor(left / 36e5)}h ${pad(Math.floor(left / 6e4) % 60)}m` : `${Math.max(1, Math.ceil(left / 6e4))}m`;
-  const btn = (kind, icon, label) => {
-    const ids = v[kind];
-    return `<button type="button" class="larpvote ${kind}${mineV === kind ? " on" : ""}"
-      ${open ? `data-larpvote="${kind}" data-trial="${esc(t.id)}"` : "disabled"}
-      title="${esc(ids.length ? rxWho(ids, "voted " + label.toLowerCase()) : "Nobody yet")}"
-      ><span aria-hidden="true">${icon}</span> ${label}<b>${ids.length}</b></button>`;
-  };
-  const verdict = open ? null : larpVerdict(t);
-  return `<div class="larpalert${open ? "" : " closed"}" data-msg="${esc(m.id)}">
-    ${head}
-    <div class="larp-who">
-      ${avatarHTML(p, "")}
-      <div>
-        <div class="larp-line"><span class="larp-people" title="${esc(reporters.length ? rxWho(reporters, "reported them") : "")}" tabindex="0">${reporters.length || LARP_NEEDED} people</span>
-          think <b class="person" data-profile="${esc(p.id)}">${esc(p.display_name)}</b> is larping.</div>
-        <div class="larp-stats">
-          <span><b>${esc(hm(t.today_minutes / 60))}</b> studied today</span>
-          <span><b>${esc(f1(t.week_minutes / 60))}h</b> this week</span>
-          ${t.week_rank ? `<span><b>#${t.week_rank}</b> of ${t.week_of} this week</span>` : ""}
-        </div>
-      </div>
-    </div>
-    ${verdict
-      ? `<div class="larp-verdict ${verdict.cls}"><span>Verdict: <b>${esc(verdict.word)}</b></span><small>${esc(verdict.line)}</small></div>`
-      : `<div class="larp-ask">Legit or larp?</div>`}
-    <div class="larp-votes">
-      ${btn("legit", "✅", "Legit")}${btn("larp", "🤥", "Larp")}
-      <span class="larp-clock">${open ? `Voting closes in ${leftTxt}` : "Voting closed"}</span>
-    </div>
-  </div>`;
-}
-
-let larpVoting = false;
-async function voteLarp(trial, kind) {
-  if (larpVoting || !sb) return;
-  const v = DB.larpVotes[trial]; if (!v) return;
-  const before = { legit: v.legit.slice(), larp: v.larp.slice() };
-  const had = before.legit.indexOf(UID) > -1 ? "legit" : before.larp.indexOf(UID) > -1 ? "larp" : null;
-  v.legit = v.legit.filter(u => u !== UID); v.larp = v.larp.filter(u => u !== UID);
-  if (had !== kind) v[kind].push(UID);              /* the same button again takes it back */
-  paintChat();
-  larpVoting = true;
-  try {
-    const { data, error } = await sb.rpc("vote_larp", { trial: trial, vote: kind });
-    if (error || !data || !data.ok) {
-      DB.larpVotes[trial] = before; paintChat();
-      toast((data && data.why) || (error && error.message) || "Could not vote", 4200);
-    }
-  } finally { larpVoting = false; }
-}
-
-/* An open trial counts down in minutes, and flips to its verdict when it
-   closes, without anybody having to do anything. */
-setInterval(() => {
-  if (!chatIsOpen() || document.hidden) return;
-  if (Object.values(DB.larpTrials).some(t => Math.abs(new Date(t.closes_at).getTime() - Date.now()) < 3 * 36e5)) paintChat();
-}, 60000);
-
-/* ---------------------------------------------------------------------------
-   Are you sure. You only get one a day, so the button asks first — with a
-   game-show buzzer, because a plain confirm() box is no fun at all. The sound
-   is made on the spot with Web Audio, so there is no file to load, and it is
-   quiet: a phone in a library should not announce the accusation.
-   --------------------------------------------------------------------------- */
-function larpBuzzer() {
-  try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    const ctx = larpBuzzer.ctx || (larpBuzzer.ctx = new AC());
-    if (ctx.state === "suspended") ctx.resume();
-    const t0 = ctx.currentTime, gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02);
-    gain.gain.setValueAtTime(0.12, t0 + 0.42);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
-    gain.connect(ctx.destination);
-    /* two detuned saws a semitone apart: the "wrong answer" honk */
-    [110, 116.5].forEach(f => {
-      const o = ctx.createOscillator();
-      o.type = "sawtooth"; o.frequency.setValueAtTime(f, t0);
-      o.connect(gain); o.start(t0); o.stop(t0 + 0.56);
-    });
-  } catch (e) { /* no sound is fine */ }
-}
-
-function confirmLarp(uid) {
-  return new Promise(resolve => {
-    let ov = $("ov-larp");
-    if (!ov) {
-      ov = document.createElement("div");
-      ov.className = "ov"; ov.id = "ov-larp";
-      ov.innerHTML = `<div class="modal larpconfirm" role="alertdialog" aria-modal="true" aria-labelledby="lc-title" aria-describedby="lc-text">
-        <div class="lc-siren" aria-hidden="true">🚨</div>
-        <h2 id="lc-title">Are you sure you want to report LARP?</h2>
-        <p id="lc-text"></p>
-        <div class="lc-acts">
-          <button type="button" class="btn ghost" id="lc-no">Cancel</button>
-          <button type="button" class="larpbtn" id="lc-yes">🤥 Yes, report LARP</button>
-        </div>
-      </div>`;
-      document.body.appendChild(ov);
-    }
-    const name = profileOf(uid).display_name;
-    $("lc-text").innerHTML = `This is your <b>only</b> LARP report today.<br>It goes on <b>${esc(name)}</b>, and they will be able to see it was you.`;
-    const done = ok => {
-      ov.classList.remove("on");
-      document.removeEventListener("keydown", onKey, true);
-      ov.onclick = null; $("lc-yes").onclick = null; $("lc-no").onclick = null;
-      resolve(ok);
-    };
-    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
-    ov.onclick = e => { if (e.target === ov) done(false); };
-    $("lc-yes").onclick = () => done(true);
-    $("lc-no").onclick = () => done(false);
-    document.addEventListener("keydown", onKey, true);
-    ov.classList.add("on");
-    const m = ov.querySelector(".larpconfirm");
-    m.classList.remove("shake"); void m.offsetWidth; m.classList.add("shake");
-    larpBuzzer();
-    setTimeout(() => $("lc-no").focus(), 30);   /* the safe answer is the default */
-  });
-}
-
-/* One listener for every copy of the button and every vote. */
-document.addEventListener("click", e => {
-  const locked = e.target.closest && e.target.closest("[data-larplocked]");
-  if (locked) { e.stopPropagation(); toast(LARP_LOCKED_MSG, 3200); return; }
-  const b = e.target.closest && e.target.closest("[data-larp]");
-  if (b && !b.disabled) {
-    e.stopPropagation();
-    const uid = b.dataset.larp;
-    confirmLarp(uid).then(ok => { if (ok) reportLarp(uid); });
-    return;
-  }
-  const v = e.target.closest && e.target.closest("[data-larpvote]");
-  if (v && !v.disabled) { e.stopPropagation(); voteLarp(v.dataset.trial, v.dataset.larpvote); }
-}, true);
 
 /* ---------------------------------------------------------------------------
    The live panel on somebody's profile.
@@ -4540,7 +4194,6 @@ async function openProfile(id) {
 
   $("pf-body").innerHTML = `
     ${profileLiveHTML(id)}
-    ${larpSlot(id, "pf")}
     <div class="grid g4 mb16">
       <div class="kpi"><div class="v">${f1(totalH)}</div><div class="k">Hours logged, all time</div>
         <div class="d">${all.length} session${all.length === 1 ? "" : "s"}</div></div>
@@ -5831,11 +5484,10 @@ function onMsgReactionChange(payload) {
 
 function msgHTML(m, prev) {
   if (m.announcement) return annHTML(m);
-  if (m.larp_trial) return larpAlertHTML(m);
   const p = profileOf(m.user_id);
   const t = chatTier(m.user_id);
   /* consecutive messages from one person within five minutes share a header */
-  const cont = prev && !prev.announcement && !prev.larp_trial && prev.user_id === m.user_id &&
+  const cont = prev && !prev.announcement && prev.user_id === m.user_id &&
                Math.abs(new Date(m.created_at) - new Date(prev.created_at)) < 5 * 60e3;
   const canDelete = m.user_id === UID || (typeof IS_ADMIN !== "undefined" && IS_ADMIN);
   return `<div class="msg${cont ? " cont" : ""}${m.user_id === UID ? " mine" : ""}" data-msg="${esc(m.id)}">
@@ -5952,6 +5604,12 @@ function paintChatDot() {
 }
 const chatIsOpen = () => $("p-chat") && $("p-chat").classList.contains("on");
 
+/* Larp reports are switched off. Their alerts are still rows in messages,
+   with the trials and votes behind them, and nothing has been deleted; the
+   room simply does not show them. The branch larp-reports puts the feature,
+   and these, back. */
+const shownInChat = m => !m.larp_trial;
+
 /* The newest page, asked for once — when you first open the tab. */
 async function loadChat() {
   if (CHAT.loaded || CHAT.busy || !sb || !UID) return;
@@ -5960,15 +5618,16 @@ async function loadChat() {
     const { data, error } = await sb.from("messages").select("*")
       .order("created_at", { ascending: false }).limit(CHAT_PAGE);
     if (error) return;
-    CHAT.rows = (data || []).slice().reverse();
-    CHAT.oldest = CHAT.rows.length ? CHAT.rows[0].created_at : null;
+    const raw = (data || []).slice().reverse();
+    CHAT.rows = raw.filter(shownInChat);
+    /* paged on what the database sent, hidden rows included, so hiding one
+       never makes the room think it has reached the start */
+    CHAT.oldest = raw.length ? raw[0].created_at : null;
     CHAT.loaded = true;
     paintChat();
     /* After the rows, because it asks by id for exactly the ones just read. */
     try { await loadChatEmoji(); await loadChatReactions(); paintChat(); }
     catch (e) { /* the room reads fine without them */ }
-    try { await loadLarpTrials(CHAT.rows.map(m => m.larp_trial)); paintChat(); }
-    catch (e) { /* an alert without its buttons still reads */ }
     chatScrollBottom(true);
   } finally { CHAT.busy = false; }
 }
@@ -5989,10 +5648,10 @@ async function loadOlderChat() {
     const log = $("chatlog");
     const was = log ? log.scrollHeight : 0;
     if (!older.length) { if (btn) { btn.hidden = true; } return; }
-    CHAT.rows = older.concat(CHAT.rows);
-    CHAT.oldest = CHAT.rows[0].created_at;
+    CHAT.rows = older.filter(shownInChat).concat(CHAT.rows);
+    CHAT.oldest = older[0].created_at;
     paintChat();
-    try { await loadChatReactions(); await loadLarpTrials(older.map(m => m.larp_trial)); paintChat(); } catch (e) { /* not fatal */ }
+    try { await loadChatReactions(); paintChat(); } catch (e) { /* not fatal */ }
     if (log) log.scrollTop = log.scrollHeight - was;   /* stay where you were reading */
     if (btn && older.length < CHAT_PAGE) btn.hidden = true;
   } finally {
@@ -6004,17 +5663,12 @@ async function loadOlderChat() {
 /* Arriving over the socket, already carrying the row. */
 function onChatInsert(payload) {
   const m = payload && payload.new;
-  if (!m || !m.id) return;
+  if (!m || !m.id || !shownInChat(m)) return;
   if (CHAT.rows.some(x => x.id === m.id)) return;      /* our own echo */
   /* The socket is already carrying every message for the unread dot, so being
      mentioned costs no extra subscription — just a look at the list. */
   if (m.user_id !== UID && Array.isArray(m.mentions) && m.mentions.indexOf(UID) > -1) noteMention(m);
   if (m.image_path) signImages([m.image_path]).then(() => { if (chatIsOpen()) paintChat(); });
-  /* An alert: fetch its trial so the buttons draw, and tell the accused. */
-  if (m.larp_trial) {
-    loadLarpTrials([m.larp_trial]).then(() => { if (chatIsOpen()) paintChat(); repaintLarp(); });
-    if (m.user_id === UID) toast("🚨 You are on trial for larping. Check the chat.", 6000);
-  }
   CHAT.rows.push(m);
   if (CHAT.rows.length > 300) CHAT.rows.splice(0, CHAT.rows.length - 300);
   if (chatIsOpen()) {
