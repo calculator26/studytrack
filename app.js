@@ -2480,12 +2480,14 @@ function timerReactionsHTML(t, big) {
    is never said in chat.
 
    The button turns up in three places: on a profile; and under a live study
-   or a session of today's once ten people have called it sus. Never on
-   anybody under four hours today, anywhere.
+   or a session of today's once ten people have called it sus. Under four
+   hours today it is not under anything, and on the profile it is greyed out
+   with the reason on hover and on a press.
    ========================================================================= */
 const LARP_NEEDED = 5;            /* reports in a day to call a trial */
 const LARP_SUS_NEEDED = 10;       /* sus on a live study or session to put the button under it */
 const LARP_MIN_HOURS = 4;
+const LARP_LOCKED_MSG = `${LARP_MIN_HOURS} hours of study needed to report LARP`;
 
 function absorbLarpReports(res) {
   if (!res || res.error) return;          /* not migrated yet: nobody has reported */
@@ -2526,9 +2528,20 @@ function larpBoxHTML(uid, ctx) {
 
   /* Your own profile gets the count and nothing to press. */
   if (uid === UID) return ctx === "pf" && n ? `<div class="larpbox mine">${status}</div>` : "";
-  /* Under four hours today there is nothing to accuse anybody of, so there is
-     no button at all — just the count on a profile, if anybody got one in. */
-  if (hoursFor(uid, todayISO()) < LARP_MIN_HOURS) return ctx === "pf" && n ? `<div class="larpbox mine">${status}</div>` : "";
+  /* Under four hours today there is nothing to accuse anybody of. Under a live
+     study or a session there is no button at all. On the profile it stays in
+     its usual place, greyed out and quiet, so people can see the rule rather
+     than wonder where the button went. Not a real disabled button: those show
+     no tooltip and swallow the click in some browsers, and both are how the
+     rule gets explained. */
+  if (hoursFor(uid, todayISO()) < LARP_MIN_HOURS) {
+    if (ctx !== "pf") return "";
+    return `<div class="larpbox locked">
+      <button type="button" class="larpbtn" aria-disabled="true" data-larplocked="1"
+        title="${esc(LARP_LOCKED_MSG)}">🤥 Report LARP</button>
+      <div class="larpmeta"><span class="larpwhy" title="${esc(LARP_LOCKED_MSG)}">${LARP_MIN_HOURS} hours needed</span>${n ? status : ""}</div>
+    </div>`;
+  }
 
   const why = larpBlockedBecause(uid);
   const h = hoursFor(uid, todayISO());
@@ -2765,6 +2778,8 @@ function confirmLarp(uid) {
 
 /* One listener for every copy of the button and every vote. */
 document.addEventListener("click", e => {
+  const locked = e.target.closest && e.target.closest("[data-larplocked]");
+  if (locked) { e.stopPropagation(); toast(LARP_LOCKED_MSG, 3200); return; }
   const b = e.target.closest && e.target.closest("[data-larp]");
   if (b && !b.disabled) {
     e.stopPropagation();

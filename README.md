@@ -400,7 +400,9 @@ banter: nothing it does touches anybody's hours or flags them anywhere real.
 
 - **Everybody gets one report a day.** Open somebody's profile and press **🤥 Report LARP**.
   The same button turns up under a live study, or one of today's sessions, once ten people
-  have called it 🤨 sus. It never appears on anybody under four hours today.
+  have called it 🤨 sus. Under a live study or a session it never appears for anybody under
+  four hours today; on their profile it stays in its usual place, greyed out, and hovering or
+  pressing it says *4 hours of study needed to report LARP*.
 - **Five reports on one person in a day** and a **LARP ALERT** drops into chat with their
   numbers (studied today, this week, where they sit on the board), and the room votes
   **Legit** or **Larp**. Voting closes after two hours and the verdict stays on the card.
