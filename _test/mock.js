@@ -116,8 +116,13 @@
     mk({ day: add(today(), -1), minutes: 480, note: "marathon — should flag as a long session" });
     mk({ day: add(today(), 4),  minutes: 60,  note: "dated next week — should flag as future" });
     mk({ day: add(today(), -900), minutes: 90, note: "long before joining — should flag" });
-    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "twin A" });
-    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "twin B — exact duplicate" });
+    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "twin — exact duplicate" });
+    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "twin — exact duplicate " });
+    /* same everything but the description: two real blocks, must NOT flag */
+    mk({ day: add(today(), -2), minutes: 120, subject_id: B.subject_id, area_id: B.id, note: "evening block, not a copy" });
+    /* exactly five hours is a long session; a minute under is not */
+    mk({ day: add(today(), -5), minutes: 300, note: "five hours on the dot — should flag as long" });
+    mk({ day: add(today(), -6), minutes: 299, note: "a minute under five hours — must not flag" });
     for (let i = 0; i < 6; i++) mk({ day: add(today(), -3), minutes: 180, note: "impossible day filler " + i });
 
     T.live_timers.push({ user_id: pri, label: "Left running overnight", subject_id: null, area_id: null,

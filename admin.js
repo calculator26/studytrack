@@ -120,7 +120,7 @@ async function admLoadAudit() {
    console says so rather than accusing anyone. Nothing is auto-removed. */
 const ADM_RULES = {
   marathon:  { level:"warn",     icon:"◷", label:"Long session",
-               why:"One unbroken block over 6 hours." },
+               why:"One unbroken block of 5 hours or more." },
   impossible:{ level:"critical", icon:"▲", label:"Impossible day",
                why:"More than 16 hours logged across a single day." },
   future:    { level:"critical", icon:"▲", label:"Future date",
@@ -128,7 +128,7 @@ const ADM_RULES = {
   prejoin:   { level:"serious",  icon:"◆", label:"Before joining",
                why:"Dated before this member's account existed." },
   duplicate: { level:"serious",  icon:"❐", label:"Exact duplicate",
-               why:"Same member, day, subject and length as another entry." },
+               why:"Same member, day, subject, length and description as another entry." },
   stale:     { level:"warn",     icon:"◷", label:"Timer left running",
                why:"A live timer has been going for more than 8 hours." }
 };
@@ -137,13 +137,13 @@ function admFlags() {
   const out = [];
   const today = todayISO();
   const byDay = {};       /* uid|day -> minutes */
-  const seen  = {};       /* uid|day|subject|minutes -> first id */
+  const seen  = {};       /* uid|day|subject|area|minutes|note -> first id */
 
   admAll().forEach(s => {
     const p = profileOf(s.user_id);
     const push = (rule, detail) => out.push({ rule, detail, session:s, user_id:s.user_id });
 
-    if (s.minutes > 360) push("marathon", f1(s.minutes / 60) + " hours in one block");
+    if (s.minutes >= 300) push("marathon", f1(s.minutes / 60) + " hours in one block");
     if (s.day > today)   push("future", "dated " + fmtD(s.day));
 
     const joined = admJoined(p);
@@ -152,7 +152,11 @@ function admFlags() {
     const dk = s.user_id + "|" + s.day;
     byDay[dk] = (byDay[dk] || 0) + s.minutes;
 
-    const sk = [s.user_id, s.day, s.subject_id || "-", s.area_id || "-", s.minutes].join("|");
+    /* The description has to match too, or two honest two-hour blocks of the
+       same subject on one day — a morning and an evening — get called copies.
+       Compared after trimming, and a blank note matches only a blank note. */
+    const sk = JSON.stringify([s.user_id, s.day, s.subject_id || "-", s.area_id || "-", s.minutes,
+                               (s.note || "").trim()]);
     if (seen[sk]) push("duplicate", "matches another entry on " + fmtD(s.day));
     else seen[sk] = s.id;
   });

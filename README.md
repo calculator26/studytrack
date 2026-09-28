@@ -338,9 +338,9 @@ Five sections:
   filterable by member and date. Edit opens the same sheet members use on their own sessions,
   so a correction looks exactly like one they would have made. Tick several and delete them
   together.
-- **Integrity** — the anti-abuse part. It flags single blocks over six hours, days totalling
+- **Integrity** — the anti-abuse part. It flags single blocks of five hours or more, days totalling
   more than sixteen, dates in the future, dates from before the member joined, exact duplicate
-  entries, and timers left running overnight. Every flag is a **signal, not a verdict** — a
+  entries (same day, subject, length and description), and timers left running overnight. Every flag is a **signal, not a verdict** — a
   seven hour Saturday before trials is real, and the console says so rather than accusing
   anyone. Nothing is ever removed automatically.
 - **Audit log** — every removal and profile change made from the console, with a snapshot of
