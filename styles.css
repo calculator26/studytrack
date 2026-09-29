@@ -1231,3 +1231,7 @@ table.lh-t tr:last-child td{border-bottom:0}
 .imgview .x{position:absolute;top:16px;right:20px;font-size:30px;line-height:1;color:#fff;
   background:none;border:0;cursor:pointer}
 
+
+/* kudos everyone, in the live card's header */
+.kudosall{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+.kudosall:disabled{opacity:.6;cursor:default}

@@ -371,6 +371,18 @@
             T.session_reactions.push(...made);
             return Promise.resolve({ data: made.map(r => ({ user_id: r.user_id, kind: r.kind })), error: null });
           }
+          /* Mirrors react_timer(): one reaction per person per run of a timer,
+             kudos or sus, and a null kind takes it back. */
+          if (name === "react_timer") {
+            const owner = args && args.owner_id, kind = args && args.kind;
+            const t = T.live_timers.find(r => r.user_id === owner);
+            if (!t) return Promise.resolve({ data: { ok: false, why: "They are not on the clock" }, error: null });
+            if (owner === ME) return Promise.resolve({ data: { ok: false, why: "Not your own timer" }, error: null });
+            T.timer_reactions = T.timer_reactions.filter(r => !(r.owner_id === owner && r.user_id === ME));
+            if (kind) T.timer_reactions.push({ owner_id: owner, user_id: ME, kind, for_started_at: t.started_at,
+              created_at: new Date().toISOString() });
+            return Promise.resolve({ data: { ok: true }, error: null });
+          }
           if (name === "reactions_for") {
             const ids = (args && args.ids) || [], by = {};
             (T.session_reactions || []).filter(r => ids.includes(r.session_id)).forEach(r => {

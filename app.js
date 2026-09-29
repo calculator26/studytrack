@@ -1986,6 +1986,8 @@ function paintLive(force) {
 
   paintProfileLive();
 
+  paintKudosAll(all);
+
   const sub = $("live-sub");
   if (sub) {
     const running = all.filter(t => t.running).length;
@@ -2543,6 +2545,63 @@ async function sendTimerReaction(owner, kind) {
         : (error && error.message) || "Could not react"), 4200);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Kudos everyone.
+
+   One tap gives kudos to everybody on the strip you have not reacted to yet.
+   Only ever adds: anyone you already gave kudos or called sus is left exactly
+   as you left them, so it cannot quietly take back a sus or undo a kudos.
+   Each one goes through react_timer() like a single press, so the rules and
+   the notice the other person gets are the same as pressing their button.
+   --------------------------------------------------------------------------- */
+function kudosAllTargets(list) {
+  return (list || []).filter(t => t.user_id !== UID).map(t => t.user_id).filter(id => {
+    const r = timerRxOf(id);
+    return (r.kudos || []).indexOf(UID) < 0 && (r.sus || []).indexOf(UID) < 0;
+  });
+}
+let kudosAllOn = [];                          /* who is on the strip right now */
+function paintKudosAll(all) {
+  const b = $("kudos-all");
+  if (!b) return;
+  kudosAllOn = (all || []).filter(t => t.user_id !== UID);
+  const left = kudosAllTargets(kudosAllOn).length;
+  b.hidden = !kudosAllOn.length || hidingOthers();
+  b.disabled = !left || kudosAllBusy;
+  b.textContent = left ? `👏 Kudos everyone · ${left}` : "👏 Kudos given to everyone";
+  b.title = left ? `Give kudos to the ${left} ${left === 1 ? "person" : "people"} studying who you have not reacted to yet`
+                 : "You have reacted to everybody on the clock";
+}
+let kudosAllBusy = false;
+async function kudosAll() {
+  if (kudosAllBusy || !sb) return;
+  const ids = kudosAllTargets(kudosAllOn);
+  if (!ids.length) return;
+  kudosAllBusy = true;
+  const before = {};
+  ids.forEach(id => {
+    const r = timerRxOf(id);
+    before[id] = r;
+    DB.timerReactions[id] = { kudos: (r.kudos || []).concat(UID), sus: (r.sus || []).slice() };
+  });
+  paintLive(true);
+  let ok = 0;
+  try {
+    const results = await Promise.all(ids.map(id =>
+      Promise.resolve(sb.rpc("react_timer", { owner_id: id, kind: "kudos" })).then(
+        res => ({ id, fine: !res.error && !(res.data && res.data.ok === false) }),
+        () => ({ id, fine: false }))));
+    results.forEach(r => { if (r.fine) ok++; else DB.timerReactions[r.id] = before[r.id]; });
+  } finally {
+    kudosAllBusy = false;
+    paintLive(true);
+    repaintProfileLive(openProfileId);
+  }
+  toast(ok === ids.length ? `👏 Kudos to ${ok} ${ok === 1 ? "person" : "people"} on the clock`
+                          : `👏 Kudos to ${ok} of ${ids.length}. The rest did not go through, try again`, 3600);
+}
+if ($("kudos-all")) $("kudos-all").addEventListener("click", kudosAll);
 
 /* Asked for by id, for exactly the rows that can be drawn right now. */
 async function loadReactions() {
