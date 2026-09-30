@@ -2233,7 +2233,7 @@ function reactionsHTML(s) {
       title="${esc(title)}"><span aria-hidden="true">${k.icon}</span><span class="rxn">${
         ids.length || ""}</span><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("");
-  return bits ? `<div class="rx">${bits}</div>` : "";
+  return bits ? `<div class="rx">${bits}${fansHTML(r, "s:" + s.id, own)}</div>` : "";
 }
 
 /* One press. The row is moved locally first so the button answers instantly,
@@ -2259,6 +2259,117 @@ async function sendReaction(id, kind) {
     toast(why, 4200);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   WHO REACTED
+
+   Names used to live in a tooltip, which a phone does not have and nobody
+   thinks to hover for. Now every reaction row carries a line of faces and
+   names you can see without doing anything — "Sam, Priya and 4 others gave
+   kudos" — and tapping it opens the whole list. People like to see their fans.
+
+   The line is inside the .rx row, so every path that already repaints a row
+   when a reaction lands repaints this with it.
+   --------------------------------------------------------------------------- */
+const nameOf = id => (profileOf(id) || {}).display_name || "someone";
+
+function facesHTML(ids, max) {
+  const shown = ids.slice(0, max);
+  return shown.map(id => avatarHTML(profileOf(id), "sm")).join("") +
+    (ids.length > max ? `<span class="fmore-n">+${ids.length - max}</span>` : "");
+}
+
+/* "Sam", "Sam and Priya", "Sam, Priya and 4 others" — you come first as "You". */
+function namesLine(ids) {
+  const ordered = ids.indexOf(UID) > -1 ? [UID].concat(ids.filter(x => x !== UID)) : ids.slice();
+  const names = ordered.map(id => id === UID ? "You" : nameOf(id));
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return names[0] + " and " + names[1];
+  const rest = names.length - 2;
+  return names[0] + ", " + names[1] + " and " + rest + " other" + (rest === 1 ? "" : "s");
+}
+
+function fansHTML(r, key, own, compact) {
+  const k = r.kudos || [], su = r.sus || [];
+  if (!k.length && !su.length) return "";
+  const faces = k.concat(su.filter(x => k.indexOf(x) < 0));
+  let text;
+  if (k.length) {
+    text = `<b>${esc(namesLine(k))}</b> ${own ? "gave you kudos" : "gave kudos"}`;
+    if (su.length) text += ` <span class="fsus">· 🤨 ${su.length}</span>`;
+  } else {
+    text = `<b>${esc(namesLine(su))}</b> called it sus`;
+  }
+  return `<button type="button" class="fans${compact ? " compact" : ""}" data-fans="${esc(key)}"
+      aria-label="See everyone who reacted">
+    <span class="fstack">${facesHTML(faces, compact ? 4 : 5)}</span>
+    <span class="ftext">${text}</span>
+    <span class="fsee">See all</span>
+  </button>`;
+}
+
+/* The sheet: everybody, with their picture, kudos first. */
+function fansFor(key) {
+  const [type, id] = [key.slice(0, 1), key.slice(2)];
+  if (type === "t") {
+    const t = (DB.timers || []).find(x => x.user_id === id);
+    return { r: timerRxOf(id), owner: id,
+             what: t ? splitLabel(t.label).subject + " · on the clock now" : "a live session" };
+  }
+  const sn = DB.sessions.find(x => x.id === id) || DB.feed.find(x => x.id === id)
+          || GUEST.sessions.find(x => x.id === id);
+  return { r: rxOf(id), owner: sn ? sn.user_id : null,
+           what: sn ? labelOf(sn) + " · " + fmtD(sn.day) + " · " + f1(sn.minutes / 60) + " h" : "a session" };
+}
+
+function openFans(key) {
+  const f = fansFor(key);
+  const k = f.r.kudos || [], su = f.r.sus || [];
+  let ov = $("ov-fans");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.className = "ov"; ov.id = "ov-fans";
+    document.body.appendChild(ov);
+    ov.addEventListener("click", e => {
+      if (e.target === ov || e.target.closest("[data-fansclose]")) { ov.classList.remove("on"); return; }
+      const row = e.target.closest("[data-fanprofile]");
+      if (row) { ov.classList.remove("on"); openProfile(row.dataset.fanprofile); }
+    });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && ov.classList.contains("on")) { e.stopPropagation(); ov.classList.remove("on"); }
+    }, true);
+  }
+  const whose = f.owner === UID ? "your" : esc(nameOf(f.owner)) + "'s";
+  const row = (id, kind) => `<button type="button" class="fanrow" data-fanprofile="${esc(id)}">
+      ${avatarHTML(profileOf(id), "")}
+      <span class="fn">${esc(nameOf(id))}${id === UID ? ` <span class="pilltag">you</span>` : ""}</span>
+      <span class="fk">${kind === "kudos" ? "👏" : "🤨"}</span>
+    </button>`;
+  const section = (ids, kind, title) => ids.length
+    ? `<h3 class="fanh">${title} <span>${ids.length}</span></h3><div class="fanlist">${ids.map(id => row(id, kind)).join("")}</div>` : "";
+  ov.innerHTML = `<div class="modal fansheet" role="dialog" aria-modal="true" aria-labelledby="fans-title">
+    <header>
+      <div><h2 id="fans-title">${k.length ? `👏 ${k.length} kudos` : ""}${k.length && su.length ? " · " : ""}${su.length ? `🤨 ${su.length} sus` : ""}</h2>
+        <div class="sub">On ${whose} ${esc(f.what)}</div></div>
+      <button class="x" data-fansclose aria-label="Close" style="font-size:22px">&times;</button>
+    </header>
+    <div class="body">
+      ${section(k, "kudos", "Gave kudos")}
+      ${section(su, "sus", "Called it sus")}
+      ${!k.length && !su.length ? `<div class="empty">Nobody has reacted yet.</div>` : ""}
+    </div>
+  </div>`;
+  ov.classList.add("on");
+}
+
+/* Opens from any row, anywhere. Capture phase, so a tap on a live card's
+   faces opens the list rather than the card's own profile. */
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-fans]");
+  if (!b) return;
+  e.stopPropagation(); e.preventDefault();
+  openFans(b.dataset.fans);
+}, true);
 
 /* The same session can be on screen more than once — your own day and the feed
    both draw it — so every copy is redrawn, not just the one that was pressed. */
@@ -2349,38 +2460,47 @@ function checkReactions() {
 
 function clearReactNotes() { RXNEW = []; paintReactBar(); }
 
+let RBOPEN = false;             /* the notice's full list is showing */
 function paintReactBar() {
   const bar = $("reactbar");
   if (!bar) return;
   /* A poke or a mention is somebody asking for you. This is somebody
      commenting on work already done, so it waits its turn. */
   if (!RXNEW.length || POKES.length || MENTIONS.length) {
-    bar.className = "hide"; bar.innerHTML = ""; return;
+    bar.className = "hide"; bar.innerHTML = ""; RBOPEN = false; return;
   }
-  const kudos = RXNEW.filter(r => r.kind === "kudos");
-  const sus   = RXNEW.filter(r => r.kind === "sus");
-  const who = list => [...new Set(list.map(r => (profileOf(r.by) || {}).display_name || "someone"))];
-  const phrase = (list, verb) => {
-    const names = who(list);
-    const head = names.slice(0, 3).join(", ");
-    const more = names.length - Math.min(3, names.length);
-    return head + (more > 0 ? ` and ${more} more` : "") + " " + verb;
-  };
+  const uniq = list => [...new Set(list.map(r => r.by))];
+  const kudos = uniq(RXNEW.filter(r => r.kind === "kudos"));
+  const sus   = uniq(RXNEW.filter(r => r.kind === "sus"));
+  const faces = kudos.concat(sus.filter(x => kudos.indexOf(x) < 0));
   const parts = [];
-  if (kudos.length) parts.push(phrase(kudos, kudos.length === 1 ? "gave you kudos" : "gave you kudos"));
-  if (sus.length)   parts.push(phrase(sus, "called your study sus"));
+  if (kudos.length) parts.push(namesLine(kudos) + " gave you kudos");
+  if (sus.length)   parts.push(namesLine(sus) + " called your study sus");
   const what = [...new Set(RXNEW.map(r => r.what).filter(Boolean))];
+  const total = RXNEW.length;
 
-  bar.className = "";
+  /* newest first, one row per reaction, with what it was on */
+  const rows = RXNEW.slice().reverse().map(r => `
+    <button type="button" class="rbrow" data-rbprofile="${esc(r.by)}">
+      ${avatarHTML(profileOf(r.by), "sm")}
+      <span class="rbn"><b>${esc(nameOf(r.by))}</b> ${r.kind === "kudos" ? "gave you kudos" : "called it sus"}</span>
+      <span class="rbw">${r.kind === "kudos" ? "👏" : "🤨"} ${esc(r.what || "your study")}</span>
+    </button>`).join("");
+
+  bar.className = RBOPEN ? "open" : "";
   bar.innerHTML =
-    `<span class="pb-icon" aria-hidden="true">${sus.length && !kudos.length ? "\ud83e\udd28" : "\ud83d\udc4f"}</span>
+    `<span class="rb-stack" aria-hidden="true">${facesHTML(faces, 5)}</span>
      <div class="pb-text">
-       <strong>${esc(parts.join(" \u00b7 "))}</strong>
-       <span>${esc(what.slice(0, 2).join(" \u00b7 ") || "on your study")}</span>
+       <strong>${esc(parts.join(" · "))}</strong>
+       <span>${esc(what.slice(0, 2).join(" · ") || "on your study")}${what.length > 2 ? ` and ${what.length - 2} more` : ""}</span>
      </div>
-     <button class="x" id="rb-hide" title="Dismiss" aria-label="Dismiss">\u00d7</button>`;
-  const x = $("rb-hide");
-  if (x) x.addEventListener("click", clearReactNotes);
+     <button class="btn ghost sm" id="rb-more" aria-expanded="${RBOPEN}">${RBOPEN ? "Hide" : total > 1 ? `See all ${total}` : "See who"}</button>
+     <button class="x" id="rb-hide" title="Dismiss" aria-label="Dismiss">×</button>
+     <div class="rb-list"${RBOPEN ? "" : " hidden"}>${rows}</div>`;
+  $("rb-hide").addEventListener("click", clearReactNotes);
+  $("rb-more").addEventListener("click", () => { RBOPEN = !RBOPEN; paintReactBar(); });
+  bar.querySelectorAll("[data-rbprofile]").forEach(b =>
+    b.addEventListener("click", () => openProfile(b.dataset.rbprofile)));
 }
 
 /* ---------------------------------------------------------------------------
@@ -2464,7 +2584,7 @@ function timerReactionsHTML(t, big) {
       ><span aria-hidden="true">${k.icon}</span><span class="rxn">${ids.length || ""}</span
       ><span class="rxl">${esc(k.label)}</span></button>`;
   }).join("");
-  return bits ? `<div class="rx lrx${big ? " big" : ""}">${bits}</div>` : "";
+  return bits ? `<div class="rx lrx${big ? " big" : ""}">${bits}${fansHTML(r, "t:" + t.user_id, own, !big)}</div>` : "";
 }
 
 /* ---------------------------------------------------------------------------

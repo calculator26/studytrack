@@ -1235,3 +1235,68 @@ table.lh-t tr:last-child td{border-bottom:0}
 /* kudos everyone, in the live card's header */
 .kudosall{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
 .kudosall:disabled{opacity:.6;cursor:default}
+
+/* =========================================================================
+   WHO REACTED — faces and names under every reaction row, the full list in a
+   sheet, and a notice that shows who, not just how many.
+   ========================================================================= */
+.fans{appearance:none;font:inherit;cursor:pointer;flex-basis:100%;min-width:0;
+  display:flex;align-items:center;gap:8px;margin-top:2px;padding:4px 8px 4px 4px;
+  border:0;border-radius:999px;background:transparent;text-align:left;color:var(--ink-mid);
+  transition:background var(--fast) var(--ease)}
+.fans:hover{background:var(--surface-3)}
+.fans:focus-visible{outline:2px solid var(--navy);outline-offset:1px}
+.fstack,.rb-stack{display:inline-flex;align-items:center;flex:none}
+.fstack .av,.rb-stack .av{margin-left:-7px;box-shadow:0 0 0 2px var(--surface);border-width:0}
+.fstack .av:first-child,.rb-stack .av:first-child{margin-left:0}
+.fmore-n{margin-left:4px;font-size:11px;font-weight:700;color:var(--ink-mid);font-variant-numeric:tabular-nums}
+.ftext{flex:1;min-width:0;font-size:12px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ftext b{color:var(--ink);font-weight:650}
+.fsus{color:var(--ink-soft);font-weight:600}
+.fsee{flex:none;font-size:11.5px;font-weight:700;color:var(--navy);white-space:nowrap}
+.fans.compact .ftext{font-size:11.5px}
+@media (max-width:520px){ .fans .fsee{display:none} }
+
+.fansheet{max-width:440px}
+.fansheet .body{padding:10px 14px 18px}
+.fanh{font-size:11.5px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-mid);
+  margin:12px 8px 6px;display:flex;gap:8px;align-items:baseline}
+.fanh span{color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.fanlist{display:flex;flex-direction:column}
+.fanrow{appearance:none;font:inherit;cursor:pointer;display:flex;align-items:center;gap:12px;width:100%;
+  padding:8px;border:0;border-radius:12px;background:none;text-align:left;color:var(--ink)}
+.fanrow:hover{background:var(--surface-2)}
+.fanrow:focus-visible{outline:2px solid var(--navy);outline-offset:-2px}
+.fanrow .fn{flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fanrow .fk{font-size:16px;flex:none}
+
+/* the notice: faces first, then who and what, with the whole list a tap away */
+#reactbar{flex-wrap:wrap}
+#reactbar .rb-stack .av{box-shadow:0 0 0 2px var(--good-wash)}
+#reactbar .rb-stack .av.sm{width:30px;height:30px;font-size:11px}
+#reactbar #rb-more{flex:none}
+.rb-list{flex-basis:100%;display:flex;flex-direction:column;gap:2px;margin-top:4px;
+  padding-top:8px;border-top:1px solid #BEE3D3;max-height:320px;overflow-y:auto}
+.rbrow{appearance:none;font:inherit;cursor:pointer;display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;gap:10px;width:100%;padding:6px 6px;border:0;border-radius:10px;background:none;
+  text-align:left;color:var(--ink-mid);font-size:12.5px}
+.rbrow:hover{background:rgba(255,255,255,.6)}
+.rbrow .rbn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rbrow .rbn b{color:var(--ink);font-weight:650}
+.rbrow .rbw{font-size:12px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw}
+@media (max-width:640px){
+  #reactbar .pb-text{flex:1 1 60%}
+  .rbrow{grid-template-columns:auto minmax(0,1fr)}
+  .rbrow .rbw{grid-column:2;max-width:none}
+}
+/* names wrap to a second line rather than being cut off; three is too many */
+.ftext{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+#reactbar{position:relative}
+@media (max-width:640px){
+  /* the × sits in the corner, where it is expected, instead of on a line of its own */
+  #reactbar{padding-right:40px}
+  #reactbar #rb-hide{position:absolute;top:8px;right:8px}
+  #reactbar .rb-stack{flex-basis:100%}
+  #reactbar .pb-text{flex:1 1 100%}
+  #reactbar #rb-more{margin-left:0}
+}
