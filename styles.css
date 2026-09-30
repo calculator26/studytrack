@@ -1300,3 +1300,6 @@ table.lh-t tr:last-child td{border-bottom:0}
   #reactbar .pb-text{flex:1 1 100%}
   #reactbar #rb-more{margin-left:0}
 }
+/* on a live card: faces, then the count, pushed to the right edge */
+.fans.compact{justify-content:space-between;padding-right:10px}
+.fans.compact .fsee{display:inline}

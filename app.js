@@ -2300,9 +2300,17 @@ function fansHTML(r, key, own, compact) {
   } else {
     text = `<b>${esc(namesLine(su))}</b> called it sus`;
   }
-  return `<button type="button" class="fans${compact ? " compact" : ""}" data-fans="${esc(key)}"
+  /* A live card is too narrow for names beside the faces: squeezed in there
+     they came out as "Y… K…". So a card shows three faces and the total, which
+     fits the narrowest card on a phone, and the names are one tap away. */
+  if (compact) return `<button type="button" class="fans compact" data-fans="${esc(key)}"
+      aria-label="See everyone who reacted" title="${esc(namesLine(faces))}">
+    <span class="fstack">${faces.slice(0, 3).map(id => avatarHTML(profileOf(id), "sm")).join("")}</span>
+    <span class="fsee">See all ${faces.length}</span>
+  </button>`;
+  return `<button type="button" class="fans" data-fans="${esc(key)}"
       aria-label="See everyone who reacted">
-    <span class="fstack">${facesHTML(faces, compact ? 4 : 5)}</span>
+    <span class="fstack">${facesHTML(faces, 5)}</span>
     <span class="ftext">${text}</span>
     <span class="fsee">See all</span>
   </button>`;
