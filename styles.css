@@ -565,7 +565,8 @@ h3.sec{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin:0 0 10px;
 /* =========================================================================
    TOOLTIP / TOAST / SPINNER
    ========================================================================= */
-.tt{position:fixed;pointer-events:none;z-index:99;background:var(--ink);color:#fff;
+/* above every overlay, including the console's (admin.css lifts .ov to 260) */
+.tt{position:fixed;pointer-events:none;z-index:300;background:var(--ink);color:#fff;
   padding:10px 13px;border-radius:var(--r-xs);font-size:12px;line-height:1.45;opacity:0;
   transition:opacity .1s;max-width:280px;box-shadow:var(--sh-3)}
 .tt.on{opacity:1}

@@ -214,7 +214,7 @@
 .hmcell.hsclast::after{content:"🏁";position:absolute;top:3px;right:5px;font-size:11px}
 
 /* ---------- celebration ---------- */
-.pl-cele{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:20px;
+.pl-cele{position:fixed;inset:0;z-index:290;display:grid;place-items:center;padding:20px;
   background:rgba(10,14,20,.55);opacity:0;pointer-events:none;transition:opacity .25s var(--ease)}
 .pl-cele.on{opacity:1;pointer-events:auto}
 .pl-celebox{position:relative;width:min(380px,100%);background:var(--surface);border-radius:20px;padding:26px 24px 20px;
