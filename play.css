@@ -1,0 +1,263 @@
+/* =========================================================================
+   PLAY — levels, achievements, the study clock and the year group's boards.
+   Built on the tokens in styles.css; a colour theme only swaps --accent*.
+   ========================================================================= */
+
+/* bars used throughout this file */
+.pl-daycard .track,.pl-lvcard .track,#pl-ach .track,#pl-battle .track,#pl-kudos .track,#pl-levels .track,.pl-lvtrack{
+  display:block;position:relative;height:8px;border-radius:999px;background:var(--surface-3);overflow:hidden}
+.pl-daycard .fill,.pl-lvcard .fill,#pl-ach .fill,#pl-battle .fill,#pl-kudos .fill,#pl-levels .fill{
+  display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent-2),var(--accent));
+  transition:width .6s var(--ease)}
+.pl-muted{color:var(--ink-soft)}
+
+/* ---------- masthead ---------- */
+.todaychip .tc-rank{font-size:10.5px;letter-spacing:0;margin-left:2px;padding:1px 6px;border-radius:999px;
+  background:rgba(255,255,255,.14);color:#fff;font-weight:750}
+.todaychip .tc-rank.top{background:linear-gradient(180deg,#F4C651,#C9961A);color:#2A1E00}
+@media (max-width:640px){
+  .todaychip .tc-rank{font-size:9.5px;position:absolute;top:-7px;right:-6px;margin:0;padding:1px 5px;
+    box-shadow:0 0 0 2px var(--ink)}
+}
+
+/* ---------- level marks ---------- */
+.pl-lv{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;
+  font-size:10.5px;font-weight:800;color:#fff;background:var(--lv);vertical-align:-5px;
+  box-shadow:inset 0 -2px 0 rgba(0,0,0,.18)}
+.pl-lv.xs{width:16px;height:16px;font-size:9px;vertical-align:-3px;margin-right:2px}
+.pl-tag{display:inline-block;flex:none;margin-left:6px;padding:1px 6px;border-radius:999px;
+  font-size:10px;font-weight:750;letter-spacing:.02em;line-height:15px;
+  color:var(--lv);background:color-mix(in srgb,var(--lv) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--lv) 30%,transparent);white-space:nowrap}
+.pod .nm2 .pl-tag{vertical-align:2px}
+
+/* the ring: a conic progress track around the level number */
+.pl-lvring{--sz:112px;width:var(--sz);height:var(--sz);border-radius:50%;flex:none;display:grid;place-items:center;
+  background:conic-gradient(var(--lv) calc(var(--p) * 1%),var(--surface-3) 0);position:relative}
+.pl-lvring::before{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--surface);
+  box-shadow:inset 0 0 0 1px var(--rule-soft)}
+.pl-lvring>div{position:relative;text-align:center;line-height:1}
+.pl-lvring b{display:block;font-size:40px;font-weight:800;letter-spacing:-.04em;color:var(--lv)}
+.pl-lvring span{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-soft);font-weight:700;margin-top:3px}
+.pl-lvring.sm{--sz:58px}
+.pl-lvring.sm::before{inset:5px}
+.pl-lvring.sm b{font-size:22px}
+.pl-lvring.big{--sz:132px;margin:0 auto}
+
+/* ---------- Your day ---------- */
+.pl-dtop{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.pl-dnav{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-mid)}
+.pl-dnav b{min-width:98px;text-align:center;color:var(--ink);font-weight:650}
+.pl-arrow{appearance:none;width:30px;height:30px;border-radius:50%;border:1px solid var(--rule);background:var(--surface);
+  font:inherit;font-size:18px;line-height:1;color:var(--ink-mid);cursor:pointer;display:grid;place-items:center;padding:0 0 2px}
+.pl-arrow:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
+.pl-arrow:disabled{opacity:.35;cursor:default}
+.pl-dbig{font-size:30px;font-weight:750;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.1}
+.pl-dbig .pl-sub{font-size:13px;font-weight:500;letter-spacing:0;color:var(--ink-soft)}
+.pl-livechip{display:inline-flex;align-items:center;gap:6px;vertical-align:middle;font-size:11.5px;font-weight:650;
+  letter-spacing:0;color:var(--good);background:var(--good-wash);padding:3px 9px;border-radius:999px}
+.pl-livechip i{width:7px;height:7px;border-radius:50%;background:var(--l4);animation:ping 2s var(--ease) infinite}
+.pl-chartbox{position:relative;margin:4px 0 0}
+.pl-chart{display:block;width:100%;height:auto;overflow:visible;max-height:260px}
+.pl-chart .pl-grid{stroke:var(--rule-soft);stroke-width:1}
+.pl-chart .pl-grid.base{stroke:var(--rule)}
+.pl-chart .pl-grid.v{stroke-dasharray:2 4}
+.pl-chart .pl-ax{font-size:11px;fill:var(--ink-soft);font-family:inherit;font-variant-numeric:tabular-nums}
+.pl-chart .pl-ax.on{fill:var(--ink);font-weight:700}
+.pl-chart .pl-ax.avg{fill:var(--ink-mid);font-weight:650}
+.pl-chart .pl-typ{fill:none;stroke:var(--ink);stroke-width:1.6;stroke-dasharray:3 4;opacity:.55;stroke-linejoin:round}
+.pl-chart .pl-goal{stroke:var(--ink);stroke-width:2;opacity:.35;stroke-linecap:round}
+.pl-chart .pl-now{fill:var(--accent-wash)}
+.pl-chart .pl-livebar{opacity:.62;animation:plpulse 2.4s ease-in-out infinite}
+.pl-chart rect[data-plh]:hover{fill:rgba(16,22,32,.035)}
+@keyframes plpulse{50%{opacity:.95}}
+.pl-legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--ink-mid);margin-top:10px}
+.pl-legend span{display:inline-flex;align-items:center;gap:6px}
+.pl-legend i{width:10px;height:10px;border-radius:3px;flex:none}
+.pl-legend b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+.pl-legend .pl-typkey i{width:16px;height:0;border-radius:0;border-top:2px dashed var(--ink);opacity:.55}
+.pl-legend .pl-goalkey i{width:14px;height:0;border-radius:0;border-top:2px solid var(--ink);opacity:.4}
+.pl-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+.pl-facts>div{background:var(--surface-2);border:1px solid var(--rule-soft);border-radius:var(--r-sm);padding:10px 12px;min-width:0}
+.pl-facts span{display:block;font-size:11px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.pl-facts b{display:block;font-size:15px;font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.pl-note{font-size:12.5px;color:var(--ink-mid);margin-top:12px}
+.pl-note:empty{display:none}
+
+/* ---------- level card ---------- */
+.pl-lvhero{display:flex;align-items:center;gap:22px}
+.pl-lvtext{flex:1;min-width:0}
+.pl-lvname{font-size:22px;font-weight:750;letter-spacing:-.02em;line-height:1.1}
+.pl-lvh{font-size:13px;color:var(--ink-mid);margin-top:3px}
+.pl-lvh b{color:var(--ink);font-variant-numeric:tabular-nums}
+.pl-lvtrack{height:10px !important;margin-top:12px}
+.pl-lvtrack .fill{display:block;height:100%;border-radius:999px}
+.pl-lvnext{font-size:12.5px;color:var(--ink-mid);margin-top:7px}
+.pl-ladder{display:flex;gap:6px;margin-top:18px}
+.pl-ladder span{flex:1;height:26px;border-radius:7px;display:grid;place-items:center;font-size:11.5px;font-weight:750;
+  color:var(--ink-soft);background:var(--surface-3);transition:transform var(--fast) var(--ease)}
+.pl-ladder span.on{background:var(--lv);color:#fff}
+.pl-ladder span.cur{transform:scale(1.12);box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--lv)}
+.pl-themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.pl-theme{appearance:none;font:inherit;display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:var(--r-sm);
+  border:1px solid var(--rule);background:var(--surface);cursor:pointer;font-size:12px;font-weight:650;color:var(--ink);
+  transition:border-color var(--fast) var(--ease),box-shadow var(--fast) var(--ease)}
+.pl-theme i{width:18px;height:18px;border-radius:50%;flex:none;background:linear-gradient(135deg,var(--a2),var(--a))}
+.pl-theme:hover:not(:disabled){border-color:var(--a)}
+.pl-theme.on{border-color:var(--a);box-shadow:0 0 0 2px color-mix(in srgb,var(--a) 30%,transparent)}
+.pl-theme:disabled{cursor:not-allowed;color:var(--ink-soft);background:var(--surface-2)}
+.pl-theme:disabled i{filter:grayscale(1);opacity:.4}
+.pl-theme svg{margin-left:auto;color:var(--ink-soft)}
+
+/* ---------- personal bests + standouts ---------- */
+.pl-bests,.pl-recs{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.pl-best,.pl-rec{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:var(--r-sm);
+  border:1px solid var(--rule-soft);background:var(--surface-2);min-width:0}
+.pl-best>div,.pl-rec>div{min-width:0}
+.pl-bi{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:var(--accent-wash);color:var(--accent-ink)}
+.pl-best .k,.pl-rec .k{display:block;font-size:10.5px;color:var(--ink-soft);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.pl-best b,.pl-rec b{display:block;font-size:16px;font-weight:750;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.pl-best small,.pl-rec small{display:block;font-size:11.5px;color:var(--ink-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-rec.person:hover{background:var(--surface);box-shadow:var(--sh-2)}
+.pl-rec .pl-you{color:var(--accent-ink);font-weight:600}
+
+/* ---------- achievements ---------- */
+.pl-achbar{width:180px;align-self:center}
+.pl-medal{--ms:46px;width:var(--ms);height:var(--ms);border-radius:50%;display:inline-grid;place-items:center;flex:none;position:relative}
+.pl-medal.on{color:#fff;background:radial-gradient(circle at 32% 28%,color-mix(in srgb,var(--tier) 55%,#fff) 0,var(--tier) 62%);
+  box-shadow:inset 0 -3px 0 rgba(0,0,0,.16),0 0 0 3px color-mix(in srgb,var(--tier) 22%,transparent),0 4px 12px -4px var(--tier)}
+.pl-medal.off{color:var(--ink-soft);background:var(--surface-3);box-shadow:inset 0 0 0 1.5px var(--rule)}
+.pl-next{display:grid;grid-template-columns:auto repeat(3,1fr);gap:10px;align-items:stretch;margin-bottom:18px}
+.pl-nextk{align-self:center;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-soft);writing-mode:vertical-rl;transform:rotate(180deg)}
+.pl-nexti{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--rule-soft);border-radius:var(--r-sm);background:var(--surface-2);min-width:0}
+.pl-nexti>div{flex:1;min-width:0}
+.pl-nexti b{display:block;font-size:13px}
+.pl-nexti small{display:block;font-size:11.5px;color:var(--ink-mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px}
+.pl-nexti .track{height:6px !important}
+.pl-np{font-size:11.5px;font-weight:700;color:var(--ink-mid);white-space:nowrap;font-variant-numeric:tabular-nums}
+.pl-achgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px}
+.pl-ach{display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px;padding:14px 8px 12px;
+  border-radius:var(--r-sm);border:1px solid var(--rule-soft);background:var(--surface);
+  transition:transform var(--fast) var(--ease),box-shadow var(--fast) var(--ease)}
+.pl-ach:not(.on){background:var(--surface-2)}
+.pl-ach:not(.on) b{color:var(--ink-mid)}
+.pl-ach.on:hover{transform:translateY(-2px);box-shadow:var(--sh-2)}
+.pl-ach .pl-medal{margin-bottom:6px}
+.pl-ach b{font-size:12.5px;line-height:1.25}
+.pl-ach small{font-size:11px;color:var(--ink-soft);line-height:1.3}
+.pl-tier{font-size:10.5px;font-weight:750;text-transform:uppercase;letter-spacing:.06em;margin-top:3px;font-variant-numeric:tabular-nums}
+
+/* ---------- study clock heatmap ---------- */
+.pl-heat{display:grid;gap:3px;--lab:34px}
+.pl-heatrow,.pl-heathours{display:grid;grid-template-columns:var(--lab) repeat(24,1fr);gap:3px;align-items:center}
+.pl-heatrow>span,.pl-heathours>span{font-size:11px;color:var(--ink-soft);font-weight:600;white-space:nowrap}
+.pl-heathours>span{font-size:10px;overflow:visible}
+.pl-heatrow i{display:block;aspect-ratio:1.9;border-radius:4px;cursor:default;transition:transform var(--fast) var(--ease)}
+.pl-heatrow i:hover{transform:scale(1.25);box-shadow:var(--sh-2);position:relative;z-index:2}
+.pl-heatrow i.now{box-shadow:0 0 0 2px var(--ink)}
+.pl-clockfacts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+.pl-clockfacts>div{background:var(--surface-2);border:1px solid var(--rule-soft);border-radius:var(--r-sm);padding:10px 12px;min-width:0}
+.pl-clockfacts span{display:block;font-size:11px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.pl-clockfacts b{display:block;font-size:15px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+
+/* ---------- subject battle + kudos board ---------- */
+.pl-battle,.pl-kboard{display:grid;gap:7px}
+.pl-brow{display:grid;grid-template-columns:22px minmax(0,1.3fr) minmax(60px,1fr) 66px;gap:10px;align-items:center;font-size:12.5px;
+  padding:4px 6px;margin:0 -6px;border-radius:7px}
+.pl-brow.mine{background:var(--accent-wash)}
+.pl-brow .track{height:12px !important}
+.pl-brank{font-weight:750;color:var(--ink-soft);text-align:center;font-variant-numeric:tabular-nums}
+.pl-brank.m1{color:var(--gold)} .pl-brank.m2{color:var(--silver)} .pl-brank.m3{color:var(--bronze)}
+.pl-bname{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-bname em{font-style:normal;font-size:10px;font-weight:700;color:var(--accent-ink);text-transform:uppercase;letter-spacing:.05em;margin-left:4px}
+.pl-bval{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pl-bval small{display:block;font-size:10.5px;font-weight:500;color:var(--ink-soft)}
+.pl-krow{display:grid;grid-template-columns:22px minmax(0,1.4fr) minmax(50px,1fr) 34px;gap:10px;align-items:center;font-size:12.5px}
+.pl-krow.me{background:var(--accent-wash);border-radius:7px;padding:3px 6px;margin:0 -6px}
+.pl-krow b{text-align:right;font-variant-numeric:tabular-nums}
+.pl-krow .who{min-width:0}
+
+/* ---------- levels across the year group ---------- */
+.pl-lvdist{display:grid;gap:4px}
+.pl-lvbtn{appearance:none;font:inherit;width:100%;display:grid;grid-template-columns:22px 92px 1fr 32px;gap:10px;align-items:center;
+  padding:5px 6px;border:0;background:none;border-radius:7px;cursor:pointer;font-size:12.5px;text-align:left;color:var(--ink)}
+.pl-lvbtn:hover:not(:disabled){background:var(--surface-2)}
+.pl-lvbtn:disabled{cursor:default;opacity:.55}
+.pl-lvbtn b{text-align:right;font-variant-numeric:tabular-nums}
+.pl-lvn{font-weight:650;white-space:nowrap}
+.pl-lvrow.me .pl-lvbtn{background:var(--accent-wash)}
+.pl-lvbtn .track{height:12px !important}
+.pl-lvfaces{display:flex;flex-wrap:wrap;gap:4px;padding:6px 6px 10px 38px}
+.pl-lvfaces .person{border-radius:50%}
+.pl-lvfaces .person:hover{transform:translateY(-2px)}
+.pl-foot{font-size:11.5px;color:var(--ink-soft);margin:12px 0 0}
+
+/* ---------- profile ---------- */
+.pl-prof{border:1px solid var(--rule-soft);border-radius:var(--r-sm);padding:14px 16px;background:var(--surface-2)}
+.pl-proflv{display:flex;align-items:center;gap:14px}
+.pl-proflv .pl-lvname{font-size:17px}
+.pl-proflv .pl-lvh{font-size:12px}
+.pl-proflv .pl-lvring::before{background:var(--surface-2)}
+.pl-profcount{margin-left:auto;text-align:right;line-height:1.1}
+.pl-profcount b{display:block;font-size:22px;font-weight:800}
+.pl-profcount span{font-size:11px;color:var(--ink-soft)}
+.pl-profbadges{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.pl-profchart .pl-chart .pl-now{display:none}
+
+/* ---------- calendar: exam days and the last day of the HSC ---------- */
+.hmcell.exam{box-shadow:inset 0 0 0 2px var(--exc,var(--accent))}
+.hmcell.exam.today{box-shadow:inset 0 0 0 2px var(--exc,var(--accent)),0 0 0 2px var(--ink)}
+.hmcell.exam .exm{position:absolute;left:5px;right:5px;bottom:5px;font-size:9.5px;font-weight:800;text-transform:uppercase;
+  letter-spacing:.04em;color:#fff;background:var(--exc,var(--accent));border-radius:4px;text-align:center;padding:1px 0;
+  white-space:nowrap;overflow:hidden}
+.hmcell.hsclast::after{content:"🏁";position:absolute;top:3px;right:5px;font-size:11px}
+
+/* ---------- celebration ---------- */
+.pl-cele{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:20px;
+  background:rgba(10,14,20,.55);opacity:0;pointer-events:none;transition:opacity .25s var(--ease)}
+.pl-cele.on{opacity:1;pointer-events:auto}
+.pl-celebox{position:relative;width:min(380px,100%);background:var(--surface);border-radius:20px;padding:26px 24px 20px;
+  text-align:center;box-shadow:var(--sh-4);transform:scale(.88) translateY(14px);transition:transform .45s cubic-bezier(.2,1.4,.3,1);overflow:hidden}
+.pl-cele.on .pl-celebox{transform:none}
+.pl-celek{font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-ink)}
+.pl-celeart{margin:18px 0 12px;display:grid;place-items:center}
+.pl-celeart .pl-medal{animation:plpop .7s cubic-bezier(.2,1.5,.3,1) both .1s}
+.pl-celebox h2{font-size:22px}
+.pl-celebox p{font-size:13.5px;color:var(--ink-mid);margin:6px 0 18px}
+.pl-celebtns{display:flex;gap:8px;justify-content:center}
+.pl-conf{position:absolute;inset:0;pointer-events:none}
+.pl-conf i{position:absolute;left:50%;top:38%;width:7px;height:11px;border-radius:2px;background:var(--c);opacity:0}
+.pl-cele.on .pl-conf i{animation:plconf 1.4s cubic-bezier(.15,.7,.3,1) var(--d) forwards}
+@keyframes plconf{
+  0%{opacity:1;transform:translate(-50%,0) rotate(0)}
+  100%{opacity:0;transform:translate(calc(var(--x) * 190px),calc(-40px + var(--x) * var(--x) * 220px)) rotate(var(--r))}}
+@keyframes plpop{0%{transform:scale(.3) rotate(-25deg)}100%{transform:none}}
+
+/* ---------- small screens ---------- */
+@media (max-width:1080px){
+  .pl-next{grid-template-columns:1fr}
+  .pl-nextk{writing-mode:horizontal-tb;transform:none}
+}
+@media (max-width:620px){
+  .pl-facts,.pl-clockfacts{grid-template-columns:repeat(2,1fr)}
+  .pl-bests,.pl-recs{grid-template-columns:1fr}
+  .pl-lvhero{gap:16px}
+  .pl-lvring{--sz:92px}
+  .pl-lvring b{font-size:32px}
+  .pl-lvname{font-size:19px}
+  .pl-achgrid{grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
+  .pl-ach small{display:none}
+  .pl-achbar{width:100%}
+  .pl-heat{--lab:26px;gap:2px}
+  .pl-heatrow,.pl-heathours{gap:2px}
+  .pl-heatrow i{border-radius:2px;aspect-ratio:.8}
+  .pl-heathours>span{font-size:8.5px}
+  .pl-dbig{font-size:26px}
+  .pl-themes{grid-template-columns:repeat(3,1fr)}
+  .pl-lvbtn{grid-template-columns:22px 80px 1fr 28px}
+}
+@media (prefers-reduced-motion:reduce){
+  .pl-chart .pl-livebar,.pl-cele.on .pl-conf i,.pl-celeart .pl-medal{animation:none}
+  .pl-celebox{transition:none}
+}

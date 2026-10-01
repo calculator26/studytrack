@@ -1538,8 +1538,11 @@ function paintTodayChip() {
   const live = liveMsFor(UID) / 3600000;
   const pct = g > 0 ? Math.min(1, h / g) : (h > 0 ? 1 : 0);
   const col = lvlColour(g > 0 ? h / g : (h > 0 ? 1 : null), h > 0);
+  /* where that puts you in the year group today, from play.js */
+  const rk = typeof playRankToday === "function" ? playRankToday() : null;
   const html =
-    `<span class="tc-k">${live ? `<i class="tc-live" aria-hidden="true"></i>` : ""}Studied today</span>
+    `<span class="tc-k">${live ? `<i class="tc-live" aria-hidden="true"></i>` : ""}Studied today${
+       rk ? `<b class="tc-rank${rk.rank <= 3 ? " top" : ""}">#${rk.rank}</b>` : ""}</span>
      <span class="tc-v">${esc(hm(h))}${g > 0 ? `<small> / ${esc(f1(g))}h</small>` : ""}</span>
      <span class="tc-bar" aria-hidden="true"><i style="width:${(pct * 100).toFixed(1)}%;background:${col}"></i></span>`;
   if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
@@ -1547,7 +1550,8 @@ function paintTodayChip() {
     ? `${hm(h)} studied today, including the ${hm(live)} on your timer now` +
       (g > 0 ? ` · goal ${f1(g)} h` : "")
     : (h > 0 ? `${hm(h)} studied today` : "Nothing studied yet today") + (g > 0 ? ` · goal ${f1(g)} h` : " · rest day");
-  if (el.title !== title) { el.title = title; el.setAttribute("aria-label", title); }
+  const title2 = rk ? title + ` · #${rk.rank} of ${rk.of} in the year group today` : title;
+  if (el.title !== title2) { el.title = title2; el.setAttribute("aria-label", title2); }
   el.hidden = false;
 }
 
@@ -1859,6 +1863,8 @@ $("h-goalreset").addEventListener("click", async () => {
 function renderAll() {
   paintSelects();
   renderShell(); renderHome(); renderCrew(); renderMe(); renderSetup();
+  /* levels, achievements and the study clock live in play.js */
+  if (typeof playRender === "function") playRender();
   try { paintNudgeBar(); } catch (e) { console.error(e); }
   try { paintReminders(); } catch (e) { console.error(e); }
   const tot = crewTotals();
@@ -3178,7 +3184,7 @@ function renderCrew() {
       <div class="rank">#${i + 1}</div>
       ${avatarHTML(r.p, i === 0 ? "xl" : "lg")}
       <div class="hrs">${M.big(r)}<span style="font-size:13px;font-weight:500;color:var(--ink-soft)">${M.unit}</span></div>
-      <div class="nm2">${esc(r.p.display_name)}</div>
+      <div class="nm2">${esc(r.p.display_name)}${typeof playLevelTag === "function" ? playLevelTag(r.id) : ""}</div>
       <div class="sub2">${r.sessions} session${r.sessions === 1 ? "" : "s"} · ${
         LB_METRIC === "hours" ? `best day ${f1(r.best)} h` : `${f1(r.hours)} h in total`}</div>
     </div>`;
@@ -3210,7 +3216,7 @@ function renderCrew() {
     const medal = i === 0 ? "var(--gold)" : i === 1 ? "var(--silver)" : i === 2 ? "var(--bronze)" : "var(--ink-soft)";
     return `<tr class="${r.id === UID ? "me" : ""}">
       <td class="l" style="font-weight:700;color:${medal}">${i + 1}</td>
-      <td class="l"><div class="who person" data-profile="${r.id}" title="See ${esc(r.p.display_name)}'s full profile">${avatarHTML(r.p, "sm")}<span class="nm">${esc(r.p.display_name)}</span></div></td>
+      <td class="l"><div class="who person" data-profile="${r.id}" title="See ${esc(r.p.display_name)}'s full profile">${avatarHTML(r.p, "sm")}<span class="nm">${esc(r.p.display_name)}</span>${typeof playLevelTag === "function" ? playLevelTag(r.id) : ""}</div></td>
       <td style="font-weight:700">${f1(r.hours)}</td>
       <td>${r.sessions}</td>
       <td>${f1(r.hours / Math.max(1, days.length))}</td>
@@ -3963,10 +3969,25 @@ function renderMe() {
   $("m-avg").textContent = active ? f1(total / active) : "0.0";
   $("m-avg-d").textContent = "Only counting days you logged something";
 
-  /* calendar: from first session (or 27 days ago) to the last exam or today+13 */
-  const exams = mySubjects(UID).map(s => s.exam_date).filter(Boolean).sort();
+  /* calendar: from your first session (or 27 days ago) right through to the
+     last day of the HSC, with every paper you sit marked on its day. It used
+     to stop at the latest exam date typed against a subject, which for most
+     people was some time in October with weeks of exams still to come. */
+  const examsOn = {};
+  mySubjects(UID).forEach(s => {
+    const c = CAT.byName(s.name);
+    const papers = c && c.exams && c.exams.length ? c.exams.map(e => ({ date: e.date, paper: e.paper || e.name || "", start: e.start }))
+      : (s.exam_date ? [{ date: s.exam_date, paper: "", start: "" }] : []);
+    papers.forEach(e => {
+      if (!e.date) return;
+      const list = examsOn[e.date] = examsOn[e.date] || [];
+      if (!list.some(x => x.name === s.name && x.paper === e.paper)) list.push({ name: s.name, colour: s.colour, paper: e.paper, start: e.start });
+    });
+  });
+  const lastHsc = (CAT.papers || []).reduce((m, p) => p.date > m ? p.date : m, "");
+  const exams = Object.keys(examsOn).sort();
   const start = days[0] || addDays(todayISO(), -27);
-  const end = exams.length ? exams[exams.length - 1] : addDays(todayISO(), 13);
+  const end = [lastHsc, exams[exams.length - 1] || "", addDays(todayISO(), 13)].sort().pop();
   const gridStart = addDays(start, -dowIdx(start));
   const weeks = Math.max(1, Math.ceil((daysBetween(gridStart, end) + 1) / 7));
   $("calhead").innerHTML = DOW.map(d => `<div class="calhd">${d}</div>`).join("");
@@ -3976,12 +3997,18 @@ function renderMe() {
     const div = document.createElement("div");
     if (d < start || d > end) { div.style.cssText = "background:transparent;border:0"; heat.appendChild(div); continue; }
     const h = hoursFor(UID, d), g = goalFor(UID, d), rr = ratioFor(UID, d), fut = d > todayISO();
-    div.className = "hmcell" + (d === todayISO() ? " today" : "") + (fut ? " future" : "");
+    const ex = examsOn[d] || null;
+    div.className = "hmcell" + (d === todayISO() ? " today" : "") + (fut ? " future" : "") + (ex ? " exam" : "") +
+      (d === lastHsc ? " hsclast" : "");
     if (!fut) div.style.background = lvlColour(rr, h > 0);
-    div.innerHTML = `<div class="dn">${parseD(d).getDate()}</div>` +
-      (h > 0 ? `<div class="hv">${f1(h)}</div>` : (fut && g > 0 ? `<div class="hv" style="color:rgba(18,35,46,.3);font-weight:500">${f1(g)}</div>` : ""));
+    if (ex) div.style.setProperty("--exc", ex[0].colour || "var(--accent)");
+    div.innerHTML = `<div class="dn">${parseD(d).getDate()}${parseD(d).getDate() === 1 ? " " + parseD(d).toLocaleDateString("en-AU", { month: "short" }) : ""}</div>` +
+      (ex ? `<div class="exm">${ex.length > 1 ? ex.length + " exams" : "Exam"}</div>` :
+      h > 0 ? `<div class="hv">${f1(h)}</div>` : (fut && g > 0 ? `<div class="hv" style="color:rgba(18,35,46,.3);font-weight:500">${f1(g)}</div>` : ""));
     div.addEventListener("mousemove", e => showTT(e,
-      `<b>${fmtD(d)}</b>${f1(h)} h logged · goal ${f1(g)} h${g > 0 && !fut ? `<br><em>${f0(h / g * 100)}% of goal</em>` : ""}`));
+      `<b>${fmtD(d)}</b>${ex ? ex.map(x => `<span style="color:${esc(x.colour || "inherit")}">●</span> ${esc(x.name)}${x.paper ? " · " + esc(x.paper) : ""}${x.start ? " · " + esc(x.start) : ""}`).join("<br>") + "<br>" : ""}` +
+      (d === lastHsc ? "<em>Last day of the HSC</em><br>" : "") +
+      `${f1(h)} h logged · goal ${f1(g)} h${g > 0 && !fut ? `<br><em>${f0(h / g * 100)}% of goal</em>` : ""}`));
     div.addEventListener("mouseleave", hideTT);
     div.addEventListener("click", () => { CUR = d; renderHome(); document.querySelector('nav.tabs button[data-p="home"]').click(); });
     heat.appendChild(div);
@@ -4381,6 +4408,7 @@ async function openProfile(id) {
 
   $("pf-body").innerHTML = `
     ${profileLiveHTML(id)}
+    ${typeof playProfileHTML === "function" ? playProfileHTML(id, all) : ""}
     <div class="grid g4 mb16">
       <div class="kpi"><div class="v">${f1(totalH)}</div><div class="k">Hours logged, all time</div>
         <div class="d">${all.length} session${all.length === 1 ? "" : "s"}</div></div>
@@ -4425,6 +4453,7 @@ async function openProfile(id) {
 
   wireEntryActions($("pf-body"));
   $("ov-profile").classList.add("on");
+  if (typeof playAfterProfile === "function") playAfterProfile(id);
 }
 
 /* one listener for every avatar and name in the app */

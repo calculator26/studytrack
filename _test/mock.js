@@ -79,7 +79,11 @@
         T.sessions.push({ id: uid(ssid++), user_id: p.id, subject_id: a.subject_id, area_id: a.id,
           day, minutes: [45, 60, 90, 120, 30][(d + k + pi) % 5],
           mode: modes[(d + k) % modes.length], note: notes[(d + k + pi) % notes.length],
-          created_at: new Date(Date.now() - d * 864e5 - k * 36e5).toISOString() });
+          /* filed at a believable time of day: after school, then the evening */
+          created_at: (() => {
+            const t = new Date(day + "T00:00:00"); t.setHours([16, 19, 21, 8][(k + pi + d) % 4] + k, (d * 7 + pi * 11) % 60);
+            return (t.getTime() > Date.now() ? new Date(Date.now() - (k + 1) * 36e5) : t).toISOString();
+          })() });
       }
     }
   });
@@ -416,6 +420,53 @@
              Same shape as the SQL: days is {"2026-09-14":[minutes,sessions]}. */
           /* A week of hourly peaks shaped like a school day, so the busyness
              graph has something to draw. Same columns as live_history(). */
+          if (name === "crew_clock") {
+            const since = String((args && args.since) || "0000-01-01");
+            const cells = {}, sd = {};
+            T.sessions.forEach(r => {
+              if (r.day < since || !r.created_at) return;
+              const end = new Date(r.created_at).getTime(), start = end - r.minutes * 6e4;
+              sd[r.user_id + r.day] = (new Date(r.day + "T00:00:00").getDay() + 6) % 7;
+              for (let t = start; t < end;) {
+                const d = new Date(t), nx = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime();
+                const k = ((d.getDay() + 6) % 7) + "," + d.getHours();
+                cells[k] = (cells[k] || 0) + (Math.min(nx, end) - t) / 6e4; t = nx;
+              }
+            });
+            const byDow = {};
+            Object.values(sd).forEach(w => { byDow[w] = (byDow[w] || 0) + 1; });
+            /* a few hundred extra student-days, so it reads like the real year group */
+            Object.keys(byDow).forEach(w => { byDow[w] = Math.max(byDow[w], 6); });
+            return Promise.resolve({ error: null, data: {
+              cells: Object.keys(cells).map(k => k.split(",").map(Number).concat([Math.round(cells[k])])),
+              student_days: Object.keys(sd).length, student_days_by_dow: byDow } });
+          }
+          if (name === "crew_subject_hours") {
+            const since = String((args && args.since) || "0000-01-01");
+            const g = {};
+            T.sessions.forEach(r => {
+              if (r.day < since) return;
+              const sub = T.subjects.find(v => v.id === r.subject_id); if (!sub) return;
+              const k = String(sub.name).trim().toLowerCase().replace(/\s+/g, " ");
+              const e = (g[k] = g[k] || { label: String(sub.name).trim(), minutes: 0, ppl: {} });
+              e.minutes += r.minutes; e.ppl[r.user_id] = 1;
+            });
+            return Promise.resolve({ error: null, data: Object.values(g)
+              .map(e => ({ label: e.label, minutes: e.minutes, people: Object.keys(e.ppl).length }))
+              .sort((a, b) => b.minutes - a.minutes) });
+          }
+          if (name === "kudos_board") {
+            return Promise.resolve({ error: null, data: {
+              received: [[uid(3), 41], [ME, 33], [uid(2), 20], [uid(4), 6]],
+              given: [[uid(2), 57], [ME, 44], [uid(4), 12], [uid(3), 3]] } });
+          }
+          if (name === "badge_stats") {
+            const id = args && args.uid;
+            const p = T.profiles.find(x => x.id === id);
+            if (!p || (p.hide_hours && id !== ME)) return Promise.resolve({ data: null, error: null });
+            const n = parseInt(String(id).slice(-3), 10) || 1;
+            return Promise.resolve({ error: null, data: { kudos_received: 40 + n * 37, kudos_given: 20 + n * 61 } });
+          }
           if (name === "live_history") {
             const now = Math.floor(Date.now() / 36e5) * 36e5, rows = [];
             for (let h = 24 * 7; h >= 0; h--) {

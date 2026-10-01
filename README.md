@@ -322,6 +322,40 @@ also a **Delete my account** button there, which removes every session, subject,
 goal, your profile, and the login itself. It is not reversible, and it is the fastest way to
 clear out test accounts.
 
+### Levels, achievements and the study clock
+All of this lives in `play.js` and `play.css`, on top of four read-only functions in `stats.sql`.
+
+- **Your day** (Today tab) is a Screen Time–style chart: your minutes in each hour, coloured
+  by subject, with a running timer counted in and pulsing. **Week** shows each day against your
+  goal; **Pattern** shows your average study day over four weeks. The dotted line is a typical
+  Knox student on that weekday: the year group's minutes in that hour divided by the number of
+  people who studied that day. Each session is spread back from the time it was filed, so a
+  timed session is exact to the minute. One typed in for a different day counts towards the
+  day's total but no particular hour.
+- **Your place today** sits in the masthead chip (`#4`), counting running timers.
+- **Levels** 1–9 (Rookie to HSC Legend) come from hours with **at most 8 counted per day**, so
+  the way up is coming back tomorrow, not staying up. Each level unlocks a colour theme on My
+  stats. Themes only swap the brand accent; the goal colours are data and never change.
+  Thresholds were set from the real spread on 1 October 2026.
+- **32 achievements** in bronze, silver, gold and platinum: hours, days in a row, goals hit,
+  past papers, deep sessions, early starts, big weeks, day finishes in the top 10/3/1 (only on
+  days at least ten people logged), and kudos given and received. Two reward looking after
+  yourself (**Recharged**: a day off after six in a row; **Lights out**: a five-day week with
+  nothing after 11pm), and **nothing rewards studying late**. A new badge or level pops a
+  celebration once per device.
+- **Peloton** gains: when the year group studies (a weekday × hour heatmap, with a "You"
+  toggle), the subject battle, the kudos board, this week's standouts (biggest capped week,
+  longest run, most consistent, most improved) and how many people are on each level.
+- **Profiles** show the person's level, badges and when they usually study.
+
+Private mode is respected throughout: `crew_clock` and `crew_subject_hours` run as the caller,
+so the sessions policy already leaves private people out; `kudos_board` and `badge_stats` filter
+`hide_hours` themselves. Nobody private gets a level, badge or board place except on their own
+screen, and anyone hiding other people's hours sees none of the year-group cards.
+
+The calendar on My stats runs to the **last day of the HSC** (5 November, from the NESA
+timetable) and marks every paper you sit on its day.
+
 ### The admin console
 The addresses listed in `schema.sql` get one extra thing: a dark control room for keeping the
 peloton honest. The way in is a button at the bottom of **Setup**, and it is only rendered after
@@ -573,6 +607,8 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `index.html` | Markup for auth, onboarding and the four tabs |
 | `app.js` | All the logic — auth, data, timer, charts, import |
 | `styles.css` | The design system |
+| `play.js`, `play.css` | Levels, achievements, colour themes, the Your day chart and the Peloton stat cards |
+| `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `badge_stats`). Safe to re-run |
 | `config.js` | Your Supabase keys and group name |
 | `favicon.svg` | The mark — a track seen from above, with a runner on the lane |
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |
@@ -607,6 +643,7 @@ npm i -g playwright-core      # once
 node _test/smoke.js           # signs in and walks every tab — run before pushing app.js
 node _test/msgrx.js           # chat emoji reactions
 node _test/reset.js           # forgot password
+node _test/shots.js <dir>     # screenshots of every new stats surface, laptop and phone
 ```
 
 Each serves the repository itself and blocks the Supabase CDN so the stub cannot be replaced
