@@ -110,6 +110,39 @@ as $$
   )
 $$;
 
+-- The same board for either reaction: which = 'kudos' or 'sus'. The kudos
+-- board above stays for anything still calling it.
+create or replace function public.reaction_board(since date, which text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with pub as (select id from public.profiles where not hide_hours),
+  t0 as (select (since::timestamp at time zone 'Australia/Sydney') as at),
+  rx as (
+    select r.user_id as giver, s.user_id as receiver
+      from public.session_reactions r
+      join public.sessions s on s.id = r.session_id
+     where r.kind = which and r.created_at >= (select at from t0)
+    union all
+    select user_id, owner_id
+      from public.timer_reactions
+     where kind = which and created_at >= (select at from t0)
+  )
+  select case when which not in ('kudos', 'sus') then null else jsonb_build_object(
+    'received', coalesce((select jsonb_agg(jsonb_build_array(id, n) order by n desc)
+       from (select receiver id, count(*) n from rx
+              where giver <> receiver and receiver in (select id from pub)
+              group by 1 order by 2 desc limit 10) a), '[]'::jsonb),
+    'given', coalesce((select jsonb_agg(jsonb_build_array(id, n) order by n desc)
+       from (select giver id, count(*) n from rx
+              where giver <> receiver and giver in (select id from pub)
+              group by 1 order by 2 desc limit 10) b), '[]'::jsonb)
+  ) end
+$$;
+
 -- One person's kudos totals, for their achievements. Nothing for somebody in
 -- private mode unless it is you asking about yourself.
 create or replace function public.badge_stats(uid uuid)
@@ -140,9 +173,11 @@ revoke execute on function public.crew_clock(date)         from public, anon;
 revoke execute on function public.crew_subject_hours(date) from public, anon;
 revoke execute on function public.kudos_board(date)        from public, anon;
 revoke execute on function public.badge_stats(uuid)        from public, anon;
+revoke execute on function public.reaction_board(date, text) from public, anon;
 grant  execute on function public.crew_clock(date)         to authenticated;
 grant  execute on function public.crew_subject_hours(date) to authenticated;
 grant  execute on function public.kudos_board(date)        to authenticated;
 grant  execute on function public.badge_stats(uuid)        to authenticated;
+grant  execute on function public.reaction_board(date, text) to authenticated;
 
 notify pgrst, 'reload schema';

@@ -344,12 +344,13 @@ All of this lives in `play.js` and `play.css`, on top of four read-only function
   nothing after 11pm), and **nothing rewards studying late**. A new badge or level pops a
   celebration once per device.
 - **Peloton** gains: when the year group studies (a weekday × hour heatmap, with a "You"
-  toggle), the subject battle, the kudos board, this week's standouts (biggest capped week,
+  toggle), the subject battle, a **kudos and sus board** (switch between them, received or given,
+  7 days or all time: Most appreciated, Biggest hype, Most sus studier, Sus police), this week's standouts (biggest capped week,
   longest run, most consistent, most improved) and how many people are on each level.
 - **Profiles** show the person's level, badges and when they usually study.
 
 Private mode is respected throughout: `crew_clock` and `crew_subject_hours` run as the caller,
-so the sessions policy already leaves private people out; `kudos_board` and `badge_stats` filter
+so the sessions policy already leaves private people out; `kudos_board`, `reaction_board` and `badge_stats` filter
 `hide_hours` themselves. Nobody private gets a level, badge or board place except on their own
 screen, and anyone hiding other people's hours sees none of the year-group cards.
 
@@ -608,7 +609,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `app.js` | All the logic — auth, data, timer, charts, import |
 | `styles.css` | The design system |
 | `play.js`, `play.css` | Levels, achievements, colour themes, the Your day chart and the Peloton stat cards |
-| `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `badge_stats`). Safe to re-run |
+| `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
 | `config.js` | Your Supabase keys and group name |
 | `favicon.svg` | The mark — a track seen from above, with a runner on the lane |
 | `catalogue.js` | Every Knox HSC subject: 2026 exam dates and syllabus sections |

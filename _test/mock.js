@@ -460,6 +460,15 @@
               received: [[uid(3), 41], [ME, 33], [uid(2), 20], [uid(4), 6]],
               given: [[uid(2), 57], [ME, 44], [uid(4), 12], [uid(3), 3]] } });
           }
+          if (name === "reaction_board") {
+            const sus = args && args.which === "sus", all = args && args.since < "2001";
+            const k = (a, b) => all ? a * 3 : a;
+            return Promise.resolve({ error: null, data: sus ? {
+              received: [[uid(4), k(9)], [uid(2), k(5)], [ME, k(2)]],
+              given: [[uid(3), k(11)], [ME, k(4)], [uid(2), k(1)]] } : {
+              received: [[uid(3), k(41)], [ME, k(33)], [uid(2), k(20)], [uid(4), k(6)]],
+              given: [[uid(2), k(57)], [ME, k(44)], [uid(4), k(12)], [uid(3), k(3)]] } });
+          }
           if (name === "badge_stats") {
             const id = args && args.uid;
             const p = T.profiles.find(x => x.id === id);

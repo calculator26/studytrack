@@ -141,7 +141,8 @@ function plSpread(segs) {
 const PL = {
   clock: null, clockAt: 0, clockBusy: false,
   subjects: { 7: null, 30: null }, subjectsAt: { 7: 0, 30: 0 }, subjRange: 7,
-  kudos: null, kudosAt: 0, kudosTab: "received",
+  /* the kudos and sus boards: "kudos|7" -> {received, given}, and when */
+  rx: {}, rxAt: {}, rxKind: "kudos", kudosTab: "received", rxRange: 7,
   badgeStats: {},            /* uid -> {kudos_received, kudos_given} | null */
   badgeAt: {},
   dayView: "day", dayCursor: null, weekCursor: null,
@@ -183,12 +184,16 @@ async function plLoadSubjects(range, force) {
   PL.subjects[range] = d;
   plPaintBattle();
 }
+const plRxKey = () => PL.rxKind + "|" + PL.rxRange;
 async function plLoadKudos(force) {
-  if (!force && PL.kudos && Date.now() - PL.kudosAt < PL_STALE) return;
-  PL.kudosAt = Date.now();
-  const d = await plRpc("kudos_board", { since: addDays(todayISO(), -6) });
-  if (!d) { PL.kudosAt = 0; return; }
-  PL.kudos = d;
+  const key = plRxKey();
+  if (!force && PL.rx[key] && Date.now() - PL.rxAt[key] < PL_STALE) return;
+  PL.rxAt[key] = Date.now();
+  const [kind, range] = key.split("|");
+  const since = range === "0" ? "2000-01-01" : addDays(todayISO(), -(Number(range) - 1));
+  const d = await plRpc("reaction_board", { since, which: kind });
+  if (!d) { PL.rxAt[key] = 0; return; }
+  PL.rx[key] = d;
   plPaintKudos();
 }
 async function plLoadBadgeStats(uid, force) {
@@ -938,24 +943,50 @@ function plPaintBattle() {
   }).join("")}</div>`;
 }
 
+/* One card, four boards: kudos or sus, got or gave. Each has its own title,
+   because "most sus studier" and "sus police" are different jokes. */
+const PL_RX_TITLES = {
+  "kudos|received": ["Most appreciated", "Kudos received from other people"],
+  "kudos|given":    ["Biggest hype", "Kudos handed out to other people"],
+  "sus|received":   ["Most sus studier", "Times other people called their study sus"],
+  "sus|given":      ["Sus police", "Times they called someone else's study sus"]
+};
 function plPaintKudos() {
   const host = $("pl-kudos");
   if (!host) return;
   host.querySelectorAll("[data-plkt]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.plkt === PL.kudosTab)));
-  const body = host.querySelector(".body");
-  if (!PL.kudos) { body.innerHTML = `<div class="empty">Counting kudos…</div>`; return; }
-  const list = (PL.kudos[PL.kudosTab] || []).filter(r => DB.profiles.some(p => p.id === r[0]));
-  if (!list.length) { body.innerHTML = `<div class="empty">No kudos this week yet.</div>`; return; }
+  host.querySelectorAll("[data-plrk]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.plrk === PL.rxKind)));
+  host.querySelectorAll("[data-plrr]").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.plrr) === PL.rxRange)));
+  host.classList.toggle("sus", PL.rxKind === "sus");
+  const kind = RX_KINDS.find(k => k.kind === PL.rxKind) || RX_KINDS[0];
+  const [title, what] = PL_RX_TITLES[PL.rxKind + "|" + PL.kudosTab];
+  const when = PL.rxRange ? "this week" : "all time";
+  const body = host.querySelector(".pl-rxbody");
+  const d = PL.rx[plRxKey()];
+  if (!d) { body.innerHTML = `<div class="empty">Counting ${esc(kind.label.toLowerCase())}…</div>`; return; }
+  const list = (d[PL.kudosTab] || []).filter(r => DB.profiles.some(p => p.id === r[0]));
+  if (!list.length) { body.innerHTML = `<div class="empty">No ${esc(kind.label.toLowerCase())} ${when} yet.</div>`; return; }
   const mx = Math.max(1, ...list.map(r => r[1]));
-  body.innerHTML = `<div class="pl-kboard">${list.map((r, i) => {
-    const p = profileOf(r[0]);
-    return `<div class="pl-krow${r[0] === UID ? " me" : ""}">
-      <span class="pl-brank${i < 3 ? " m" + (i + 1) : ""}">${i + 1}</span>
-      <div class="who person" data-profile="${esc(r[0])}">${avatarHTML(p, "sm")}<span class="nm">${esc(p.display_name)}</span>${playLevelTag(r[0])}</div>
-      <span class="track"><span class="fill" style="width:${(r[1] / mx * 100).toFixed(1)}%"></span></span>
-      <b>${r[1]}</b>
-    </div>`;
-  }).join("")}</div>`;
+  const top = list[0], tp = profileOf(top[0]);
+  const mine = list.findIndex(r => r[0] === UID);
+  body.innerHTML = `
+    <div class="pl-rxhero person" data-profile="${esc(top[0])}" title="${esc(what)}">
+      <span class="pl-rxemoji" aria-hidden="true">${kind.icon}</span>
+      ${avatarHTML(tp, "lg")}
+      <div><span class="k">${esc(title)} · ${when}</span>
+        <b>${esc(tp.display_name)}${top[0] === UID ? " (you)" : ""}</b>
+        <small>${top[1]} ${esc(kind.label.toLowerCase())} ${PL.kudosTab === "received" ? "received" : "given"}</small></div>
+    </div>
+    <div class="pl-kboard">${list.slice(1).map((r, j) => {
+      const i = j + 1, p = profileOf(r[0]);
+      return `<div class="pl-krow${r[0] === UID ? " me" : ""}">
+        <span class="pl-brank${i < 3 ? " m" + (i + 1) : ""}">${i + 1}</span>
+        <div class="who person" data-profile="${esc(r[0])}">${avatarHTML(p, "sm")}<span class="nm">${esc(p.display_name)}</span>${playLevelTag(r[0])}</div>
+        <span class="track"><span class="fill" style="width:${(r[1] / mx * 100).toFixed(1)}%"></span></span>
+        <b>${r[1]}</b>
+      </div>`;
+    }).join("")}</div>
+    <p class="pl-foot">${mine >= 0 ? `You're #${mine + 1} here. ` : ""}Top 10 · reactions on your own study don't count · private mode is left off.</p>`;
 }
 
 function plPaintLevels() {
@@ -1232,14 +1263,28 @@ function plMount() {
     g1.innerHTML = `
       <div class="card" id="pl-battle"><header><div><h2>Subject battle</h2><div class="sub">Hours the year group put into each subject</div></div>
         <div class="controls"><button class="chip" data-plsr="7">7 days</button><button class="chip" data-plsr="30">30 days</button></div></header><div class="body"></div></div>
-      <div class="card" id="pl-kudos"><header><div><h2>Kudos board</h2><div class="sub">The last 7 days. Your own kudos on yourself don't count.</div></div>
-        <div class="controls"><button class="chip" data-plkt="received">Got</button><button class="chip" data-plkt="given">Gave</button></div></header><div class="body"></div></div>`;
+      <div class="card" id="pl-kudos"><header><div><h2>Kudos and sus</h2><div class="sub">Who gets them, and who hands them out</div></div>
+        <div class="controls"><button class="chip" data-plrr="7">7 days</button><button class="chip" data-plrr="0">All time</button></div></header>
+        <div class="body">
+          <div class="pl-rxswitch" role="group" aria-label="Which board">
+            <button data-plrk="kudos"><span aria-hidden="true">\ud83d\udc4f</span> Kudos</button>
+            <button data-plrk="sus"><span aria-hidden="true">\ud83e\udd28</span> Sus</button>
+          </div>
+          <div class="pl-rxsub" role="group" aria-label="Received or given">
+            <button class="chip" data-plkt="received">Received</button><button class="chip" data-plkt="given">Given</button>
+          </div>
+          <div class="pl-rxbody"></div>
+        </div></div>`;
     clk.after(g1);
     g1.addEventListener("click", e => {
       const s = e.target.closest("[data-plsr]");
       if (s) { PL.subjRange = Number(s.dataset.plsr); plPaintBattle(); plLoadSubjects(PL.subjRange); }
       const k = e.target.closest("[data-plkt]");
       if (k) { PL.kudosTab = k.dataset.plkt; plPaintKudos(); }
+      const rk = e.target.closest("[data-plrk]");
+      if (rk) { PL.rxKind = rk.dataset.plrk; plPaintKudos(); plLoadKudos(); }
+      const rr = e.target.closest("[data-plrr]");
+      if (rr) { PL.rxRange = Number(rr.dataset.plrr); plPaintKudos(); plLoadKudos(); }
     });
     const g2 = document.createElement("div");
     g2.className = "grid g2 mb16";
