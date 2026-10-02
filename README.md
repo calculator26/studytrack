@@ -164,7 +164,8 @@ you already had and shows as *your own date*. Nothing breaks.
 ### Goals
 Set hours per weekday once. Any individual day can be overridden on the Today tab. A goal of
 **0** marks a rest day, and rest days never break a streak — otherwise the plan punishes you
-for following it.
+for following it. No daily goal can be more than **12 hours**; the database refuses anything
+higher, and the app brings it down to 12 and says so.
 
 ### Logging a session
 Two dropdowns: the **subject**, then the **area** inside it. The area list follows whatever

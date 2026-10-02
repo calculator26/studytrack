@@ -1231,7 +1231,7 @@ function startOnboarding() {
     });
   }
   const wk = DOW.map((d, i) => `<div><label class="fl" style="text-align:center">${d}</label>
-    <input type="number" min="0" max="16" step="0.5" id="obwk${i}" value="${i < 5 ? 3 : 5}" style="text-align:center;padding:7px 4px"></div>`).join("");
+    <input type="number" min="0" max="12" step="0.5" id="obwk${i}" value="${i < 5 ? 3 : 5}" style="text-align:center;padding:7px 4px"></div>`).join("");
   $("ob-wk").innerHTML = wk;
   setStep(1);
 }
@@ -1336,13 +1336,14 @@ $("ob-finish").addEventListener("click", async () => {
       try { avatar_url = await uploadAvatar(obAvatarFile); }
       catch (e) { toast("Could not upload the picture — carrying on without it"); }
     }
-    const wk = DOW.map((_, i) => Number($("obwk" + i).value));
+    capGoalInputs(DOW.map((_, i) => "obwk" + i).concat("ob-default"));
+    const wk = DOW.map((_, i) => capGoal($("obwk" + i).value, true));
     await sb.from("profiles").update({
       display_name: $("ob-name").value.trim(),
       colour: $("ob-colour").value,
       avatar_url,
       weekday_goals: wk,
-      default_goal: Number($("ob-default").value) || 0,
+      default_goal: capGoal($("ob-default").value, true),
       onboarded: true
     }).eq("id", UID);
 
@@ -1846,9 +1847,27 @@ $("f-add").addEventListener("click", async () => {
   $("f-note").value = "";
 });
 $("h-date").addEventListener("change", e => { if (e.target.value) { CUR = e.target.value; renderHome(); } });
+/* No daily goal above 12 hours, anywhere. The database refuses one too
+   (goals_hours_max and the profile checks) — this is so the box says so
+   instead of the save silently failing. Anything over is brought down to 12
+   with a toast; nonsense or negatives become 0. */
+const GOAL_MAX = 12;
+function capGoal(v, quiet) {
+  const n = Number(v);
+  if (!isFinite(n) || n < 0) return 0;
+  if (n > GOAL_MAX) { if (!quiet) toast("Daily goals max out at " + GOAL_MAX + " hours"); return GOAL_MAX; }
+  return n;
+}
+function capGoalInputs(ids) {
+  let over = false;
+  ids.forEach(id => { const el = $(id); if (!el) return;
+    if (Number(el.value) > GOAL_MAX) { over = true; el.value = GOAL_MAX; } });
+  if (over) toast("Daily goals max out at " + GOAL_MAX + " hours");
+}
 $("h-goal").addEventListener("change", async e => {
-  const v = e.target.value === "" ? null : Number(e.target.value);
+  let v = e.target.value === "" ? null : Number(e.target.value);
   if (v === null) return;
+  v = capGoal(v); e.target.value = v;
   await sb.from("goals").upsert({ user_id: UID, day: CUR, hours: v });
   await refresh();
 });
@@ -4189,7 +4208,7 @@ function renderSetup() {
   $("s-default").value = ME.default_goal != null ? ME.default_goal : 3;
   const wk = Array.isArray(ME.weekday_goals) && ME.weekday_goals.length === 7 ? ME.weekday_goals : [3,3,3,3,3,5,5];
   $("s-wk").innerHTML = DOW.map((d, i) => `<div><label class="fl" style="text-align:center">${d}</label>
-    <input type="number" min="0" max="16" step="0.5" id="swk${i}" value="${wk[i]}" style="text-align:center;padding:7px 4px"></div>`).join("");
+    <input type="number" min="0" max="12" step="0.5" id="swk${i}" value="${wk[i]}" style="text-align:center;padding:7px 4px"></div>`).join("");
 
   const subs = mySubjects(UID);
   $("s-sublist").innerHTML = subs.length ? subs.map(s => {
@@ -4241,8 +4260,9 @@ $("s-avfile").addEventListener("change", async e => {
   catch (err) { toast("Upload failed: " + (err.message || err)); }
 });
 $("s-savegoals").addEventListener("click", async () => {
-  const wk = DOW.map((_, i) => Number($("swk" + i).value));
-  await sb.from("profiles").update({ weekday_goals: wk, default_goal: Number($("s-default").value) || 0 }).eq("id", UID);
+  capGoalInputs(DOW.map((_, i) => "swk" + i).concat("s-default"));
+  const wk = DOW.map((_, i) => capGoal($("swk" + i).value, true));
+  await sb.from("profiles").update({ weekday_goals: wk, default_goal: capGoal($("s-default").value, true) }).eq("id", UID);
   await refresh(); toast("Goals saved");
 });
 $("s-addsub").addEventListener("click", async () => {
@@ -4827,7 +4847,7 @@ async function runImport(parsed) {
     const gs = Object.keys(parsed.goals || {});
     if (gs.length) {
       const gp = gs.map(d => ({ user_id: UID, day: d, hours: Number(parsed.goals[d]) }))
-        .filter(g => !isNaN(g.hours));
+        .filter(g => !isNaN(g.hours)).map(g => Object.assign(g, { hours: capGoal(g.hours, true) }));
       for (let i = 0; i < gp.length; i += 200) await sb.from("goals").upsert(gp.slice(i, i + 200));
     }
     await refresh();

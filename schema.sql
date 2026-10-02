@@ -2114,3 +2114,28 @@ end $$;
 --  when nothing changed.
 -- ============================================================
 notify pgrst, 'reload schema';
+
+-- ============================================================
+--  NO DAILY GOAL ABOVE 12 HOURS
+--  ------------------------------------------------------------
+--  Somebody set a goal of a trillion hours, which every chart
+--  that scales to the goal then tried to draw. Enforced here so
+--  an old tab or a hand-made request cannot get round it; the
+--  app clamps and says so before it ever gets this far.
+-- ============================================================
+update public.goals set hours = 12 where hours > 12;
+update public.profiles set default_goal = 12 where default_goal > 12;
+
+create or replace function public.weekday_goals_ok(wk jsonb)
+returns boolean language sql immutable as $$
+  select wk is null or jsonb_typeof(wk) <> 'array' or not exists (
+    select 1 from jsonb_array_elements(wk) x
+     where jsonb_typeof(x) = 'number' and (x::text)::numeric > 12)
+$$;
+
+alter table public.goals drop constraint if exists goals_hours_max;
+alter table public.goals add constraint goals_hours_max check (hours <= 12);
+alter table public.profiles drop constraint if exists profiles_default_goal_max;
+alter table public.profiles add constraint profiles_default_goal_max check (default_goal is null or default_goal <= 12);
+alter table public.profiles drop constraint if exists profiles_weekday_goals_max;
+alter table public.profiles add constraint profiles_weekday_goals_max check (public.weekday_goals_ok(weekday_goals));
