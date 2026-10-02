@@ -1484,6 +1484,42 @@ function colourOf(s) {
 /* =========================================================================
    TIMER  (mirrored to live_timers so the crew sees it)
    ========================================================================= */
+/* ---------------------------------------------------------------------------
+   The stretches the clock actually ran, so a session with a three hour break
+   in it is drawn as two blocks and not one solid one before the save.
+
+   t.runs holds the finished stretches as [[startISO, endISO], ...]. The one
+   under way is never stored: it starts at started_at, and how long it ran is
+   whatever acc_ms has not yet accounted for, plus the time since started_at
+   if it is still going. That makes every way a timer can pause — the button,
+   the six hour cap, an admin, another tab — come out right without each one
+   having to remember to write a stretch down. A resume is the only thing that
+   closes one, because it is the only thing that moves started_at.
+
+   A timer started before this existed has acc_ms from stretches nobody wrote
+   down. That remainder is put just before started_at, the old guess, and
+   only ever for that one timer.
+   --------------------------------------------------------------------------- */
+const runsMs = rs => (rs || []).reduce((a, r) => a + Math.max(0, new Date(r[1]) - new Date(r[0])), 0);
+function timerRunsNow(t) {
+  if (!t || !t.started_at) return [];
+  const out = (t.runs || []).slice(), now = Date.now();
+  const a = new Date(t.started_at).getTime();
+  const left = Math.max(0, (t.acc_ms || 0) - runsMs(t.runs));
+  if (t.running) {
+    if (left > 30000) out.push([new Date(a - left).toISOString(), new Date(a).toISOString()]);
+    if (now - a > 30000) out.push([new Date(a).toISOString(), new Date(now).toISOString()]);
+  } else if (left > 30000) {
+    out.push([new Date(a).toISOString(), new Date(Math.min(a + left, now)).toISOString()]);
+  }
+  return out.slice(-50);
+}
+/* On resume: write down the stretch that just ended, before started_at moves. */
+function closeOpenRun(t) {
+  if (!t || t.running) return;
+  t.runs = timerRunsNow(t);
+}
+
 function elapsedMs() {
   if (!localTimer) return 0;
   return localTimer.acc_ms + (localTimer.running ? Date.now() - new Date(localTimer.started_at).getTime() : 0);
@@ -1700,6 +1736,7 @@ async function pushTimer(beat) {
   const row = {
     user_id: UID, label: localTimer.label, subject_id: localTimer.subject_id, area_id: localTimer.area_id,
     started_at: localTimer.started_at, acc_ms: localTimer.acc_ms, running: localTimer.running,
+    runs: localTimer.runs || [],
     updated_at: new Date().toISOString()
   };
 
@@ -1742,7 +1779,11 @@ async function pushTimer(beat) {
   toast("That session was finished in another tab");
 }
 $("tm-start").addEventListener("click", async () => {
-  if (localTimer) { localTimer.running = true; localTimer.started_at = new Date().toISOString(); }
+  if (localTimer) {
+    if (localTimer.running) return;     /* already going: a second press must not restart the stretch */
+    closeOpenRun(localTimer);
+    localTimer.running = true; localTimer.started_at = new Date().toISOString();
+  }
   else {
     const t = readPair("tm-subj", "tm-area");
     if (!t.subject_id) { toast("Add a subject in Setup first"); return; }
@@ -1753,7 +1794,7 @@ $("tm-start").addEventListener("click", async () => {
          looking at. CUR follows the date picker on Today, so starting a timer
          after scrolling back through last week used to file the hours you are
          sitting there doing into last week. A stopwatch measures now. */
-      started_at: new Date().toISOString(), running: true, day: todayISO() };
+      started_at: new Date().toISOString(), running: true, day: todayISO(), runs: [] };
   }
   lastBeat = Date.now(); paintTimer(); startClock(); pushTimer();
 });
@@ -1793,7 +1834,8 @@ $("ms-save").addEventListener("click", async () => {
   savingSession = true;
   $("ms-save").disabled = true;
   let saved = false;
-  try { saved = await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim(), true); }
+  const runs = timerRunsNow(localTimer);
+  try { saved = await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim(), runs.length ? runs : true); }
   finally { savingSession = false; $("ms-save").disabled = false; }
 
   /* Nothing was written, so the timer stays exactly as it was and the sheet
@@ -1809,11 +1851,14 @@ $("ms-save").addEventListener("click", async () => {
    about to throw away the timer it came from have to know: binning a running
    timer on the strength of a save that never happened loses the hours for
    good, and there is nowhere to get them back from. */
+/* fromTimer is true, or the stretches it ran, when the session came off the
+   timer; a session typed in by hand has neither. */
 async function addSession(day, target, minutes, note, fromTimer) {
   if (!minutes || minutes < 1) { toast("Minutes needs to be at least 1"); return false; }
-  const { data, error } = await sb.from("sessions").insert({
-    user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
-    day, minutes, note: note || null }).select("id").single();
+  const row = { user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
+    day, minutes, note: note || null };
+  if (Array.isArray(fromTimer)) row.runs = fromTimer;
+  const { data, error } = await sb.from("sessions").insert(row).select("id").single();
   if (error) { toast("Could not save — " + error.message, 4600); return false; }
   if (fromTimer && data && data.id) await carryTimerReactions(data.id);
   toast("Logged " + f1(minutes / 60) + " h");

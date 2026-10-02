@@ -636,6 +636,14 @@ It runs the whole interface against four fake members and three weeks of invente
 `?carry=1` gives you a timer of your own that has been paused and resumed, with reactions on it,
 for checking they survive the resume and carry onto the session when it is saved.
 
+### When sessions happened (`runs.sql`)
+
+Each session saved off the timer carries `runs`: the stretches the clock was actually
+running, so a session with a long break in it is drawn as separate blocks on the day chart
+and the study clock rather than one solid block before the save. `runs.sql` adds the
+columns, makes `crew_clock` use them, and rebuilds them for older sessions from the record.
+Safe to re-run.
+
 ### Running the tests
 
 Three browser tests load the real app against a stubbed Supabase and fail on any error:

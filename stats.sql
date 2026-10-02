@@ -31,20 +31,32 @@ stable
 set search_path = public
 as $$
   with s as (
-    select user_id, day, minutes, created_at
+    select id, user_id, day, minutes, created_at, runs
       from public.sessions
      where day >= since and minutes between 1 and 600
        /* a session typed in days later says nothing about the time of day */
        and ((created_at at time zone 'Australia/Sydney')::date - day) between 0 and 1
   ),
+  r as (
+    select s.id, (x->>0)::timestamptz a, (x->>1)::timestamptz b
+      from s, jsonb_array_elements(case when jsonb_typeof(s.runs) = 'array' then s.runs else '[]'::jsonb end) x
+     where jsonb_typeof(x) = 'array'
+  ),
+  rt as (select id, sum(extract(epoch from b - a)) / 60 tot from r where b > a group by id),
+  iv as (
+    select r.a, r.b, s.minutes / rt.tot k
+      from r join rt on rt.id = r.id join s on s.id = r.id
+     where r.b > r.a and rt.tot > 0
+    union all
+    select s.created_at - make_interval(mins => s.minutes), s.created_at, 1
+      from s where not exists (select 1 from rt where rt.id = s.id)
+  ),
   spread as (
     select extract(isodow from h at time zone 'Australia/Sydney')::int - 1 as dow,
            extract(hour   from h at time zone 'Australia/Sydney')::int     as hr,
-           extract(epoch from least(h + interval '1 hour', s.created_at)
-                            - greatest(h, s.created_at - make_interval(mins => s.minutes))) / 60 as m
-      from s,
-           generate_series(date_trunc('hour', s.created_at - make_interval(mins => s.minutes)),
-                           date_trunc('hour', s.created_at - interval '1 second'),
+           iv.k * extract(epoch from least(h + interval '1 hour', iv.b) - greatest(h, iv.a)) / 60 as m
+      from iv,
+           generate_series(date_trunc('hour', iv.a), date_trunc('hour', iv.b - interval '1 second'),
                            interval '1 hour') h
   ),
   sd as (select distinct user_id, day from s)

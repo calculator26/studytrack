@@ -88,31 +88,42 @@ function plColourOfSubject(key, sessionsOwner) {
 
 /* ---------------------------------------------------------------------------
    WHERE THE TIME OF DAY COMES FROM
-   A session is filed when it ends, so it covered the stretch before
-   created_at. Spread across the clock hours it touched, that is exact for a
-   timed session. One typed in for a different day says nothing about the
-   time of day, so it counts towards the day's total but no hour.
+   A session off the timer carries runs: the stretches the clock was actually
+   running, pauses left out. Those are drawn as they are, scaled if the
+   minutes were changed on save so the total still matches what was logged.
+   One without them (typed in, or saved before runs existed and not
+   recoverable from the record) is assumed to have run non-stop up to when it
+   was saved. One typed in for a different day says nothing about the time of
+   day, so it counts towards the day's total but no hour.
    --------------------------------------------------------------------------- */
+function plRunsOf(s) {
+  const m = Number(s.minutes);
+  const rs = (Array.isArray(s.runs) ? s.runs : [])
+    .map(r => [new Date(r[0]).getTime(), new Date(r[1]).getTime()])
+    .filter(r => r[1] > r[0]);
+  const tot = rs.reduce((a, r) => a + (r[1] - r[0]), 0);
+  if (rs.length && tot > 0) {
+    const k = (m * 60000) / tot;
+    return rs.map(r => [r[0], r[0] + (r[1] - r[0]) * k]);
+  }
+  const end = new Date(s.created_at).getTime();
+  return [[end - m * 60000, end]];
+}
 function plSegments(sessions, withLive) {
   const out = [];
   (sessions || []).forEach(s => {
     const m = Number(s.minutes);
     if (!(m > 0 && m <= 600) || !s.created_at) return;
-    const end = new Date(s.created_at).getTime(), start = end - m * 60000;
-    const ed = isoOf(new Date(end)), sd = isoOf(new Date(start));
+    const rs = plRunsOf(s);
+    const ed = isoOf(new Date(rs[rs.length - 1][1])), sd = isoOf(new Date(rs[0][0]));
     if (sd !== s.day && ed !== s.day && ed !== addDays(s.day, 1)) return;
-    out.push({ start, end, key: s.subject_id || "none", min: m });
+    rs.forEach(r => out.push({ start: r[0], end: r[1], key: s.subject_id || "none", min: (r[1] - r[0]) / 60000 }));
   });
-  if (withLive && typeof localTimer !== "undefined" && localTimer) {
-    const ms = liveMsFor(UID);
-    if (ms > 0) {
-      const now = Date.now();
-      /* The part since the last resume is exact; anything from before a pause
-         is put just before it, which is where it almost always was. */
-      const runMs = localTimer.running ? Math.min(ms, now - new Date(localTimer.started_at).getTime()) : 0;
-      const runStart = now - runMs;
-      out.push({ start: runStart - (ms - runMs), end: now, key: localTimer.subject_id || "none", min: ms / 60000, live: true });
-    }
+  if (withLive && typeof localTimer !== "undefined" && localTimer && typeof timerRunsNow === "function") {
+    timerRunsNow(localTimer).forEach(r => {
+      const a = new Date(r[0]).getTime(), b = new Date(r[1]).getTime();
+      if (b > a) out.push({ start: a, end: b, key: localTimer.subject_id || "none", min: (b - a) / 60000, live: true });
+    });
   }
   return out;
 }
@@ -394,7 +405,8 @@ function plFacts(uid, sessions) {
   const lateWeeks = new Set(), weekDays = {};
   list.forEach(s => {
     if (!s.created_at || !(s.minutes > 0)) return;
-    const end = new Date(s.created_at), start = new Date(end.getTime() - s.minutes * 60000);
+    const rs = plRunsOf(s);
+    const start = new Date(rs[0][0]), end = new Date(rs[rs.length - 1][1]);
     if (isoOf(end) !== s.day && isoOf(start) !== s.day && isoOf(end) !== addDays(s.day, 1)) return;
     if (start.getHours() >= 4 && start.getHours() < 8) early++;
     const wk = addDays(s.day, -dowIdx(s.day));
