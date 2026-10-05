@@ -605,7 +605,14 @@
           }),
           getPublicUrl: () => ({ data: { publicUrl: "" } })
         }) },
-        channel: () => ({ on() { return this; }, subscribe() { return this; } })
+        /* Records what is subscribed, so a test can see which tables are live
+           and that a background tab lets go of them. */
+        channel: (name) => {
+          const ch = { name, tables: [], on(ev, f) { if (f && f.table) this.tables.push(f.table); return this; },
+                       subscribe() { (window.__rt = window.__rt || []).push(this); return this; } };
+          return ch;
+        },
+        removeChannel: (ch) => { window.__rt = (window.__rt || []).filter(c => c !== ch); }
       };
     }
   };

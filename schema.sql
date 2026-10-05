@@ -284,8 +284,13 @@ grant execute on function public.admin_delete_user(uuid) to authenticated;
 -- ============================================================
 do $$
 begin
-  begin execute 'alter publication supabase_realtime add table public.sessions';    exception when others then null; end;
-  begin execute 'alter publication supabase_realtime add table public.live_timers'; exception when others then null; end;
+  /* sessions and live_timers are deliberately NOT published. Every change
+     is pushed to every open device and billed per device, and a running
+     timer changes once a minute — that alone ran into millions of messages a
+     month. The app polls both instead. Taken out again here in case an older
+     copy of this file put them in. */
+  begin execute 'alter publication supabase_realtime drop table public.sessions';    exception when others then null; end;
+  begin execute 'alter publication supabase_realtime drop table public.live_timers'; exception when others then null; end;
   begin execute 'alter publication supabase_realtime add table public.profiles';    exception when others then null; end;
 end $$;
 

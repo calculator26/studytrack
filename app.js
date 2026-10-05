@@ -1140,62 +1140,84 @@ function pollTimersSoon() {
   }, Math.max(0, TIMERS_GAP - (Date.now() - timersAt)));
 }
 
-/* Somebody else logged a session.
+/* ---------------------------------------------------------------------------
+   REALTIME, AND WHAT IT IS NOT USED FOR
 
-   This used to send every connected client off to re-read, which is the shape
-   that does not survive four hundred people: one person pressing save turns
-   into four hundred reads. But an insert arrives carrying the whole row, and
-   the rollup only wants the minutes and the day — so the numbers move at once,
-   for nothing, and the read becomes a slow reconcile rather than a reflex.
+   Supabase bills every change it pushes, once per connected device. A
+   running timer heartbeats once a minute, so live_timers alone was about
+   68,000 changes a day, each copied to every open tab — millions of
+   messages a month, almost all of them saying "still going". Sessions were
+   the next biggest. Both are now read by polling instead (timers every 30
+   seconds, the rollup every 2 minutes, a few kilobytes each), and the
+   database no longer publishes those tables at all.
 
-   Edits and deletions come through without the old row attached, so those
-   still ask; they are a fraction of the traffic. */
-function onCrewSession(payload) {
-  const row = payload && (payload.new || payload.old);
-  const kind = payload && payload.eventType;
-  if (!row || row.user_id === UID) return;     /* your own are applied locally already */
-  if (kind === "INSERT" && row.day && row.minutes) {
-    patchDaily(row.user_id, row.day, Number(row.minutes), 1);
-    try { renderAll(); } catch (e) { /* not up yet */ }
-    return;
-  }
-  refreshSoon();
-}
+   What stays live is what has to feel live and is small: chat, its
+   reactions, profile edits and your own nudges.
 
-function subscribeRealtime() {
+   A tab left in the background lets go of the socket after two minutes and
+   catches up when it comes back, so a laptop with the app open all night is
+   not on the bill all night.
+   --------------------------------------------------------------------------- */
+let rtChannels = [], rtIdle = 0, rtClosedAt = null;
+function openRealtime() {
+  if (rtChannels.length || !sb || !UID) return;
   try {
-    sb.channel("crew")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sessions"    }, onCrewSession)
-      /* Chat is subscribed from the start even though nothing is fetched until
-         you open the tab — that is what puts the dot on it when somebody
-         speaks, and a socket message costs nothing to receive. */
+    rtChannels.push(sb.channel("crew")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, onChatInsert)
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, onChatDelete)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, onMsgReactionChange)
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_reactions" }, onMsgReactionChange)
-      .on("postgres_changes", { event: "*", schema: "public", table: "live_timers" }, pollTimersSoon)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles"    },
           () => { crewReloadProfiles = true; refreshSoon(); })
-      .subscribe();
+      .subscribe());
 
     /* Nudges are addressed to one person, so each client listens only for
        its own. No filter here would mean every poke woke the whole crew. */
-    sb.channel("nudges:" + UID)
+    rtChannels.push(sb.channel("nudges:" + UID)
       .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "nudges", filter: "to_user=eq." + UID
       }, loadPokes)
-      .subscribe();
+      .subscribe());
   } catch (e) { /* realtime is a bonus, not a requirement */ }
+}
+function closeRealtime() {
+  if (!rtChannels.length) return;
+  rtChannels.forEach(c => { try { sb.removeChannel(c); } catch (e) { /* already gone */ } });
+  rtChannels = [];
+  rtClosedAt = new Date(Date.now() - 5000).toISOString();
+}
+/* Whatever was said while the socket was closed, put through the same path
+   a live message takes, so mentions and the unread dot still happen. */
+async function catchUpChat() {
+  if (!rtClosedAt) return;
+  const since = rtClosedAt; rtClosedAt = null;
+  try {
+    const { data } = await sb.from("messages").select("*").gt("created_at", since)
+      .order("created_at", { ascending: true }).limit(50);
+    (data || []).forEach(m => onChatInsert({ new: m }));
+  } catch (e) { /* the next open of the room reads it anyway */ }
+}
+
+function subscribeRealtime() {
+  openRealtime();
 
   if (pollHandle) return;                       /* only ever wire these up once */
   /* Realtime already tells us the moment anything changes. These intervals
      are only a safety net for a dropped socket, so they can be lazy — and
      they do nothing at all for a tab in the background. */
   pollHandle = setInterval(() => { if (!document.hidden) pollTimersSoon(); }, 30000);
-  setInterval(() => { if (!document.hidden) refreshSoon(); }, 300000);
+  /* Sessions are no longer pushed, so this is how other people's new hours
+     arrive: a delta read of the last two days, a few kilobytes. */
+  setInterval(() => { if (!document.hidden) refreshSoon(); }, 120000);
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) return;
+    if (document.hidden) {
+      clearTimeout(rtIdle);
+      rtIdle = setTimeout(closeRealtime, 120000);
+      return;
+    }
+    clearTimeout(rtIdle);
+    if (!rtChannels.length) { openRealtime(); catchUpChat(); missedWhileHidden = true; }
     paintTimer();
     pollTimersSoon();
     /* Only re-read everything if something actually happened while you were

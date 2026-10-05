@@ -644,6 +644,14 @@ and the study clock rather than one solid block before the save. `runs.sql` adds
 columns, makes `crew_clock` use them, and rebuilds them for older sessions from the record.
 Safe to re-run.
 
+### Realtime usage
+
+Supabase bills Realtime per message delivered, once per open device. Only `messages`,
+`message_reactions`, `profiles` and `nudges` are published. `live_timers` (which changes once a
+minute per running timer) and `sessions` are deliberately left out and read by polling: timers
+every 30 seconds, the rollup every 2 minutes. A tab in the background disconnects after two
+minutes and catches up on return. Do not add those tables back to the publication.
+
 ### Running the tests
 
 Three browser tests load the real app against a stubbed Supabase and fail on any error:
