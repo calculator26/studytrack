@@ -287,15 +287,33 @@ const filedMinutesOn = (uid, day) => {
    Yours comes from this tab, which is exact to the second; everybody else's
    from their live_timers row, on the same freshness rule the live strip uses.
    While a finished session is being saved it is about to arrive as a filed
-   row, so it stops counting here rather than being counted twice. */
+   row, so it stops counting here rather than being counted twice.
+   Only the part of it that falls on today, since every caller adds this to
+   today: a timer started at 11pm and still going at 1am has an hour on
+   yesterday that is not today's. */
 function liveMsFor(uid) {
   const cap = ms => Math.max(0, Math.min(ms, TIMER_CAP_MS));
-  if (uid === UID) return localTimer && !savingSession ? cap(elapsedMs()) : 0;
+  if (uid === UID) return localTimer && !savingSession ? todayShare(localTimer, cap(elapsedMs())) : 0;
   const t = (DB.timers || []).find(x => x.user_id === uid);
   if (!t) return 0;
   const now = Date.now();
   if (now - new Date(t.updated_at || 0).getTime() >= (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS)) return 0;
-  return cap(t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0));
+  return todayShare(t, cap(t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0)));
+}
+/* How much of a timer's total ran after midnight, worked out from its
+   stretches and scaled to the total so the six hour cap still holds. */
+function todayShare(t, total) {
+  if (!total) return 0;
+  const rs = timerRunsNow(t);
+  const all = runsMs(rs);
+  if (!all) return total;
+  const mid = parseD(todayISO()).getTime(), now = Date.now();
+  let on = 0;
+  rs.forEach(r => {
+    const a = Math.max(new Date(r[0]).getTime(), mid), b = Math.min(new Date(r[1]).getTime(), now);
+    if (b > a) on += b - a;
+  });
+  return Math.min(total, total * on / all);
 }
 
 /* The subject on somebody's clock, in the same normalised form the subject
@@ -1566,6 +1584,34 @@ function timerRunsNow(t) {
   }
   return out.slice(-50);
 }
+/* A session that ran across midnight belongs to both days. Its stretches are
+   cut at each midnight and the minutes shared out in proportion, adding up
+   to exactly what was saved (it may have been edited on the sheet). With no
+   stretches to go on it stays whole, on the day given. */
+function splitByDay(runs, minutes, fallbackDay) {
+  const by = {};
+  (runs || []).forEach(r => {
+    let a = new Date(r[0]).getTime(); const b = new Date(r[1]).getTime();
+    let guard = 0;
+    while (a < b && guard++ < 10) {
+      const d = new Date(a);
+      const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+      const end = Math.min(b, next), day = isoOf(d);
+      (by[day] = by[day] || []).push([new Date(a).toISOString(), new Date(end).toISOString()]);
+      a = end;
+    }
+  });
+  const days = Object.keys(by).sort();
+  if (days.length <= 1) return [{ day: days[0] || fallbackDay, minutes, runs: days.length ? by[days[0]] : null }];
+  const ms = days.map(d => runsMs(by[d])), tot = ms.reduce((x, y) => x + y, 0);
+  let parts = days.map((d, i) => ({ day: d, minutes: Math.round(minutes * ms[i] / tot), runs: by[d] }));
+  parts = parts.filter(p => p.minutes >= 1);
+  if (!parts.length) return [{ day: days[days.length - 1], minutes, runs: null }];
+  const diff = minutes - parts.reduce((x, p) => x + p.minutes, 0);
+  parts.reduce((m, p) => p.minutes > m.minutes ? p : m, parts[0]).minutes += diff;
+  return parts;
+}
+
 /* On resume: write down the stretch that just ended, before started_at moves. */
 function closeOpenRun(t) {
   if (!t || t.running) return;
@@ -1870,7 +1916,10 @@ $("tm-stop").addEventListener("click", () => {
   setPair("ms-subj", "ms-area", localTimer.subject_id, localTimer.area_id);
   $("ms-min").value = mins;
   $("ms-note").value = "";
-  $("ms-sub").textContent = hms(elapsedMs()) + " on " + fmtLong(localTimer.day || todayISO());
+  const parts = splitByDay(timerRunsNow(localTimer), mins, localTimer.day || todayISO());
+  $("ms-sub").textContent = parts.length > 1
+    ? hms(elapsedMs()) + " across midnight: " + parts.map(p => p.minutes + " min on " + fmtD(p.day)).join(", ")
+    : hms(elapsedMs()) + " on " + fmtLong(parts[0].day);
   $("ov-save").classList.add("on");
   setTimeout(() => $("ms-note").focus(), 60);
 });
@@ -1907,13 +1956,21 @@ $("ms-save").addEventListener("click", async () => {
    timer; a session typed in by hand has neither. */
 async function addSession(day, target, minutes, note, fromTimer) {
   if (!minutes || minutes < 1) { toast("Minutes needs to be at least 1"); return false; }
-  const row = { user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
-    day, minutes, note: note || null };
-  if (Array.isArray(fromTimer)) row.runs = fromTimer;
-  const { data, error } = await sb.from("sessions").insert(row).select("id").single();
+  /* Off the timer, split at midnight: one row per day it ran on. */
+  const parts = Array.isArray(fromTimer) ? splitByDay(fromTimer, minutes, day) : [{ day, minutes, runs: null }];
+  const rows = parts.map(p => {
+    const row = { user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
+      day: p.day, minutes: p.minutes, note: note || null };
+    if (p.runs) row.runs = p.runs;
+    return row;
+  });
+  const { data, error } = await sb.from("sessions").insert(rows).select("id, minutes");
   if (error) { toast("Could not save — " + error.message, 4600); return false; }
-  if (fromTimer && data && data.id) await carryTimerReactions(data.id);
-  toast("Logged " + f1(minutes / 60) + " h");
+  /* The live reactions go on the biggest part. */
+  const main = (data || []).slice().sort((a, b) => b.minutes - a.minutes)[0];
+  if (fromTimer && main && main.id) await carryTimerReactions(main.id);
+  toast("Logged " + f1(minutes / 60) + " h" + (parts.length > 1
+    ? " — " + parts.map(p => f1(p.minutes / 60) + " h on " + fmtD(p.day)).join(", ") : ""));
   await refresh();
   return true;
 }

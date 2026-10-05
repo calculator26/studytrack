@@ -236,7 +236,9 @@
         const made = arr.map(o => Object.assign({ id: uid(ssid++), created_at: new Date().toISOString() }, o));
         T[table].push(...made);
         const p = Promise.resolve({ data: made, error: null });
-        p.select = () => ({ single: () => Promise.resolve({ data: made[0], error: null }) });
+        /* as PostgREST: select() gives back every row inserted, single() the first */
+        p.select = () => { const q = Promise.resolve({ data: made, error: null });
+                           q.single = () => Promise.resolve({ data: made[0], error: null }); return q; };
         return p;
       },
       upsert(payload) {

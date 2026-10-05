@@ -151,3 +151,14 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------------
+--  SESSIONS ACROSS MIDNIGHT (applied 6 Oct 2026, one-off)
+--  The app now saves a session that ran across midnight as one row per day,
+--  minutes shared in proportion to the stretches on each side. The 58 older
+--  sessions that crossed midnight were split the same way, and 6 that ran
+--  entirely on a different day from the one they were filed on (and had not
+--  been moved by hand) were moved to it. Every original row is kept in
+--  public.sessions_split_backup (no access from the app) in case anything
+--  needs putting back. Totals per person are unchanged.
+-- ---------------------------------------------------------------------------
