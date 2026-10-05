@@ -169,7 +169,10 @@ const pad = n => String(n).padStart(2, "0");
 const todayISO = () => { const d = new Date(); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); };
 const parseD = s => { const p = String(s).slice(0,10).split("-").map(Number); return new Date(p[0], p[1]-1, p[2]); };
 const isoOf = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
-const addDays = (s, n) => isoOf(new Date(parseD(s).getTime() + n*864e5));
+/* By calendar day, never by 24 hours: the day daylight saving starts is 23
+   hours long, and adding 24h at a time skipped it — so from Monday 5 October,
+   "yesterday" came out as Saturday and every streak broke across Sunday. */
+const addDays = (s, n) => { const d = parseD(s); return isoOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)); };
 const dowIdx = s => (parseD(s).getDay() + 6) % 7;            // 0 = Monday
 const fmtD = s => parseD(s).toLocaleDateString("en-AU", {weekday:"short", day:"numeric", month:"short"});
 const fmtLong = s => parseD(s).toLocaleDateString("en-AU", {weekday:"long", day:"numeric", month:"long"});
@@ -444,8 +447,14 @@ function allDaysFor(uid) {
   while (d <= t && out.length < 500) { out.push(d); d = addDays(d, 1); }
   return out;
 }
+/* The Day range shows one day, today unless you have stepped back. Held as a
+   date rather than an offset, so leaving the page open past midnight does
+   not quietly slide what you were looking at onto a different day. */
+let LB_DAY = null;
+const lbDay = () => (LB_DAY && LB_DAY < todayISO()) ? LB_DAY : todayISO();
 function rangeDays() {
   const t = todayISO();
+  if (RANGE === 1) return [lbDay()];
   if (RANGE === 0) {
     /* "All time" reaches back to the first day anybody logged, or to the edge
        of the rollup window, whichever is nearer. */
@@ -805,6 +814,7 @@ async function onSession(session) {
     renderAll();
     initReminders();
     loadPokes();
+    setTimeout(maybeShowRecap, 1800);
     /* Asks the database whether this account is an administrator and reveals
        the console entry in Setup if it is. Never blocks the app: a project
        that has not re-run schema.sql simply has no console. */
@@ -1409,8 +1419,28 @@ $("np-pause").addEventListener("click", () => {
 $("np-stop").addEventListener("click", () => { goToTimer(); $("tm-stop").click(); });
 $("rangechips").querySelectorAll("[data-r]").forEach(b => b.addEventListener("click", () => {
   $("rangechips").querySelectorAll("[data-r]").forEach(x => x.setAttribute("aria-pressed", "false"));
-  b.setAttribute("aria-pressed", "true"); RANGE = +b.dataset.r; renderCrew();
+  b.setAttribute("aria-pressed", "true"); RANGE = +b.dataset.r;
+  if (RANGE === 1) LB_DAY = null;       /* pressing Day always lands on today */
+  renderCrew();
 }));
+function stepLbDay(n) {
+  const d = addDays(lbDay(), n);
+  if (d > todayISO() || d < crewSince()) return;
+  LB_DAY = d === todayISO() ? null : d;
+  renderCrew();
+}
+$("lbday-prev").addEventListener("click", () => stepLbDay(-1));
+$("lbday-next").addEventListener("click", () => stepLbDay(1));
+function paintLbDay() {
+  const box = $("lbday"); if (!box) return;
+  box.hidden = RANGE !== 1;
+  if (RANGE !== 1) return;
+  const d = lbDay(), t = todayISO();
+  $("lbday-name").textContent = d === t ? "Today" : d === addDays(t, -1) ? "Yesterday" : fmtLong(d).split(" ")[0];
+  $("lbday-date").textContent = fmtLong(d);
+  $("lbday-prev").disabled = addDays(d, -1) < crewSince();
+  $("lbday-next").disabled = d >= t;
+}
 /* The pressed chip follows RANGE rather than the markup, so a browser still
    holding a cached index.html never shows one range highlighted over another. */
 $("rangechips").querySelectorAll("[data-r]").forEach(x =>
@@ -1882,6 +1912,120 @@ async function carryTimerReactions(sessionId) {
     rxSeenSave();
   } catch (e) { /* see above */ }
 }
+
+/* ---------------------------------------------------------------------------
+   YESTERDAY, ON ARRIVAL
+   The first time the app is opened on a new day — or the moment the clock
+   passes midnight with it open — a card with how yesterday went: hours,
+   where you finished, how far behind the person above, goal, streak, and who
+   won the day. Once a day, remembered per person on this device.
+
+   Built from the rollup already in memory, so it costs no extra reads. Private
+   mode is respected both ways: someone hiding other people's hours sees only
+   their own numbers, and someone hiding their own is ranked against the field
+   for their eyes only, the way the rest of the app already treats them.
+   --------------------------------------------------------------------------- */
+let recapShown = "", recapRetry = 0;
+const recapKey = () => "st.recap." + (UID || "anon");
+function recapSeen(day) {
+  if (recapShown === day) return true;
+  try { return localStorage.getItem(recapKey()) === day; } catch (e) { return false; }
+}
+function markRecap(day) {
+  recapShown = day;
+  try { localStorage.setItem(recapKey(), day); } catch (e) { /* once per load, then */ }
+}
+function recapData() {
+  const t = todayISO(), y = addDays(t, -1);
+  const mine = dayCell(UID, y);
+  const field = visiblePeople().map(p => [p, dayCell(p.id, y)[0]]).filter(x => x[1] > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const idx = field.findIndex(x => x[0].id === UID);
+  const goal = goalFor(UID, y);
+  return { y, min: mine[0], sessions: mine[1], field, rank: idx + 1, above: idx > 0 ? field[idx - 1] : null,
+           before: dayCell(UID, addDays(y, -1))[0], goal, hit: goal > 0 && mine[0] / 60 >= goal,
+           streak: streakFor(UID), total: field.reduce((a, x) => a + x[1], 0) };
+}
+function maybeShowRecap() {
+  if (!UID || !ME || !ME.onboarded || document.hidden) return;
+  const t = todayISO();
+  if (recapSeen(t)) return;
+  /* Somebody who only joined today has no yesterday to talk about. */
+  if (ME.created_at && isoOf(new Date(ME.created_at)) >= t) { markRecap(t); return; }
+  /* Never on top of something else (an achievement, the save sheet): look
+     again shortly, so it follows straight on once that is closed. */
+  if (document.querySelector(".ov.on, .pl-cele.on")) {
+    if (!recapRetry) recapRetry = setTimeout(() => { recapRetry = 0; maybeShowRecap(); }, 4000);
+    return;
+  }
+  const r = recapData();
+  if (!r.field.length && !r.min) return;     /* the rollup has not arrived yet */
+  markRecap(t);
+  paintRecap(r);
+  $("ov-recap").classList.add("on");
+}
+function paintRecap(r) {
+  const h = m => f1(m / 60) + " h";
+  const others = !hidingOthers();
+  $("rc-title").textContent = r.min ? "Yesterday, you did " + h(r.min) : "Yesterday";
+  $("rc-date").textContent = fmtLong(r.y);
+  const tiles = [];
+  if (r.min) {
+    if (others && r.rank) tiles.push(["#" + r.rank, "of " + r.field.length + " who studied"]);
+    tiles.push([String(r.sessions), r.sessions === 1 ? "session" : "sessions"]);
+    if (r.goal > 0) tiles.push([r.hit ? "✓" : f1(r.min / 60) + "/" + f1(r.goal), r.hit ? "goal of " + f1(r.goal) + " h hit" : "of your goal"]);
+    tiles.push([String(r.streak), r.streak === 1 ? "day streak" : "day streak"]);
+  }
+  const lines = [];
+  if (r.min) {
+    if (r.before) {
+      const d = r.min - r.before;
+      lines.push(Math.abs(d) < 5 ? "Level with the day before."
+        : (d > 0 ? "Up " + h(d) + " on the day before." : "Down " + h(-d) + " on the day before."));
+    }
+    if (others && r.above) {
+      const gap = Math.max(1, Math.round(r.above[1] - r.min));
+      const gapTxt = gap < 60 ? gap + " min" : Math.floor(gap / 60) + " h" + (gap % 60 ? " " + (gap % 60) + " min" : "");
+      lines.push("<b>" + gapTxt + "</b> behind #" + (r.rank - 1) + ". One more session and that place is yours.");
+    } else if (others && r.rank === 1) {
+      lines.push("<b>You won the day.</b> Everyone is coming for it today.");
+    }
+  } else {
+    lines.push("Nothing logged yesterday. Today is a clean slate — one session gets you back on the board.");
+  }
+  if (others && r.field.length) {
+    const w = r.field[0];
+    if (w[0].id !== UID) lines.push("Top of the day: <b>" + esc(w[0].display_name) + "</b> with " + h(w[1]) + ".");
+    lines.push(r.field.length + " people logged " + Math.round(r.total / 60) + " hours between them.");
+  }
+  $("rc-body").innerHTML =
+    (tiles.length ? `<div class="rc-tiles">${tiles.map(x => `<div><b>${esc(x[0])}</b><span>${esc(x[1])}</span></div>`).join("")}</div>` : "") +
+    `<div class="rc-lines">${lines.map(l => `<p>${l}</p>`).join("")}</div>
+     <div class="controls" style="justify-content:flex-end;margin-top:14px">
+       ${others ? `<button class="btn ghost" id="rc-board">See yesterday's board</button>` : ""}
+       <button class="btn" id="rc-go">Start today</button>
+     </div>`;
+  const close = () => $("ov-recap").classList.remove("on");
+  if ($("rc-board")) $("rc-board").onclick = () => {
+    close();
+    RANGE = 1; LB_DAY = r.y;
+    $("rangechips").querySelectorAll("[data-r]").forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.r === 1)));
+    const tab = document.querySelector('nav.tabs button[data-p="crew"]');
+    if (tab) tab.click();
+    renderCrew();
+  };
+  $("rc-go").onclick = () => {
+    close();
+    const tab = document.querySelector('nav.tabs button[data-p="home"]');
+    if (tab) tab.click();
+  };
+}
+$("rc-x").addEventListener("click", () => $("ov-recap").classList.remove("on"));
+$("ov-recap").addEventListener("click", e => { if (e.target === $("ov-recap")) $("ov-recap").classList.remove("on"); });
+/* Midnight with the app open, a phone unlocked in the morning, or a tab that
+   was in the background: all just "is it a new day yet". */
+setInterval(maybeShowRecap, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) setTimeout(maybeShowRecap, 1500); });
 
 /* ---------- manual add ---------- */
 document.querySelectorAll("[data-min]").forEach(b => b.addEventListener("click", () => $("f-min").value = b.dataset.min));
@@ -3231,9 +3375,11 @@ function renderCrew() {
   const board = leaderboard(null, { subject: LB_SUBJECT, metric: LB_METRIC });
   const days = rangeDays();
   const M = LB_METRICS[LB_METRIC];
+  paintLbDay();
   const period = RANGE === 0
     ? `All time — ${days.length} days of records`
-    : (RANGE === 1 ? "Today only" : `The last ${RANGE} days`);
+    : (RANGE === 1 ? (lbDay() === todayISO() ? "Today only" : fmtLong(lbDay()) + " only")
+                   : `The last ${RANGE} days`);
   $("lb-sub").textContent = period +
     (group ? ` · ${group.label} only, ${group.takers.size} ${group.takers.size === 1 ? "person takes" : "take"} it` : "") +
     (LB_METRIC === "hours" ? "" : ` · ranked on ${M.label.toLowerCase()}`) +

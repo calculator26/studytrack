@@ -314,13 +314,18 @@
       <header>
         <div><h2>Leaderboard</h2><div class="sub" id="lb-sub">—</div></div>
         <div class="controls" id="rangechips">
-          <button class="chip" data-r="1">Today</button>
+          <button class="chip" data-r="1">Day</button>
           <button class="chip" aria-pressed="true" data-r="7">7 days</button>
           <button class="chip" data-r="30">30 days</button>
           <button class="chip" data-r="0">All time</button>
         </div>
       </header>
       <div class="body">
+        <div class="lbday" id="lbday" hidden>
+          <button class="chip" id="lbday-prev" aria-label="Previous day">‹</button>
+          <div class="lbday-l"><b id="lbday-name">Today</b><span id="lbday-date"></span></div>
+          <button class="chip" id="lbday-next" aria-label="Next day">›</button>
+        </div>
         <div class="lbfilters" id="lbfilters">
           <div><label class="fl" for="lb-subject">Subject</label><select id="lb-subject"></select></div>
           <div><label class="fl" for="lb-metric">Ranked by</label><select id="lb-metric"></select></div>
@@ -644,6 +649,14 @@
 </div>
 
 <!-- ============ MODALS ============ -->
+<div class="ov" id="ov-recap">
+  <div class="modal recap">
+    <header><div><h2 id="rc-title">Yesterday</h2><div class="sub" id="rc-date">—</div></div>
+      <button class="x" id="rc-x" style="font-size:20px" aria-label="Close">×</button></header>
+    <div class="body" id="rc-body"></div>
+  </div>
+</div>
+
 <div class="ov" id="ov-save">
   <div class="modal">
     <header><div><h2>Session finished</h2><div style="font-size:12.5px;color:var(--ink-soft)" id="ms-sub">—</div></div></header>
