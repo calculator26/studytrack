@@ -2011,15 +2011,37 @@ create policy "msgreact delete own" on public.message_reactions
 -- emoji list and the cap cannot be stepped over by anyone holding the anon key.
 revoke insert, update on public.message_reactions from anon, authenticated;
 
--- The list, in one place, so the database and the picker cannot drift apart.
+-- The quick row the picker leads with (crickets first). Any other emoji can
+-- be picked or typed: is_reaction_emoji() is the actual rule.
 create or replace function public.chat_emoji()
 returns text[]
 language sql
 immutable
 set search_path = public
-as $$ select array['👍','❤️','😂','🔥','💀','🤨','👀','🎉','😭'] $$;
+as $$ select array['🦗','👍','❤️','😂','🔥','💀','🤨','👀','🎉','😭','🫡','🐐'] $$;
 
 grant execute on function public.chat_emoji() to authenticated;
+
+-- One emoji, optionally with a skin tone or variation selector, or a joined
+-- sequence (families, flags). Never letters, digits, spaces or punctuation,
+-- so a reaction cannot be used to post text.
+create or replace function public.is_reaction_emoji(e text)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select e is not null
+     and char_length(e) between 1 and 12
+     and e !~ '[[:alnum:][:space:][:cntrl:][:punct:]]'
+     and e ~ '^[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u23FF\u2460-\u27BF\u2900-\u297F\u2B00-\u2BFF\u3030\u303D\u3297\u3299\u00A9\u00AE\u2122\u203C\u2049\u2139]'
+     and (char_length(e) <= 2
+          or e ~ '\u200D'
+          or e ~ '[\U000E0020-\U000E007F]'
+          or (char_length(e) = 3 and e ~ '[\U0001F3FB-\U0001F3FF]'))
+$$;
+
+grant execute on function public.is_reaction_emoji(text) to authenticated;
 
 create or replace function public.react_message(message_id uuid, emoji text)
 returns jsonb
@@ -2040,8 +2062,8 @@ begin
   if me is null then
     return jsonb_build_object('ok', false, 'why', 'You are not signed in');
   end if;
-  if e is null or not (e = any(public.chat_emoji())) then
-    return jsonb_build_object('ok', false, 'why', 'Not one of the reactions');
+  if not public.is_reaction_emoji(e) then
+    return jsonb_build_object('ok', false, 'why', 'Reactions have to be a single emoji');
   end if;
   if not exists (select 1 from public.messages m where m.id = mid) then
     return jsonb_build_object('ok', false, 'why', 'That message is gone');

@@ -1,7 +1,7 @@
 const { setup } = require('./browser');
 const UID = "11111111-1111-1111-1111-111111111111";
 const OTHER = "22222222-2222-2222-2222-222222222222";
-const EMOJI = ["\u{1F44D}","❤️","\u{1F602}","\u{1F525}","\u{1F480}","\u{1F928}","\u{1F440}","\u{1F389}","\u{1F62D}"];
+const EMOJI = ["\u{1F997}","\u{1F44D}","❤️","\u{1F602}","\u{1F525}","\u{1F480}","\u{1F928}","\u{1F440}","\u{1F389}","\u{1F62D}","\u{1FAE1}","\u{1F410}"];
 
 const STUB = `
 window.__rpc = []; window.__fail = false; window.__rt = {};
@@ -59,8 +59,11 @@ window.supabase = { createClient: () => {
   console.log('\n--- the picker ---');
   await p.click('[data-msg="m2"] [data-mrxadd]'); await p.waitForTimeout(200);
   ok('opens', await p.locator('[data-msg="m2"] .mrxpick').isVisible());
-  ok('with all nine, sus included', await p.locator('[data-msg="m2"] .mrxpick button').count() === 9 &&
+  ok('with the whole quick row, crickets first and sus included',
+     await p.locator('[data-msg="m2"] .mrxpick button[data-mrx]').count() === EMOJI.length &&
+     await p.locator('[data-msg="m2"] .mrxpick button[data-mrx]').first().getAttribute('data-mrx') === '\u{1F997}' &&
      await p.locator('[data-msg="m2"] .mrxpick button[data-mrx="\u{1F928}"]').count() === 1);
+  ok('and a way to any emoji', await p.locator('[data-msg="m2"] .mrxpick [data-mrxmore]').count() === 1);
   await p.keyboard.press('Escape'); await p.waitForTimeout(200);
   ok('Escape closes it', await p.locator('.mrxpick').count() === 0);
 
@@ -104,6 +107,25 @@ window.supabase = { createClient: () => {
   ok('  with the reason shown', /limit/i.test(toastTxt), toastTxt.trim().slice(0,50));
 
   await p.evaluate(() => { __fail = false; });
+
+  console.log('\n--- any emoji at all ---');
+  await p.click('[data-msg="m2"] [data-mrxadd]'); await p.waitForTimeout(150);
+  await p.click('[data-msg="m2"] [data-mrxmore]'); await p.waitForTimeout(250);
+  ok('the library opens', await p.locator('#rxsheet.on .rxs-grid button').count() > 200);
+  await p.click('#rxsheet [data-rxpick="\u{1F438}"]'); await p.waitForTimeout(350);
+  const frog = await p.evaluate(() => __rpc.filter(c => c[0]==='react_message').pop());
+  ok('picking one outside the quick row reacts with it', frog && frog[1].emoji === '\u{1F438}', frog);
+  ok('  and it shows on the message', await p.locator('[data-msg="m2"] .mrx.on[data-mrx="\u{1F438}"]').count() === 1);
+  ok('  and the library closed', await p.locator('#rxsheet.on').count() === 0);
+  await p.click('[data-msg="m2"] [data-mrxadd]'); await p.waitForTimeout(150);
+  ok('it is now in your recent picks', await p.locator('[data-msg="m2"] .mrxpick button[data-mrx="\u{1F438}"]').count() === 1);
+  await p.click('[data-msg="m2"] [data-mrxmore]'); await p.waitForTimeout(250);
+  await p.fill('#rxsheet [data-rxtype]', 'lol'); await p.waitForTimeout(100);
+  ok('typing words is refused', /not an emoji/i.test(await p.locator('#rxsheet .rxs-hint').textContent()) &&
+     await p.locator('#rxsheet.on').count() === 1);
+  await p.fill('#rxsheet [data-rxtype]', '\u{1F9A6}'); await p.waitForTimeout(350);
+  const otter = await p.evaluate(() => __rpc.filter(c => c[0]==='react_message').pop());
+  ok('typing or pasting an emoji reacts with it', otter && otter[1].emoji === '\u{1F9A6}', otter);
   /* Only when asked for: node _test/msgrx.js <folder>. Without one this used
      to write into a folder literally called "undefined", which got committed. */
   if (process.argv[2]) await p.locator('#chatlog').screenshot({ path: process.argv[2] + '/msgrx.png' });

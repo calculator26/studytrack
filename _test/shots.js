@@ -8,6 +8,9 @@ const out = process.argv[2] || '.';
   for (const [tag, vp] of [['laptop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     const p = await b.newPage({ viewport: vp, deviceScaleFactor: tag === 'phone' ? 2 : 1 });
     p.on('pageerror', e => errs.push(tag + ': ' + e.message));
+    /* the daily recap is somebody else's surface; mark it seen so it stays out of the way */
+    await p.addInitScript(() => { const d = new Date(), z = n => String(n).padStart(2, '0');
+      localStorage.setItem('st.recap.00000000-0000-4000-8000-000000000001', d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate())); });
     p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push(tag + ' console: ' + m.text()); });
     await p.goto(b.base + '/_test/index.html', { waitUntil: 'networkidle' });
     await p.waitForTimeout(1200);

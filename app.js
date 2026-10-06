@@ -5898,15 +5898,61 @@ function annHTML(m) {
    --------------------------------------------------------------------------- */
 /* 🤨 is "sus" — the same face the sus reaction on sessions and timers wears,
    so it means the same thing in the room as it does on the board. */
-let CHAT_EMOJI = ["\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\ude02", "\ud83d\udd25",
-                  "\ud83d\udc80", "\ud83e\udd28", "\ud83d\udc40", "\ud83c\udf89", "\ud83d\ude2d"];
+/* The quick row: crickets first, by popular demand. Any other emoji can be
+   picked from the library or typed; the database checks it is one emoji. */
+let CHAT_EMOJI = ["\ud83e\udd97", "\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\ude02", "\ud83d\udd25",
+                  "\ud83d\udc80", "\ud83e\udd28", "\ud83d\udc40", "\ud83c\udf89", "\ud83d\ude2d",
+                  "\ud83e\udee1", "\ud83d\udc10"];
+const EMOJI_LIBRARY = [
+  ["Faces", "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🫢 🤫 🤔 🫡 🤐 🤨 😐 😑 😶 🫥 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵‍💫 🤯 🤠 🥳 🥸 😎 🤓 🧐 😕 🫤 😟 🙁 😮 😯 😲 😳 🥺 🥹 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 💀 ☠️ 💩 🤡 👹 👻 👽 🤖 🗿"],
+  ["Hands & people", "👍 👎 👏 🙌 🫶 🤝 🙏 ✍️ 💪 🫵 👈 👉 👆 👇 ☝️ ✋ 🖐️ 🖖 👋 🤙 🫰 🤌 🤏 ✌️ 🤞 🤘 👊 ✊ 👀 🧠 🗣️ 🏃 🕺 💃 🤦 🤷 🙇 🧎 🧍"],
+  ["Animals", "🦗 🐐 🦁 🐑 🐺 🦊 🐸 🐒 🙈 🙉 🙊 🐔 🐧 🦆 🦉 🐝 🐛 🦋 🐌 🐢 🐍 🦖 🐙 🦈 🐳 🐬 🐊 🐘 🦒 🦘 🐨 🐼 🐻 🐶 🐱 🐭 🐹 🐷 🐮 🦄 🦥 🦫"],
+  ["Study", "📚 📖 📝 ✏️ 🖊️ 📎 📌 📐 📏 🧮 💻 ⌨️ 🖥️ 📱 ⏰ ⏳ ⌛ 💡 📈 📉 📊 🗂️ 📅 🎓 🏫 🧪 🔬 🔭 💯 ✅ ❌ ❓ ❗ 💤 🔒 🔑 🎯 🏆 🥇 🥈 🥉 🏅 👑 💎 💰 💸 🧾"],
+  ["Food", "☕ 🍵 🧃 🥤 🧋 🍕 🍔 🍟 🌭 🌮 🥩 🍳 🥚 🍞 🥐 🍩 🍪 🎂 🍫 🍿 🍎 🍌 🍉 🍇 🍜 🍣 🧂"],
+  ["Sport & fun", "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎱 🏓 🏸 🥊 🏋️ 🏊 🤽 🚴 ⛳ 🏄 🎮 🎲 🎧 🎵 🎶 🎤 🎸 🥁 🎉 🎊 🎈 🎁 🪩"],
+  ["Symbols", "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❤️‍🔥 💢 💥 💫 💦 💨 🕳️ 💬 💭 🔥 ✨ ⭐ 🌟 ⚡ ☀️ 🌧️ ❄️ 🌈 🌊 🚀 🛸 🚨 ⚠️ 🚫 ⛔ 📢 🔔 🏁 🚩 🆗 🆒 🆙 🔝"],
+  ["Flags", "🇦🇺 🇳🇿 🇬🇧 🇺🇸 🇨🇳 🇮🇳 🇰🇷 🇯🇵 🇮🇹 🇬🇷 🇱🇧 🇵🇭 🇻🇳 🇫🇷 🇩🇪 🇧🇷 🏴󠁧󠁢󠁥󠁮󠁧󠁿"]
+];
+
+/* One emoji and nothing else: a single grapheme that is a pictograph or a
+   flag, never letters or digits. The same rule as is_reaction_emoji(). */
+function isOneEmoji(str) {
+  const t = String(str || "").trim();
+  if (!t || t.length > 24 || /[\p{L}\p{N}\s]/u.test(t.replace(/[\u{E0020}-\u{E007F}]/gu, ""))) return false;
+  if (!/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(t)) return false;
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t)].length === 1;
+  }
+  return [...t].length <= 2 || /\u200d/.test(t);
+}
+function lastEmojiIn(str) {
+  const t = String(str || "").trim();
+  if (!t) return null;
+  const parts = typeof Intl !== "undefined" && Intl.Segmenter
+    ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t)].map(x => x.segment)
+    : [...t];
+  for (let i = parts.length - 1; i >= 0; i--) if (isOneEmoji(parts[i])) return parts[i];
+  return null;
+}
+const RX_RECENT_KEY = "st.rxrecent";
+function recentEmoji() {
+  try { const v = JSON.parse(localStorage.getItem(RX_RECENT_KEY) || "[]"); return Array.isArray(v) ? v.filter(isOneEmoji) : []; }
+  catch (e) { return []; }
+}
+function rememberEmoji(e) {
+  try { localStorage.setItem(RX_RECENT_KEY, JSON.stringify([e].concat(recentEmoji().filter(x => x !== e)).slice(0, 16))); }
+  catch (er) { /* private window */ }
+}
 let msgPickerFor = null;          /* the message whose picker is open */
 
 const msgRx = id => CHAT.rx[id] || {};
 
 function msgReactionsHTML(m) {
   const r = msgRx(m.id);
-  const kinds = CHAT_EMOJI.filter(e => (r[e] || []).length);
+  /* every emoji anyone used, the most popular first */
+  const kinds = Object.keys(r).filter(e => (r[e] || []).length)
+    .sort((a, b) => r[b].length - r[a].length ||
+      (CHAT_EMOJI.indexOf(a) + 1 || 99) - (CHAT_EMOJI.indexOf(b) + 1 || 99));
   const chips = kinds.map(e => {
     const by = r[e] || [];
     const mine = by.indexOf(UID) > -1;
@@ -5924,9 +5970,76 @@ function msgReactionsHTML(m) {
 }
 
 function msgPickerHTML(id) {
-  return `<div class="mrxpick" role="menu">` + CHAT_EMOJI.map(e =>
+  /* your recent picks that are not already in the quick row lead it */
+  const quick = recentEmoji().filter(e => CHAT_EMOJI.indexOf(e) < 0).slice(0, 4).concat(CHAT_EMOJI);
+  return `<div class="mrxpick" role="menu">` + quick.map(e =>
     `<button type="button" role="menuitem" data-mrx="${esc(e)}" data-mrxid="${esc(id)}"
-      title="${esc(e)}">${esc(e)}</button>`).join("") + `</div>`;
+      title="${esc(e)}">${esc(e)}</button>`).join("") +
+    `<button type="button" class="mrxmore" data-mrxmore="${esc(id)}" title="Any emoji" aria-label="Any emoji">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="9" cy="10" r="1.2" fill="currentColor"/><circle cx="15" cy="10" r="1.2" fill="currentColor"/>
+      <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M19 3v4M17 5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>`;
+}
+
+/* The whole library, in its own panel outside the chat log. The log is
+   repainted on every message and reaction, which would wipe a half-typed
+   search or a scrolled list if the panel lived inside it. */
+let rxSheetFor = null;
+function openEmojiSheet(id, anchor) {
+  rxSheetFor = id;
+  let sh = $("rxsheet");
+  if (!sh) {
+    sh = document.createElement("div");
+    sh.id = "rxsheet"; sh.className = "rxsheet"; sh.setAttribute("role", "dialog"); sh.setAttribute("aria-label", "React with any emoji");
+    document.body.appendChild(sh);
+    sh.addEventListener("click", e => {
+      const b = e.target.closest("[data-rxpick]");
+      if (b) { pickSheetEmoji(b.dataset.rxpick); return; }
+      if (e.target.closest("[data-rxclose]") || e.target === sh) closeEmojiSheet();
+      const j = e.target.closest("[data-rxjump]");
+      if (j) { const t = sh.querySelector(`[data-rxcat="${j.dataset.rxjump}"]`); if (t) t.scrollIntoView({ block: "start", behavior: "smooth" }); }
+    });
+    sh.addEventListener("input", e => {
+      if (!e.target.matches("[data-rxtype]")) return;
+      const em = lastEmojiIn(e.target.value);
+      const hint = sh.querySelector(".rxs-hint");
+      if (em) { pickSheetEmoji(em); return; }
+      hint.textContent = e.target.value.trim() ? "That's not an emoji. Use your emoji keyboard." : "";
+    });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && rxSheetFor) closeEmojiSheet(); });
+  }
+  const recent = recentEmoji();
+  const cats = (recent.length ? [["Recent", recent.join(" ")]] : []).concat(EMOJI_LIBRARY);
+  sh.innerHTML = `<div class="rxs-box">
+      <div class="rxs-top">
+        <input type="text" data-rxtype placeholder="Type or paste any emoji" aria-label="Type or paste any emoji" autocomplete="off">
+        <button type="button" class="x" data-rxclose aria-label="Close">&times;</button>
+      </div>
+      <div class="rxs-hint" aria-live="polite"></div>
+      <div class="rxs-tabs">${cats.map((c, i) => `<button type="button" data-rxjump="${i}" title="${esc(c[0])}">${esc(c[1].split(" ")[0])}</button>`).join("")}</div>
+      <div class="rxs-list">${cats.map((c, i) => `<h4 data-rxcat="${i}">${esc(c[0])}</h4>
+        <div class="rxs-grid">${c[1].split(" ").filter(Boolean).map(e => `<button type="button" data-rxpick="${esc(e)}" title="${esc(e)}">${esc(e)}</button>`).join("")}</div>`).join("")}</div>
+    </div>`;
+  /* beside the message on a laptop, a sheet from the bottom on a phone */
+  const box = sh.querySelector(".rxs-box");
+  sh.classList.add("on");
+  if (anchor && innerWidth > 640) {
+    const r = anchor.getBoundingClientRect(), w = 340, h = Math.min(420, innerHeight - 24);
+    box.style.left = Math.max(12, Math.min(innerWidth - w - 12, r.left)) + "px";
+    box.style.top = Math.max(12, r.top - h - 8 < 12 ? Math.min(innerHeight - h - 12, r.bottom + 8) : r.top - h - 8) + "px";
+  } else { box.style.left = ""; box.style.top = ""; }
+  if (innerWidth > 640) setTimeout(() => { const i = sh.querySelector("[data-rxtype]"); if (i) i.focus(); }, 0);
+}
+function closeEmojiSheet() {
+  rxSheetFor = null;
+  const sh = $("rxsheet");
+  if (sh) { sh.classList.remove("on"); sh.innerHTML = ""; }
+}
+function pickSheetEmoji(e) {
+  const id = rxSheetFor;
+  closeEmojiSheet();
+  if (id && isOneEmoji(e)) sendMessageReaction(id, e);
 }
 
 /* The palette lives in the database so that the check and the picker agree.
@@ -5951,6 +6064,8 @@ async function loadChatReactions() {
 }
 
 async function sendMessageReaction(id, emoji) {
+  if (!isOneEmoji(emoji)) { toast("Reactions have to be a single emoji"); return; }
+  rememberEmoji(emoji);
   const before = JSON.parse(JSON.stringify(msgRx(id)));
   const now = JSON.parse(JSON.stringify(before));
   const by = now[emoji] || (now[emoji] = []);
@@ -6047,6 +6162,15 @@ function wireChatReactions() {
   if (!log || chatRxWired) return;
   chatRxWired = true;
   log.addEventListener("click", e => {
+    const more = e.target.closest && e.target.closest("[data-mrxmore]");
+    if (more) {
+      e.stopPropagation();
+      const id = more.dataset.mrxmore, row = more.closest(".mrxrow");
+      msgPickerFor = null; paintChat();
+      const anchor = row && $("chatlog").querySelector(`[data-mrxadd="${CSS.escape(id)}"]`);
+      openEmojiSheet(id, anchor || null);
+      return;
+    }
     const chip = e.target.closest && e.target.closest("[data-mrx]");
     if (chip) { e.stopPropagation(); sendMessageReaction(chip.dataset.mrxid, chip.dataset.mrx); return; }
     const add = e.target.closest && e.target.closest("[data-mrxadd]");

@@ -502,6 +502,12 @@ with a ring round the avatar at the top. Nobody is ever shown a zero — an empt
 simply has no badge, so a quiet room looks clean rather than accusing. The number comes
 from data the app already holds, so the whole badge costs nothing to show.
 
+**Reactions** can be any emoji. The **+** under a message opens a quick row (🦗 first,
+then the favourites and your own recent picks), and the smiley at its end opens every emoji,
+by category, with a box to type or paste any other. Three each per message. The database
+checks a reaction really is one emoji (`is_reaction_emoji()` in `schema.sql`), so nobody can
+react with words.
+
 You can delete your own messages. Enter sends, Shift+Enter starts a new line, and 500
 characters is the limit. Ten messages a minute is the limit too, enforced by the database
 rather than the browser.
