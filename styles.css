@@ -94,8 +94,7 @@ header.top>.wrap{position:relative}
 .todaychip .tc-v small{font-size:12px;font-weight:600;color:#A9B4C4;letter-spacing:0}
 .todaychip .tc-bar{display:block;height:4px;margin-top:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
 .todaychip .tc-bar i{display:block;height:100%;border-radius:2px;transition:width .6s var(--ease)}
-.tc-live,.railive{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--l4);flex:none;
-  animation:ping 2s var(--ease) infinite}
+.tc-live,.railive{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--l4);flex:none}
 .railive{margin-left:6px;vertical-align:middle}
 
 /* on the Today tab the same figure leads the row of four */
@@ -108,12 +107,17 @@ header.top>.wrap{position:relative}
 .nowbar.on{display:flex}
 .nowlabel{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;
   color:#C9D2E0;white-space:nowrap}
-.nowdot{width:7px;height:7px;border-radius:50%;background:var(--l4);flex:none;
-  animation:ping 2s var(--ease) infinite}
-@keyframes ping{
-  0%{box-shadow:0 0 0 0 rgba(25,169,116,.55)}
-  70%{box-shadow:0 0 0 7px rgba(25,169,116,0)}
-  100%{box-shadow:0 0 0 0 rgba(25,169,116,0)}
+.nowdot{width:7px;height:7px;border-radius:50%;background:var(--l4);flex:none}
+/* The live dots' ripple. It used to animate box-shadow, which repaints every
+   frame for every dot on screen: with thirty people live that kept the page
+   busy even sitting still. A ring that scales and fades is handed to the
+   compositor instead and costs next to nothing. */
+@keyframes pingring{0%{transform:scale(1);opacity:.55}70%,100%{transform:scale(2.6);opacity:0}}
+.nowdot,.tc-live,.railive,.pl-livechip i{position:relative}
+.nowdot::after,.tc-live::after,.railive::after,.pl-livechip i::after{content:"";position:absolute;inset:0;border-radius:50%;
+  background:rgba(25,169,116,.55);animation:pingring 2s var(--ease) infinite;will-change:transform,opacity;pointer-events:none}
+@media (prefers-reduced-motion:reduce){
+  .nowdot::after,.tc-live::after,.railive::after,.pl-livechip i::after{animation:none;opacity:0}
 }
 .nowavs{display:flex;align-items:center}
 .nowav{display:block;margin-left:-7px;cursor:pointer;border-radius:50%;
@@ -252,6 +256,12 @@ thead th{position:sticky;top:0;z-index:2;font-size:11px;font-weight:700;color:va
 tbody tr{transition:background var(--fast) var(--ease)}
 tbody tr:hover{background:var(--surface-2)}
 tr.me{background:var(--accent-wash)}
+/* the board shows the top and the people around you; the rest on request */
+tr.lbgap td{text-align:center;color:var(--ink-soft);letter-spacing:.3em;padding:4px 0;font-size:12px}
+tr.lbmore td{text-align:center;padding:12px 0}
+tr.lbmore:hover,tr.lbgap:hover{background:none}
+.railmore{display:flex;justify-content:center;margin-top:10px}
+.railgap{text-align:center;color:var(--ink-soft);letter-spacing:.3em;font-size:12px;padding:2px 0}
 tr.me:hover{background:#FFE7DF}
 tr.me td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .tblwrap{max-height:540px;overflow:auto;border-top:1px solid var(--rule-soft);
@@ -1255,9 +1265,14 @@ table.lh-t tr:last-child td{border-bottom:0}
 .mentionbox .mh{font-size:11px;color:var(--ink-soft);padding:6px 9px 3px}
 
 /* the full-size view when a picture is tapped */
-.imgview{position:fixed;inset:0;z-index:120;background:rgba(9,13,20,.88);display:grid;
-  place-items:center;padding:24px}
-.imgview img{max-width:100%;max-height:100%;border-radius:var(--r-xs);box-shadow:var(--sh-4)}
+/* The picture fits the screen whatever its shape. Sized against the viewport
+   rather than a percentage of its box: the box grew to fit the picture, so a
+   tall portrait photo used to run off the bottom of the screen. */
+.imgview{position:fixed;inset:0;z-index:270;background:rgba(9,13,20,.9);display:flex;
+  align-items:center;justify-content:center;padding:16px;cursor:zoom-out;animation:ovin .14s var(--ease)}
+.imgview img{display:block;width:auto;height:auto;object-fit:contain;
+  max-width:calc(100vw - 32px);max-height:calc(100vh - 72px);max-height:calc(100dvh - 72px);
+  border-radius:var(--r-xs);box-shadow:var(--sh-4)}
 .imgview .x{position:absolute;top:16px;right:20px;font-size:30px;line-height:1;color:#fff;
   background:none;border:0;cursor:pointer}
 

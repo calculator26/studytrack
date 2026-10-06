@@ -491,6 +491,24 @@ paused one is shown for thirty and then goes quiet. A session paused yesterday l
 no longer sits between two people who are actually working. Administrators can also clear
 anyone's timer outright, from **Members** in the console.
 
+### Keeping it fast with the whole year group on
+Measured with `_test/index.html?big=1` (250 members, two months of sessions, 30 timers live):
+
+- **Only the tab you are on is drawn.** Peloton and My stats are marked out of date and drawn
+  when opened. A full repaint went from about 120 ms to about 12 ms.
+- **Long lists show the top and the people around you**: the leaderboard shows its top 25,
+  the Today list its top 12, each with a *Show all* button.
+- **The live dots ripple on the compositor**, not by repainting every frame. The page uses
+  under 1% of the CPU sitting still, down from about 20%.
+- **Profile pictures load as thumbnails** through Storage's image resizing, falling back to
+  the original if that fails, and new uploads are cut to a 480 px square first. The ones in
+  use added up to 71 MB.
+- **Row level policies check who you are once per query** (`perf.sql`). They used to call
+  `auth.uid()` and `is_admin()` for every row: `crew_daily`, which every open tab calls every
+  two minutes, went from about 150 ms to 5 ms.
+- **The year-group stats are worked out once and shared** through `stats_cache`:
+  `crew_clock` went from 3.4 s per person to 68 ms, every 15 minutes.
+
 ### Chat
 A fifth tab, and one room for the whole year group. Open it and you are in it — there is
 nothing to join and nothing to choose. A dot appears on the tab when somebody has said
@@ -616,6 +634,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `app.js` | All the logic — auth, data, timer, charts, import |
 | `styles.css` | The design system |
 | `play.js`, `play.css` | Levels, achievements, colour themes, the Your day chart and the Peloton stat cards |
+| `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
 | `config.js` | Your Supabase keys and group name |
 | `favicon.svg` | The mark — a track seen from above, with a runner on the lane |

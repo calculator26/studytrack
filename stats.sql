@@ -2,7 +2,9 @@
 --  STATS — the numbers behind the study clock, the subject battle, the
 --  kudos board and achievements
 --  -----------------------------------------------------------------------
---  All read-only. Safe to re-run.
+--  All read-only. Safe to re-run, but run perf.sql after it: perf.sql
+--  replaces crew_clock and reaction_board with versions that share one
+--  cached answer between everybody instead of working it out per person.
 --
 --  WHERE THE TIME OF DAY COMES FROM
 --  A session row knows when it was logged (created_at) and how long it was

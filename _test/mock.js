@@ -169,6 +169,39 @@
     started_at: new Date().toISOString(), acc_ms: 47 * 60000, running: false,
     updated_at: new Date().toISOString() });
 
+  /* ?big=1: the real year group's size, for checking the app stays smooth.
+     250 members, sixty days of sessions each, thirty timers running and a
+     busy room. */
+  if (/big=1/.test(location.search)) {
+    const first = ["Sam","Josh","Will","Jack","Tom","Max","Ryan","Aidan","Nick","James","Ben","Harry","Ollie","Luke","Ethan","Noah","Liam","Kai","Leo","Zac"];
+    const last = ["Smith","Nguyen","Brown","Wilson","Taylor","Lee","Martin","White","Clark","Hall","Young","King","Wright","Scott","Green"];
+    const cols = ["#3E7CA6","#C0564C","#3FA98A","#C9A227","#7A6BB5","#D96C3B","#2F80ED","#B4339C","#0F8FA0","#6B8E23"];
+    let sx = 9000, subx = 20000, mx = 30000;
+    for (let i = 0; i < 246; i++) {
+      const id = uid(100000 + i);
+      T.profiles.push({ id, display_name: first[i % 20] + " " + last[(i * 7) % 15], colour: cols[i % 10], onboarded: true,
+        default_goal: 2 + (i % 5), weekday_goals: null, created_at: joined(60), hide_hours: i % 23 === 0, hide_others: false });
+      const sj = [["English Advanced","#3E7CA6"],["Mathematics Advanced","#3FA98A"],["Business Studies","#C0564C"]].map(([n, c], k) => {
+        const r = { id: uid(subx++), user_id: id, name: n, colour: c, exam_date: null, position: k }; T.subjects.push(r); return r; });
+      for (let d = 60; d >= 0; d--) {
+        if ((d * 13 + i) % 6 === 0) continue;
+        const day = add(today(), -d);
+        for (let k = 0; k < 1 + ((d + i) % 3); k++) {
+          const mins = [40, 60, 90, 120, 75][(d + k + i) % 5];
+          const t = new Date(day + "T00:00:00"); t.setHours(9 + k * 3 + (i % 6), (i * 7) % 60);
+          T.sessions.push({ id: uid(sx++), user_id: id, subject_id: sj[(d + k) % 3].id, area_id: null, day, minutes: mins,
+            mode: null, note: null, created_at: (t.getTime() > Date.now() ? new Date(Date.now() - 36e5) : t).toISOString() });
+        }
+      }
+      if (i < 30) T.live_timers.push({ user_id: id, label: sj[i % 3].name, subject_id: null, area_id: null,
+        started_at: new Date(Date.now() - (5 + i * 3) * 60000).toISOString(), acc_ms: 0, running: i % 4 !== 0,
+        updated_at: new Date().toISOString() });
+    }
+    for (let m = 0; m < 220; m++) T.messages.push({ id: uid(mx++), user_id: uid(100000 + (m * 17) % 246),
+      body: ["larp", "who's at macq", "locked in", "anyone have mod b questions?", "sus", "quote of the day pls"][m % 6],
+      mentions: [], created_at: new Date(Date.now() - (220 - m) * 4 * 60000).toISOString() });
+  }
+
   /* ?larp=1: larp reports are switched off (the branch larp-reports has
      them), but two of their old alerts are still rows in messages, and the
      room must not show them. Also a busier board — more people, Priya over

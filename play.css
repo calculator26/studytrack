@@ -56,7 +56,7 @@
 .pl-dbig .pl-sub{font-size:13px;font-weight:500;letter-spacing:0;color:var(--ink-soft)}
 .pl-livechip{display:inline-flex;align-items:center;gap:6px;vertical-align:middle;font-size:11.5px;font-weight:650;
   letter-spacing:0;color:var(--good);background:var(--good-wash);padding:3px 9px;border-radius:999px}
-.pl-livechip i{width:7px;height:7px;border-radius:50%;background:var(--l4);animation:ping 2s var(--ease) infinite}
+.pl-livechip i{width:7px;height:7px;border-radius:50%;background:var(--l4)}
 .pl-chartbox{position:relative;margin:4px 0 0}
 .pl-chart{display:block;width:100%;height:auto;overflow:visible;max-height:260px}
 .pl-chart .pl-grid{stroke:var(--rule-soft);stroke-width:1}

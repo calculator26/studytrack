@@ -63,6 +63,7 @@ const plStore = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private window */ } }
 };
+const plOn = id => { const el = $("p-" + id); return !!el && el.classList.contains("on"); };
 const plMins = m => {
   m = Math.round(m);
   if (m < 1) return "0m";
@@ -535,7 +536,8 @@ function plRowsFor(dayRow) {
 
 function plPaintDay() {
   const host = $("pl-day");
-  if (!host || !UID) return;
+  /* it measures its own width, which on a hidden tab forces a layout for nothing */
+  if (!host || !UID || !plOn("home")) return;
   const view = PL.dayView;
   host.querySelectorAll("[data-plview]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.plview === view)));
   host.querySelector("[data-plnav='-1']").disabled = view === "pattern";
@@ -1312,17 +1314,47 @@ function plMount() {
 }
 
 let PL_LAST_FULL = 0;
+/* Achievements are worked out at most every half minute, or straight away
+   when your own sessions change: they were being recomputed on every repaint. */
+let PL_ACH_CACHE = { sig: "", at: 0, A: null };
+function plMyAchievements(force) {
+  const mine = DB.sessions.filter(s => s.user_id === UID);
+  const sig = mine.length + ":" + (mine[0] && mine[0].id) + ":" + JSON.stringify(PL.badgeStats[UID] || null) + ":" + todayISO();
+  if (!force && PL_ACH_CACHE.A && PL_ACH_CACHE.sig === sig && Date.now() - PL_ACH_CACHE.at < 30000) return PL_ACH_CACHE.A;
+  PL_ACH_CACHE = { sig, at: Date.now(), A: plAchievements(UID, mine) };
+  return PL_ACH_CACHE.A;
+}
+function plPaintMe(A) {
+  if (!plOn("me")) return;
+  A = A || plMyAchievements();
+  if ($("pl-level")) $("pl-level").innerHTML = plLevelCardHTML();
+  if ($("pl-bests")) $("pl-bests").innerHTML = plBestsHTML(A.f);
+  if ($("pl-ach")) $("pl-ach").innerHTML = plAchCardHTML(A);
+}
+function plPaintCrew() {
+  if (!plOn("crew")) return;
+  plPaintClock(); plPaintBattle(); plPaintKudos(); plPaintLevels(); plPaintRecords();
+  plLoadSubjects(PL.subjRange); plLoadKudos();
+}
+/* Only the cards on the tab in view are drawn; app.js says when another opens. */
+function playTabOpened(tab) {
+  if (!UID || !ME) return;
+  try {
+    if (tab === "home") plPaintDay();
+    if (tab === "me") plPaintMe();
+    if (tab === "crew") plPaintCrew();
+  } catch (e) { console.error("play", e); }
+}
+
 function playRender() {
   if (!UID || !ME) return;
   try {
     plMount();
     plApplyTheme(plCurrentTheme());
-    plPaintDay();
-    const A = plAchievements(UID, DB.sessions.filter(s => s.user_id === UID));
-    if ($("pl-level")) $("pl-level").innerHTML = plLevelCardHTML();
-    if ($("pl-bests")) $("pl-bests").innerHTML = plBestsHTML(A.f);
-    if ($("pl-ach")) $("pl-ach").innerHTML = plAchCardHTML(A);
-    plPaintClock(); plPaintBattle(); plPaintKudos(); plPaintLevels(); plPaintRecords();
+    if (plOn("home")) plPaintDay();
+    const A = plMyAchievements();
+    plPaintMe(A);
+    plPaintCrew();
     /* the masthead: level beside your weekly place */
     const mr = $("me-rank");
     if (mr && !mr.querySelector(".pl-lv")) {
@@ -1331,12 +1363,11 @@ function playRender() {
     }
     if (A.f.kudosKnown) plCheckUnlocks(A);
     /* server numbers, at most every ten minutes */
-    plLoadClock(); plLoadSubjects(PL.subjRange); plLoadKudos();
+    plLoadClock();
     if (!PL.badgeAt[UID] || Date.now() - PL.badgeAt[UID] > PL_STALE) {
       plLoadBadgeStats(UID).then(() => {
-        const B = plAchievements(UID, DB.sessions.filter(s => s.user_id === UID));
-        if ($("pl-bests")) $("pl-bests").innerHTML = plBestsHTML(B.f);
-        if ($("pl-ach")) $("pl-ach").innerHTML = plAchCardHTML(B);
+        const B = plMyAchievements(true);
+        plPaintMe(B);
         if (B.f.kudosKnown || PL.badgeStats[UID] === null) plCheckUnlocks(B);
       });
     }
@@ -1362,9 +1393,6 @@ if (typeof UID !== "undefined" && UID && typeof ME !== "undefined" && ME) {
 
 /* A chart drawn on a hidden tab had no width to measure; redraw on arrival,
    and when the window changes size. */
-document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => {
-  if (b.dataset.p === "home") setTimeout(() => { try { plPaintDay(); } catch (e) { /* */ } }, 0);
-}));
 let plResizeT = 0, plLastW = innerWidth;
 addEventListener("resize", () => {
   clearTimeout(plResizeT);

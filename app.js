@@ -174,8 +174,12 @@ const isoOf = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
    "yesterday" came out as Saturday and every streak broke across Sunday. */
 const addDays = (s, n) => { const d = parseD(s); return isoOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)); };
 const dowIdx = s => (parseD(s).getDay() + 6) % 7;            // 0 = Monday
-const fmtD = s => parseD(s).toLocaleDateString("en-AU", {weekday:"short", day:"numeric", month:"short"});
-const fmtLong = s => parseD(s).toLocaleDateString("en-AU", {weekday:"long", day:"numeric", month:"long"});
+/* toLocaleDateString is slow, and the same few dozen days are formatted
+   thousands of times a repaint, so each answer is kept. */
+const FMT_CACHE = new Map();
+const fmtCached = (k, f) => { let v = FMT_CACHE.get(k); if (v === undefined) { if (FMT_CACHE.size > 4000) FMT_CACHE.clear(); v = f(); FMT_CACHE.set(k, v); } return v; };
+const fmtD = s => fmtCached("d" + s, () => parseD(s).toLocaleDateString("en-AU", {weekday:"short", day:"numeric", month:"short"}));
+const fmtLong = s => fmtCached("l" + s, () => parseD(s).toLocaleDateString("en-AU", {weekday:"long", day:"numeric", month:"long"}));
 const daysBetween = (a, b) => Math.round((parseD(b) - parseD(a)) / 864e5);
 const initials = n => String(n||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase() || "?";
 const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -206,10 +210,22 @@ function lvlColour(ratio, logged) {
   if (ratio > 0)    return "var(--l0)";
   return "var(--none)";
 }
+/* Profile pictures are drawn at 26 to 76 pixels, but most were uploaded
+   straight off a phone camera: 71 MB between 68 people, some 8 MB each, all
+   downloaded and decoded on every phone that opened the app. Storage's image
+   resizing (on the project's plan) serves each as a thumbnail of a few KB.
+   If resizing ever fails the original loads instead, so nobody loses theirs. */
+function avatarThumb(url) {
+  const m = /^(https:\/\/[^/]+\/storage\/v1)\/object\/public\/(avatars\/[^?#]+)$/.exec(String(url || ""));
+  return m ? `${m[1]}/render/image/public/${m[2]}?width=160&height=160&resize=cover&quality=70` : url;
+}
 function avatarHTML(p, cls) {
   const c = (p && p.colour) || "#7B8D98";
-  if (p && p.avatar_url)
-    return `<img class="av ${cls||''}" style="border-color:${esc(c)}" src="${esc(p.avatar_url)}" alt="">`;
+  if (p && p.avatar_url) {
+    const thumb = avatarThumb(p.avatar_url);
+    return `<img class="av ${cls||''}" style="border-color:${esc(c)}" src="${esc(thumb)}" alt="" loading="lazy" decoding="async"${
+      thumb !== p.avatar_url ? ` data-orig="${esc(p.avatar_url)}" onerror="this.onerror=null;this.src=this.dataset.orig"` : ""}>`;
+  }
   return `<div class="av ${cls||''}" style="background:${esc(c)};border-color:${esc(c)}">${esc(initials(p && p.display_name))}</div>`;
 }
 
@@ -291,10 +307,19 @@ const filedMinutesOn = (uid, day) => {
    Only the part of it that falls on today, since every caller adds this to
    today: a timer started at 11pm and still going at 1am has an hour on
    yesterday that is not today's. */
+/* Everybody's live timer by person, rebuilt whenever the list is replaced
+   (it is never edited in place). liveMsFor runs for every person on every
+   repaint and every second, and used to search the whole list each time. */
+const TIX = { src: null, map: new Map() };
+function timerRow(uid) {
+  const list = DB.timers || [];
+  if (TIX.src !== list) { TIX.map = new Map(list.map(t => [t.user_id, t])); TIX.src = list; }
+  return TIX.map.get(uid);
+}
 function liveMsFor(uid) {
   const cap = ms => Math.max(0, Math.min(ms, TIMER_CAP_MS));
   if (uid === UID) return localTimer && !savingSession ? todayShare(localTimer, cap(elapsedMs())) : 0;
-  const t = (DB.timers || []).find(x => x.user_id === uid);
+  const t = timerRow(uid);
   if (!t) return 0;
   const now = Date.now();
   if (now - new Date(t.updated_at || 0).getTime() >= (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS)) return 0;
@@ -403,7 +428,7 @@ let timerTouched = 0, timerWrites = 0;
 function timerWriteStart() { timerWrites++; timerTouched = Date.now(); }
 function timerWriteEnd()   { timerWrites = Math.max(0, timerWrites - 1); timerTouched = Date.now(); }
 
-const profileOf = id => DB.profiles.find(p => p.id === id) || {id, display_name:"Unknown", colour:"#7B8D98"};
+const profileOf = id => profileRow(id) || {id, display_name:"Unknown", colour:"#7B8D98"};
 /* Whoever's profile is open, fetched when you click them. This client keeps
    its own subjects and areas and nobody else's, so a visitor's rows live here
    for as long as their profile is on screen and the lookups below fall
@@ -415,10 +440,31 @@ const myAreas    = uid => uid === UID ? DB.areas    : (GUEST.id === uid ? GUEST.
 const areaById   = id => DB.areas.find(a => a.id === id)    || GUEST.areas.find(a => a.id === id);
 const subjById   = id => DB.subjects.find(s => s.id === id) || GUEST.subjects.find(s => s.id === id);
 
+/* goalFor runs thousands of times a repaint (every person, every day, every
+   board), and it used to search two whole arrays each time. Both arrays are
+   only ever replaced, never edited in place, so an index keyed on the array
+   itself stays right: a new array, a new index. */
+const IX = { goals: null, goalsLen: -1, goalMap: null, profs: null, profsLen: -1, profMap: null };
+function goalRow(uid, day) {
+  if (IX.goals !== DB.goals || IX.goalsLen !== DB.goals.length) {
+    IX.goalMap = new Map();
+    DB.goals.forEach(g => IX.goalMap.set(g.user_id + "|" + g.day, g));
+    IX.goals = DB.goals; IX.goalsLen = DB.goals.length;
+  }
+  return IX.goalMap.get(uid + "|" + day);
+}
+function profileRow(uid) {
+  if (IX.profs !== DB.profiles || IX.profsLen !== DB.profiles.length) {
+    IX.profMap = new Map();
+    DB.profiles.forEach(p => IX.profMap.set(p.id, p));
+    IX.profs = DB.profiles; IX.profsLen = DB.profiles.length;
+  }
+  return IX.profMap.get(uid);
+}
 function goalFor(uid, day) {
-  const o = DB.goals.find(g => g.user_id === uid && g.day === day);
+  const o = goalRow(uid, day);
   if (o) return Number(o.hours);
-  const p = DB.profiles.find(x => x.id === uid);
+  const p = profileRow(uid);
   if (!p) return 0;
   if (Array.isArray(p.weekday_goals) && p.weekday_goals.length === 7) {
     const v = p.weekday_goals[dowIdx(day)];
@@ -1416,7 +1462,26 @@ $("ob-finish").addEventListener("click", async () => {
   }
 });
 
+/* A profile picture is never shown bigger than 76 pixels, so it is cut to a
+   480 pixel square before it leaves the phone. */
+function squareAvatar(file) {
+  return new Promise(resolve => {
+    if (!file || !/^image\//.test(file.type) || file.type === "image/gif") return resolve(file);
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const side = Math.min(img.width, img.height), out = Math.min(480, side);
+      const cv = document.createElement("canvas");
+      cv.width = out; cv.height = out;
+      cv.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, out, out);
+      cv.toBlob(b => resolve(b ? new File([b], "avatar.jpg", { type: "image/jpeg" }) : file), "image/jpeg", 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 async function uploadAvatar(file) {
+  file = await squareAvatar(file);
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const path = `${UID}/avatar-${Date.now()}.${ext}`;
   const { error } = await sb.storage.from("avatars").upload(path, file, { upsert: true });
@@ -1437,7 +1502,9 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("cl
      no width. Drawn at load while Peloton was hidden, it came out in its phone
      layout — huge labels, three of them — on every laptop, and stayed that way
      until something else happened to redraw it. So it is redrawn on arrival. */
-  if (b.dataset.p === "crew" && LIVEHIST.rows.length) drawLiveHistory();
+  if (b.dataset.p === "crew") { if (STALE.crew) renderCrew(); else if (LIVEHIST.rows.length) drawLiveHistory(); }
+  if (b.dataset.p === "me" && STALE.me) renderMe();
+  if (typeof playTabOpened === "function") playTabOpened(b.dataset.p);
   /* Chat costs nothing until somebody actually looks at it. */
   if (b.dataset.p === "chat") {
     initChat();
@@ -1634,18 +1701,23 @@ function shortTime(ms) {
   return h ? h + ":" + pad(m) + ":" + pad(sec) : pad(m) + ":" + pad(sec);
 }
 
+/* This runs every second for as long as the page is open, so it only writes
+   what has actually changed: a write of the same text still makes the
+   browser recheck the styles around it. */
+const setText = (el, v) => { if (el && el.textContent !== v) el.textContent = v; };
+const setProp = (el, k, v) => { if (el && el[k] !== v) el[k] = v; };
 function paintTimer() {
   const t = localTimer, d = $("tdisp");
-  d.textContent = hms(elapsedMs());
-  d.classList.toggle("run", !!(t && t.running));
-  $("tm-start").textContent = t ? (t.running ? "Running" : "Resume") : "Start";
-  $("tm-start").disabled = !!(t && t.running);
-  $("tm-pause").disabled  = !(t && t.running);
-  $("tm-stop").disabled   = !t;
-  $("tm-cancel").disabled = !t;
-  $("tsub").textContent = t ? (t.label + (t.running ? "" : " · paused")) : "Nothing running";
-  document.title = t ? (t.running ? "▶ " : "❚❚ ") + shortTime(elapsedMs()) + " · " + APP_NAME
-                     : nudgeTitle();
+  setText(d, hms(elapsedMs()));
+  if (d.classList.contains("run") !== !!(t && t.running)) d.classList.toggle("run", !!(t && t.running));
+  setText($("tm-start"), t ? (t.running ? "Running" : "Resume") : "Start");
+  setProp($("tm-start"), "disabled", !!(t && t.running));
+  setProp($("tm-pause"), "disabled", !(t && t.running));
+  setProp($("tm-stop"), "disabled", !t);
+  setProp($("tm-cancel"), "disabled", !t);
+  setText($("tsub"), t ? (t.label + (t.running ? "" : " · paused")) : "Nothing running");
+  const title = t ? (t.running ? "▶ " : "❚❚ ") + shortTime(elapsedMs()) + " · " + APP_NAME : nudgeTitle();
+  if (document.title !== title) document.title = title;
   paintFavicon();
   paintNowPill();
   paintLive();
@@ -2406,6 +2478,12 @@ function paintCountdown() {
   box.hidden = false;
 }
 
+const LB_TOP = 25, RAIL_TOP = 12;
+let LB_ALL = false, RAIL_ALL = false;
+document.addEventListener("click", e => {
+  if (e.target.closest && e.target.closest("[data-lball]")) { LB_ALL = !LB_ALL; renderCrew(); }
+  if (e.target.closest && e.target.closest("[data-railall]")) { RAIL_ALL = !RAIL_ALL; renderHome(); }
+});
 function renderHome() {
   paintCountdown();
   $("h-title").textContent = CUR === todayISO() ? "Today · " + fmtLong(CUR) : fmtLong(CUR);
@@ -2464,9 +2542,16 @@ function renderHome() {
   $("k-week").textContent = f1(wk);
   $("k-week-d").textContent = `Against ${f1(wkg)} of goals`;
 
-  const rows = visiblePeople().map(p => ({ p, h: hoursFor(p.id, CUR), g: goalFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
-  const mx = Math.max(1, ...rows.map(x => Math.max(x.h, x.g)));
+  const all = visiblePeople().map(p => ({ p, h: hoursFor(p.id, CUR), g: goalFor(p.id, CUR) })).sort((a, b) => b.h - a.h);
+  const mx = Math.max(1, ...all.map(x => Math.max(x.h, x.g)));
+  /* the top of the day and the people around you; everybody on request */
+  const meAt = all.findIndex(x => x.p.id === UID);
+  const keep = (x, i) => RAIL_ALL || i < RAIL_TOP || (meAt > -1 && Math.abs(i - meAt) <= 1);
+  /* a break where people are left out, so the list does not read as unbroken */
+  const rows = [];
+  all.forEach((x, i) => { if (keep(x, i)) rows.push(x); else if (rows[rows.length - 1] !== null) rows.push(null); });
   $("todayrail").innerHTML = rows.map(x => {
+    if (x === null) return `<div class="railgap">···</div>`;
     const rr = x.g > 0 ? x.h / x.g : (x.h > 0 ? 1 : null);
     return `<div class="rowbar" style="grid-template-columns:190px 1fr 108px">
       <div class="who">${avatarHTML(x.p, "sm")}<span class="nm" style="${x.p.id === UID ? "text-decoration:underline" : ""}">${esc(x.p.display_name)}</span>${
@@ -2477,7 +2562,8 @@ function renderHome() {
       </div>
       <div class="val" style="text-align:right">${f1(x.h)}<span style="color:var(--ink-soft);font-weight:400"> / ${f1(x.g)}</span></div>
     </div>`;
-  }).join("");
+  }).join("") + (all.length > RAIL_TOP ? `<div class="railmore"><button type="button" class="btn ghost sm" data-railall>${
+    RAIL_ALL ? "Show the top " + RAIL_TOP + " only" : "Show all " + all.length}</button></div>` : "");
 
   paintLive();
 }
@@ -3443,7 +3529,18 @@ function paintLbNote(group, groups) {
   note.hidden = !bits.length;
 }
 
+/* Only the tab on screen is drawn. The rest are marked out of date and drawn
+   the moment they are opened. Rebuilding Peloton (250 people, three charts)
+   and My stats on every refresh while somebody sat on Today was most of what
+   made the page stall. */
+const STALE = { crew: false, me: false };
+const panelOn = id => { const el = $("p-" + id); return !!el && el.classList.contains("on"); };
 function renderCrew() {
+  if (!panelOn("crew")) { STALE.crew = true; return; }
+  STALE.crew = false;
+  renderCrewNow();
+}
+function renderCrewNow() {
   const groups = subjectGroups();
   paintLbControls(groups);
   const group = LB_SUBJECT ? groups.find(g => g.key === LB_SUBJECT) || null : null;
@@ -3493,7 +3590,11 @@ function renderCrew() {
     sparkH[r.id] = row;
   });
 
-  $("lbtbl").querySelector("tbody").innerHTML = board.map((r, i) => {
+  /* The top 25 and the people either side of you; everyone on request. Two
+     hundred and fifty rows of table and sparkline were most of the page. */
+  const meAt = board.findIndex(r => r.id === UID);
+  const showRow = i => LB_ALL || i < LB_TOP || (meAt > -1 && Math.abs(i - meAt) <= 2);
+  const lbRow = (r, i) => {
     const spark = last7.map(d => (sparkH[r.id] || {})[d] || 0);
     const mx = Math.max(1, ...spark);
     const bars = spark.map((v, j) => {
@@ -3514,7 +3615,15 @@ function renderCrew() {
       <td style="font-weight:600;color:${r.streak > 0 ? "var(--good)" : "var(--ink-soft)"}">${r.streak === null ? "—" : r.streak}</td>
       <td class="l"><svg width="92" height="24" viewBox="0 0 92 24">${bars}</svg></td>
     </tr>`;
-  }).join("");
+  };
+  let lbHtml = "", gap = false;
+  board.forEach((r, i) => {
+    if (showRow(i)) { lbHtml += lbRow(r, i); gap = false; }
+    else if (!gap) { lbHtml += `<tr class="lbgap"><td colspan="9">···</td></tr>`; gap = true; }
+  });
+  if (board.length > LB_TOP) lbHtml += `<tr class="lbmore"><td colspan="9"><button type="button" class="btn ghost sm" data-lball>${
+    LB_ALL ? "Show the top " + LB_TOP + " only" : "Show all " + board.length}</button></td></tr>`;
+  $("lbtbl").querySelector("tbody").innerHTML = lbHtml;
 
   drawRace(board, days);
   drawStack(board, days);
@@ -3689,9 +3798,23 @@ const lhDayLabel  = d => d.toLocaleDateString("en-AU", { weekday: "short", day: 
    bigger without changing a single font size. */
 const LH_GEO = { W: 900, H: 260, ml: 40, mr: 16, mt: 18, mb: 42, bh: 26 };
 
+/* The graph's width, kept up to date by a ResizeObserver. Reading it with
+   getBoundingClientRect straight after the rest of Peloton was rebuilt forced
+   the browser to lay the whole page out again, on every repaint. */
+let LH_PX = 0;
+(function () {
+  const wrap = $("livegraph-wrap");
+  if (!wrap || typeof ResizeObserver === "undefined") return;
+  new ResizeObserver(es => {
+    const w = es[0].contentRect.width;
+    const was = LH_PX < 560;
+    LH_PX = w;
+    if (w > 0 && (w < 560) !== was && LIVEHIST.rows.length) drawLiveHistory();
+  }).observe(wrap);
+})();
 function lhGeo() {
   const wrap = $("livegraph-wrap");
-  const px = wrap ? wrap.getBoundingClientRect().width : 900;
+  const px = LH_PX || (wrap ? wrap.getBoundingClientRect().width : 900);
   /* hidden: no width to go on, so keep whatever it was last drawn at */
   const narrow = px === 0 ? LH_GEO.W === 420 : px < 560;
   LH_GEO.W  = narrow ? 420 : 900;
@@ -3718,6 +3841,9 @@ function lhIndexAt(px) {
 function drawLiveHistory() {
   const svg = $("livegraph");
   if (!svg) return;
+  /* measuring a box on a hidden tab forces the whole page to lay out, for a
+     width of zero; it is drawn when Peloton opens instead */
+  if (!panelOn("crew")) { STALE.crew = true; return; }
   const note = $("livegraph-note");
   const rows = LIVEHIST.rows;
   const narrow = lhGeo();
@@ -4247,6 +4373,11 @@ function drawH2H() {
    RENDER — me
    ========================================================================= */
 function renderMe() {
+  if (!panelOn("me")) { STALE.me = true; return; }
+  STALE.me = false;
+  renderMeNow();
+}
+function renderMeNow() {
   const days = allDaysFor(UID);
   const total = DB.sessions.filter(s => s.user_id === UID).reduce((a, s) => a + s.minutes / 60, 0);
   const active = days.filter(d => hoursFor(UID, d) > 0).length;
@@ -5820,11 +5951,12 @@ function openImageView(url) {
   const ov = document.createElement("div");
   ov.className = "imgview";
   ov.innerHTML = `<button class="x" aria-label="Close">&times;</button><img src="${esc(url)}" alt="">`;
-  const shut = () => ov.remove();
-  ov.addEventListener("click", e => { if (e.target === ov || e.target.classList.contains("x")) shut(); });
-  document.addEventListener("keydown", function esc2(e) {
-    if (e.key === "Escape") { shut(); document.removeEventListener("keydown", esc2); }
-  });
+  /* a tap anywhere closes it, the picture included: on a phone that is the
+     whole screen, and hunting for the little cross is the annoying part */
+  const shut = () => { ov.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = e => { if (e.key === "Escape") shut(); };
+  ov.addEventListener("click", shut);
+  document.addEventListener("keydown", onKey);
   document.body.appendChild(ov);
 }
 let CHAT = { loaded: false, rows: [], oldest: null, unread: 0, atBottom: true, busy: false,
@@ -6124,7 +6256,7 @@ function msgHTML(m, prev) {
       ${m.body ? `<div class="msgtext">${withMentions(esc(m.body), m.mentions)}</div>` : ""}
       ${m.image_path ? (signedFor(m.image_path)
         ? `<img class="msgimg" src="${esc(signedFor(m.image_path))}" alt="Picture from ${esc(p.display_name)}"
-             loading="lazy" data-full="${esc(m.image_path)}">`
+             loading="lazy" decoding="async" data-full="${esc(m.image_path)}">`
         : `<div class="msgimg pending" style="width:160px;height:110px"></div>`) : ""}
       ${msgReactionsHTML(m)}
     </div>
