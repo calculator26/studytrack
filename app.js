@@ -219,12 +219,32 @@ function avatarThumb(url) {
   const m = /^(https:\/\/[^/]+\/storage\/v1)\/object\/public\/(avatars\/[^?#]+)$/.exec(String(url || ""));
   return m ? `${m[1]}/render/image/public/${m[2]}?width=160&height=160&resize=cover&quality=70` : url;
 }
+/* A picture that would not load is remembered for the visit and drawn as
+   initials from then on. A broken image used to be fetched again on every
+   repaint: three iPhone HEIC photos, which most browsers cannot show, were
+   downloaded about 70,000 times a day between them, roughly 120 GB. */
+const AV_FAILED = new Set();
+function avatarFailed(img) {
+  if (img.dataset.orig && img.src !== img.dataset.orig && !AV_FAILED.has(img.dataset.orig + "#thumb")) {
+    AV_FAILED.add(img.dataset.orig + "#thumb");        /* the thumbnail failed: try the original once */
+    img.src = img.dataset.orig;
+    return;
+  }
+  AV_FAILED.add(img.dataset.orig || img.src);
+  const d = document.createElement("div");
+  d.className = img.className;
+  d.style.cssText = img.style.cssText + ";background:" + (img.style.borderColor || "#7B8D98");
+  d.textContent = img.dataset.ini || "?";
+  img.replaceWith(d);
+}
+const isHeic = url => /\.(heic|heif)(\?|#|$)/i.test(String(url || ""));
 function avatarHTML(p, cls) {
   const c = (p && p.colour) || "#7B8D98";
-  if (p && p.avatar_url) {
-    const thumb = avatarThumb(p.avatar_url);
-    return `<img class="av ${cls||''}" style="border-color:${esc(c)}" src="${esc(thumb)}" alt="" loading="lazy" decoding="async"${
-      thumb !== p.avatar_url ? ` data-orig="${esc(p.avatar_url)}" onerror="this.onerror=null;this.src=this.dataset.orig"` : ""}>`;
+  const url = p && p.avatar_url;
+  if (url && !isHeic(url) && !AV_FAILED.has(url)) {
+    const thumb = AV_FAILED.has(url + "#thumb") ? url : avatarThumb(url);
+    return `<img class="av ${cls||''}" style="border-color:${esc(c)}" src="${esc(thumb)}" alt="" loading="lazy" decoding="async"
+      data-orig="${esc(url)}" data-ini="${esc(initials(p.display_name))}" onerror="avatarFailed(this)">`;
   }
   return `<div class="av ${cls||''}" style="background:${esc(c)};border-color:${esc(c)}">${esc(initials(p && p.display_name))}</div>`;
 }
@@ -1040,7 +1060,7 @@ async function loadAll() {
     sb.from("sessions").select(FEED_COLUMNS).order("created_at", { ascending: false }).limit(40),
     /* Errors rather than throws on a project that has not run migrate.sql yet,
        which absorbTimerReactions reads as "nobody has reacted". */
-    sb.from("timer_reactions").select("*")
+    timerReactionsQuery()
   ]);
   /* Set off before the last write landed, so it cannot know about it. Throwing
      it away costs one more read; believing it un-deletes things. */
@@ -1084,7 +1104,7 @@ async function loadCrew() {
     sb.rpc("crew_daily", { since, only_active: true }),
     sb.from("live_timers").select("*"),
     feedJob,
-    sb.from("timer_reactions").select("*")
+    timerReactionsQuery()
   ];
   if (crewReloadProfiles) jobs.push(sb.from("profiles").select("*"));
   const [cd, ti, fe, tr, pr] = await Promise.all(jobs);
@@ -1465,7 +1485,7 @@ $("ob-finish").addEventListener("click", async () => {
 /* A profile picture is never shown bigger than 76 pixels, so it is cut to a
    480 pixel square before it leaves the phone. */
 function squareAvatar(file) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     if (!file || !/^image\//.test(file.type) || file.type === "image/gif") return resolve(file);
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = () => {
@@ -1476,7 +1496,13 @@ function squareAvatar(file) {
       cv.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, out, out);
       cv.toBlob(b => resolve(b ? new File([b], "avatar.jpg", { type: "image/jpeg" }) : file), "image/jpeg", 0.85);
     };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    /* An iPhone HEIC photo this browser cannot read would upload as a picture
+       most people's browsers cannot show either, so it is refused. */
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      if (isHeic(file.name) || /hei[cf]/i.test(file.type)) reject(new Error("that's an iPhone HEIC photo most browsers can't show. Pick a JPG or PNG, or screenshot the photo and use that"));
+      else resolve(file);
+    };
     img.src = url;
   });
 }
@@ -2232,7 +2258,17 @@ function renderAll() {
     `${tot.sessions} sessions logged between everyone · ` +
     `${f1(tot.hours)} hours in total.`;
 }
+/* Somebody whose own picture is an iPhone HEIC photo is told, once a day:
+   most people see initials instead, and a fresh upload converts it. */
+let heicToldOn = null;
+function tellHeicOwner() {
+  if (!ME || !isHeic(ME.avatar_url) || heicToldOn === todayISO()) return;
+  heicToldOn = todayISO();
+  try { if (localStorage.getItem("st.heic") === heicToldOn) return; localStorage.setItem("st.heic", heicToldOn); } catch (e) { /* once a visit, then */ }
+  setTimeout(() => toast("Your profile picture is an iPhone HEIC photo most people can't see. Upload it again in Setup and it converts itself.", 8000), 2500);
+}
 function renderShell() {
+  tellHeicOwner();
   $("crewname").textContent = APP_NAME;
   paintTodayChip();
   const crew = String(CFG.CREW_NAME || "").trim();
@@ -2904,6 +2940,16 @@ function paintReactBar() {
    (carry_timer_reactions), then stopping removes the timer and the foreign
    key takes these with it.
    --------------------------------------------------------------------------- */
+/* Only reactions on runs that began in the last three days, and only the
+   columns drawn. A reaction counts only on the run it was aimed at, which is
+   one that is on the strip now (a paused one drops off after half an hour,
+   a running one pauses itself at six hours). Reading the whole table every
+   refresh was 300 KB a time, about 3 GB a day across the year group, and
+   growing with every kudos. */
+function timerReactionsQuery() {
+  return sb.from("timer_reactions").select("owner_id,user_id,kind,for_started_at")
+    .gte("for_started_at", new Date(Date.now() - 3 * 864e5).toISOString());
+}
 function absorbTimerReactions(res) {
   /* A project that has not run migrate.sql yet has no such table. That is not
      an error worth showing anybody — it just means nobody has reacted. */

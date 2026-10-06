@@ -16,7 +16,7 @@ window.supabase = {
       goals: [], live_timers: [], timer_reactions: [], messages: [], admin_audit: []
     };
     const res = (data) => { const p = Promise.resolve({data, error:null});
-      p.select=()=>p; p.eq=()=>p; p.or=()=>p; p.order=()=>p; p.limit=()=>p; p.gt=()=>p; p.lt=()=>p;
+      p.select=()=>p; p.eq=()=>p; p.or=()=>p; p.order=()=>p; p.limit=()=>p; p.gt=()=>p; p.gte=()=>p; p.lt=()=>p;
       p.in=()=>p; p.single=()=>p; p.insert=()=>p; p.update=()=>p; p.delete=()=>p; p.upsert=()=>p; return p; };
     const rpcData = { crew_daily:[], crew_subjects:[], reactions_for:[], live_history:[], note_live:1, note:null, is_admin:false };
     return {

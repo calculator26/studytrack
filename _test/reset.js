@@ -10,7 +10,7 @@ window.supabase = { createClient: () => {
   const has = ${mode === 'recovery-pkce' ? 'true' : mode === 'recovery-hash' ? 'true' : 'false'};
   let cb = null;
   const res = (d) => { const p = Promise.resolve({data:d, error:null});
-    p.select=()=>p;p.eq=()=>p;p.or=()=>p;p.order=()=>p;p.limit=()=>p;p.gt=()=>p;p.lt=()=>p;p.in=()=>p;
+    p.select=()=>p;p.eq=()=>p;p.or=()=>p;p.order=()=>p;p.limit=()=>p;p.gt=()=>p;p.gte=()=>p;p.lt=()=>p;p.in=()=>p;
     p.insert=()=>p;p.update=()=>p;p.delete=()=>p;p.upsert=()=>p;return p; };
   const rows = { profiles:[{id:${JSON.stringify(UID)},display_name:"Lewis",colour:"#E8402A",onboarded:true}],
                  subjects:[],areas:[],sessions:[],goals:[],live_timers:[],timer_reactions:[],messages:[] };

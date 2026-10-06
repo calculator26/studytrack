@@ -16,7 +16,7 @@ window.supabase = { createClient: () => {
       {id:${JSON.stringify(OTHER)},display_name:"Sam Ng",colour:"#3E7CA6",onboarded:true}],
     subjects:[],areas:[],sessions:[],goals:[],live_timers:[],timer_reactions:[],messages:msgs };
   const res=(d)=>{const p=Promise.resolve({data:d,error:null});
-    p.select=()=>p;p.eq=()=>p;p.or=()=>p;p.order=()=>p;p.limit=()=>p;p.gt=()=>p;p.lt=()=>p;p.in=()=>p;
+    p.select=()=>p;p.eq=()=>p;p.or=()=>p;p.order=()=>p;p.limit=()=>p;p.gt=()=>p;p.gte=()=>p;p.lt=()=>p;p.in=()=>p;
     p.insert=()=>p;p.update=()=>p;p.delete=()=>p;p.upsert=()=>p;return p;};
   return {
     from:(t)=>res(rows[t]||[]),
