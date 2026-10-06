@@ -23,6 +23,7 @@
   display:flex;flex-direction:column;justify-content:center;min-width:0}
 .xc-k{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85}
 .xc-big{font-size:46px;font-weight:800;letter-spacing:-.04em;line-height:1.05;margin-top:4px;font-variant-numeric:tabular-nums}
+.xc-big small,.xh-big small{font-size:.5em;font-weight:700;letter-spacing:0;margin-left:2px;opacity:.7}
 .xc-big span{font-size:16px;font-weight:650;letter-spacing:0;margin-left:7px;opacity:.85}
 .xc-what{font-size:16px;font-weight:700;margin-top:6px;line-height:1.25}
 .xc-what small{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:2px}

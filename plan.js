@@ -104,16 +104,22 @@ function plnExamsNow() {
 }
 
 /* What to say about the time until a paper. */
-function plnUntil(ex, now) {
+function plnUntil(ex, now, precise) {
   now = now || new Date();
   if (now >= ex.endAt) return { done: true, big: "Done", unit: "" };
   if (now >= ex.at) return { live: true, big: "Now", unit: "good luck" };
+  const ms = ex.at - now, h = Math.floor(ms / 36e5), m = Math.floor(ms / 6e4) % 60;
+  /* The headline countdowns go to the hour: "6d 14h", then "17h 05m" on the
+     last day. Only when the paper has a real start time. */
+  if (precise && ex.start && h >= 24) return { big: `${Math.floor(h / 24)}d ${h % 24}h`, unit: "to go" };
+  if (precise && ex.start) return { soon: true, today: daysBetween(todayISO(), ex.date) === 0, big: `${h}h ${pad(m)}m`, unit: "to go" };
   const days = daysBetween(todayISO(), ex.date);
   if (days >= 2) return { big: String(days), unit: "days" };
   if (days === 1) return { soon: true, big: "Tomorrow", unit: ex.start ? "at " + plnTime(ex.start) : "" };
-  const ms = ex.at - now, h = Math.floor(ms / 36e5), m = Math.floor(ms / 6e4) % 60;
   return { soon: true, today: true, big: h ? `${h}h ${pad(m)}m` : `${m}m`, unit: "to go" };
 }
+/* "6d 14h" with the letters drawn smaller than the figures. */
+const plnBig = u => esc(u.big).replace(/(\d)([dhm])\b/g, '$1<small>$2</small>');
 
 /* All the HSC exam days, for the "Day 7" marks. */
 let PLN_HSCDAYS = null;
@@ -274,8 +280,8 @@ function planPaintStrip(X) {
   const now = new Date();
   const nx = X.list.find(e => e.endAt > now);
   if (!nx) { el.hidden = true; return; }
-  const u = plnUntil(nx, now);
-  const when = u.live ? "now" : (u.big + (u.unit && !u.soon ? " " + u.unit : "") + (u.soon && u.unit ? " · " + u.unit : ""));
+  const u = plnUntil(nx, now, true);
+  const when = u.live ? "now" : /\d[dhm]$/.test(u.big) ? u.big : (u.big + (u.unit && !u.soon ? " " + u.unit : "") + (u.soon && u.unit ? " · " + u.unit : ""));
   const html = `<button type="button" class="xs-pill" data-plgo="cal" title="${esc(nx.subject + (nx.paper ? " · " + nx.paper : "") + " · " + fmtLong(nx.date) + (nx.start ? " · " + nx.start + " – " + nx.end : ""))}">
       <span class="xs-k">${u.live ? "In the exam" : "Next exam"}</span>
       <span class="xs-n" style="--c:${esc(nx.colour)}">${esc(plnShort(nx.subject))}${nx.label !== "Exam" ? " " + esc(nx.label) : ""}</span>
@@ -378,7 +384,7 @@ function planPaintCountdown() {
     box.hidden = false;
     return true;
   }
-  const nx = ahead[0], u = plnUntil(nx, now);
+  const nx = ahead[0], u = plnUntil(nx, now, true);
   const { cells } = plnStudied();
   /* the fortnight ahead, a cell a day */
   const strip = Array.from({ length: 14 }, (_, i) => addDays(today, i)).map(d => {
@@ -404,7 +410,7 @@ function planPaintCountdown() {
   const html = `<div class="xc${u.soon || u.live ? " soon" : ""}" style="--c:${esc(nx.colour)}">
     <div class="xc-hero">
       <div class="xc-k">${u.live ? "In the exam room" : "Next exam"}${plnHscDays().get(nx.date) ? ` · HSC day ${plnHscDays().get(nx.date)}` : ""}</div>
-      <div class="xc-big">${esc(u.big)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
+      <div class="xc-big">${plnBig(u)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
       <div class="xc-what">${esc(nx.subject)}${nx.paper && nx.paper !== nx.subject && nx.label !== "Exam" ? `<small>${esc(nx.paper)}</small>` : ""}</div>
       <div class="xc-when">${esc(fmtLong(nx.date))}${nx.start ? " · " + esc(nx.start + " – " + nx.end) : ""}</div>
     </div>
@@ -437,12 +443,12 @@ function plnHero(X) {
     plan7 += plnPlanDay(f);
   }
   const nx = ahead[0];
-  const u = nx ? plnUntil(nx, now) : null;
+  const u = nx ? plnUntil(nx, now, true) : null;
   const last = X.list.length ? X.list[X.list.length - 1] : null;
   return `<div class="xh">
     <div class="xh-next" style="--c:${esc(nx ? nx.colour : "var(--accent)")}">
       ${nx ? `<div class="xh-k">${u.live ? "In the exam room now" : "Next exam"}</div>
-        <div class="xh-big">${esc(u.big)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
+        <div class="xh-big" id="xh-big">${plnBig(u)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
         <div class="xh-what">${esc(nx.subject)}${nx.label !== "Exam" ? " · " + esc(nx.paper || nx.label) : ""}</div>
         <div class="xh-when">${esc(fmtLong(nx.date))}${nx.start ? " · " + esc(nx.start + " – " + nx.end) : ""}</div>`
       : X.list.length ? `<div class="xh-k">That's the HSC</div><div class="xh-big">Done</div><div class="xh-what">Every paper is behind you. Go and enjoy it.</div>`
@@ -1103,7 +1109,13 @@ setInterval(() => {
     const X = plnExams();
     planPaintStrip(X);
     const nx = X.list.find(e => e.endAt > new Date());
-    if (nx && daysBetween(todayISO(), nx.date) <= 1 && $("p-home") && $("p-home").classList.contains("on")) planPaintCountdown();
+    if (nx && $("p-home") && $("p-home").classList.contains("on")) planPaintCountdown();
+    const xb = $("xh-big");
+    if (nx && xb && $("p-cal") && $("p-cal").classList.contains("on")) {
+      const u = plnUntil(nx, new Date(), true);
+      const h = plnBig(u) + (u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : "");
+      if (xb.innerHTML !== h) xb.innerHTML = h;
+    }
   } catch (e) { /* next time */ }
 }, 30000);
 
