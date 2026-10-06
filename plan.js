@@ -231,14 +231,16 @@ function plnSuggest(exams) {
       PLN.plans.forEach((v, k) => { const [day, sid] = k.split("|"); if (day === d) touched.set(sid, d); });
       continue;
     }
+    /* The day's goal is the day's plan: a 7 h goal gets 7 h. A goal of 0
+       is a rest day and stays one; no goal set at all plans 3 h. */
     const prof = profileOf(UID);
-    const wk = Array.isArray(prof.weekday_goals) && prof.weekday_goals.length === 7 ? prof.weekday_goals[dowIdx(d)] : null;
-    if (wk !== null && wk !== "" && Number(wk) === 0) continue;          /* your rest day */
+    const hasGoals = Number(prof.default_goal) > 0 || (Array.isArray(prof.weekday_goals) && prof.weekday_goals.some(v => Number(v) > 0));
     let budget = goalFor(UID, d);
-    if (!(budget > 0)) budget = 3;
-    budget = Math.min(budget, 8);
-    const examToday = ahead.some(e => e.date === d);
-    if (examToday) budget = Math.min(budget, 1.5);
+    if (!(budget > 0)) { if (hasGoals) continue; budget = 3; }
+    budget = Math.min(budget, 14);
+    /* An exam day: the paper takes the morning, so the plan is the
+       afternoon. About 2.5 h lighter, never below half the goal. */
+    if (ahead.some(e => e.date === d)) budget = Math.max(budget - 2.5, budget / 2);
     if (d === today) budget = Math.max(0, budget - minutesTodayFor() / 60);
     /* subjects with a paper after this day, nearest first */
     const next = new Map();
@@ -254,15 +256,21 @@ function plnSuggest(exams) {
       weights.push([sid, w]);
     });
     weights.sort((a, b) => b[1] - a[1]);
-    const top = weights.slice(0, budget >= 3 ? 4 : 2);
-    const sum = top.reduce((a, x) => a + x[1], 0);
-    const blocks = Math.round(budget * 2);
-    let given = 0;
-    const share = top.map(([sid, w]) => { const b = Math.floor(blocks * w / sum); given += b; return { sid, b, r: blocks * w / sum - b }; });
-    share.sort((a, b) => b.r - a.r);
-    for (let i = 0; given < blocks; i = (i + 1) % share.length) { share[i].b++; given++; }
+    const top = weights.slice(0, budget >= 6 ? 5 : budget >= 3 ? 4 : 2);
+    /* Half-hour blocks (quarter hours if the goal needs them, so the day
+       adds up to the goal exactly), handed out in proportion to need, with
+       no subject taking more than ~60% of a long day while others wait. */
+    const unit = Math.abs(budget * 2 - Math.round(budget * 2)) < 1e-6 ? 0.5 : 0.25;
+    const blocks = Math.round(budget / unit);
+    const cap = top.length > 1 ? Math.max(Math.ceil(blocks * 0.6), Math.ceil(2 / unit)) : blocks;
+    const share = top.map(([sid, w]) => ({ sid, w, b: 0 }));
+    for (let n = 0; n < blocks; n++) {
+      let best = null;
+      share.forEach(x => { if (x.b < cap && (!best || x.w / (x.b + 1) > best.w / (best.b + 1))) best = x; });
+      (best || share[0]).b++;
+    }
     share.forEach(x => {
-      if (x.b > 0) { rows.push({ day: d, subject_id: x.sid, hours: x.b / 2 }); touched.set(x.sid, d); }
+      if (x.b > 0) { rows.push({ day: d, subject_id: x.sid, hours: x.b * unit }); touched.set(x.sid, d); }
     });
   }
   return rows;

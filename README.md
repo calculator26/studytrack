@@ -513,9 +513,11 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
     today is marked, days after a subject's last paper are hatched, and a totals row shows
     each day against your goal. Hover for the sessions, tap a past day for the detail (and
     a button to log that subject for that day), tap a day ahead to plan hours.
-  - **Suggest a plan:** fills every unplanned day to your last paper with your daily goal,
-    weighted towards the nearest exam (the day before an exam is mostly that subject), pulls
-    back anything left alone for days, keeps exam days light. Undo puts it back.
+  - **Suggest a plan:** fills every unplanned day to your last paper with exactly that day's
+    goal (a 7 h goal is 7 h; a 0 h day stays a rest day), weighted towards the nearest exam
+    (the day before an exam is mostly that subject, capped near 60% of the day), pulls back
+    anything left alone for days. Exam days get the afternoon: about 2.5 h less, never under
+    half the goal. Undo puts it back.
   - **Calendar:** one running calendar from the start of this month to the last day of the
     HSC (it doesn't stop when your own papers do), with your papers, HSC day numbers, hours
     studied and planned;
