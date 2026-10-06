@@ -499,8 +499,7 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
   papers matches. A subject typed by hand still finds its course (`catFor()` in `app.js`
   understands "maths advanced", "Advanced English", "SOR 1", "German X"…); anything
   ambiguous ("maths") is left unlinked rather than guessed.
-- **Masthead (wide screens):** your next paper with a live countdown, and every paper after
-  it on a line from today to your last.
+- **Masthead (wide screens):** one small line with your next paper and how long until it.
 - **Today:** the countdown card, with the fortnight ahead, one useful nudge (a subject left
   alone, a double day coming, your best revision window) and, the day before and the day of
   an exam, a checklist: arrival time, student card, pens, clear bottle, calculator where

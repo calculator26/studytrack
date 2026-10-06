@@ -264,36 +264,36 @@ function plnSuggest(exams) {
 const minutesTodayFor = () => { const v = DB.daily.get(UID); return (typeof dayCell === "function" ? dayCell(UID, todayISO())[0] : (v && v.days[todayISO()] || [0])[0]) || 0; };
 
 /* ---------------------------------------------------------------------------
-   THE MASTHEAD: next paper, and the line to your last
+   THE MASTHEAD: one line, the next paper and how long until it. It never
+   makes the header taller: if it would push anything onto a second line,
+   it steps aside.
    --------------------------------------------------------------------------- */
 function planPaintStrip(X) {
   const el = $("examstrip");
   if (!el) return;
   const now = new Date();
-  const ahead = X.list.filter(e => e.endAt > now);
-  if (!ahead.length) { el.hidden = true; return; }
-  const nx = ahead[0], u = plnUntil(nx, now);
-  const today = todayISO(), last = ahead[ahead.length - 1].date;
-  const span = Math.max(1, daysBetween(today, last));
-  const byDay = {};
-  ahead.forEach(e => { (byDay[e.date] = byDay[e.date] || []).push(e); });
-  const dots = Object.keys(byDay).map(d => {
-    const n = daysBetween(today, d), es = byDay[d];
-    const tip = fmtD(d) + " · " + es.map(e => plnShort(e.subject) + (e.label !== "Exam" ? " " + e.label : "")).join(", ") + (n > 0 ? " · " + n + " d" : " · today");
-    return `<i class="xs-dot${es.length > 1 ? " two" : ""}" style="left:${(n / span * 100).toFixed(2)}%;--c:${esc(es[0].colour)}${es[1] ? ";--c2:" + esc(es[1].colour) : ""}" title="${esc(tip)}"></i>`;
-  }).join("");
-  const html = `<button type="button" class="xs-next" data-plgo="cal" title="${esc(nx.subject + (nx.paper ? " · " + nx.paper : "") + " · " + fmtLong(nx.date) + (nx.start ? " · " + nx.start + " – " + nx.end : ""))}">
+  const nx = X.list.find(e => e.endAt > now);
+  if (!nx) { el.hidden = true; return; }
+  const u = plnUntil(nx, now);
+  const when = u.live ? "now" : (u.big + (u.unit && !u.soon ? " " + u.unit : "") + (u.soon && u.unit ? " · " + u.unit : ""));
+  const html = `<button type="button" class="xs-pill" data-plgo="cal" title="${esc(nx.subject + (nx.paper ? " · " + nx.paper : "") + " · " + fmtLong(nx.date) + (nx.start ? " · " + nx.start + " – " + nx.end : ""))}">
       <span class="xs-k">${u.live ? "In the exam" : "Next exam"}</span>
-      <span class="xs-v">${esc(u.big)}${u.unit && !u.soon ? `<small> ${esc(u.unit)}</small>` : ""}</span>
-      <span class="xs-n" style="--c:${esc(nx.colour)}">${esc(plnShort(nx.subject))}${nx.label !== "Exam" ? " " + nx.label : ""}${u.soon && u.unit ? " · " + esc(u.unit) : ""}</span>
-    </button>
-    <button type="button" class="xs-line" data-plgo="cal" title="Your exams from today to ${esc(fmtD(last))}">
-      <span class="xs-track">${dots}<b class="xs-now"></b></span>
-      <span class="xs-ends"><span>Today</span><span>${ahead.length} paper${ahead.length === 1 ? "" : "s"} left</span><span>${esc(fmtD(last).replace(/,/, ""))}</span></span>
+      <span class="xs-n" style="--c:${esc(nx.colour)}">${esc(plnShort(nx.subject))}${nx.label !== "Exam" ? " " + esc(nx.label) : ""}</span>
+      <span class="xs-v">${esc(when)}</span>
     </button>`;
   if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
   el.hidden = false;
+  plnStripFit();
 }
+function plnStripFit() {
+  const el = $("examstrip"), mast = el && el.parentElement;
+  if (!el || el.hidden || !mast) return;
+  el.classList.remove("xs-off");
+  const kids = [...mast.children].filter(k => k.offsetParent);
+  const top = kids.length ? kids[0].offsetTop : 0;
+  if (kids.some(k => Math.abs(k.offsetTop + k.offsetHeight / 2 - (top + kids[0].offsetHeight / 2)) > 12)) el.classList.add("xs-off");
+}
+window.addEventListener("resize", () => { try { plnStripFit(); } catch (e) {} });
 
 /* ---------------------------------------------------------------------------
    TODAY: the countdown card
