@@ -76,9 +76,10 @@ function plnExams() {
   PLN_MEMO.ex = plnExamsNow(); PLN_MEMO.exAt = Date.now();
   return PLN_MEMO.ex;
 }
-function plnExamsNow() {
+function plnExamsNow() { return plnExamsFor(mySubjects(UID)); }
+function plnExamsFor(subjects) {
   const list = [], unlinked = [], wrong = [], noPaper = [];
-  mySubjects(UID).forEach(s => {
+  subjects.forEach(s => {
     const c = catFor(s.name);
     if (c && c.exams && c.exams.length) {
       c.exams.forEach((e, i) => list.push({
@@ -757,6 +758,60 @@ function plnHscEnd(X) {
   if (X.list.length && X.list[X.list.length - 1].date > end) end = X.list[X.list.length - 1].date;
   return end;
 }
+/* ---------------------------------------------------------------------------
+   SOMEONE'S PROFILE: their calendar. Their papers come from their subjects,
+   which everyone can already see; the hours come from the sessions the
+   profile has just fetched, which private mode keeps empty for anyone but
+   them. Plans are never shown: those are yours alone.
+   --------------------------------------------------------------------------- */
+function planProfileCalHTML(id, subs, sessions) {
+  const X = plnExamsFor(subs || []);
+  /* the course's proper name, however they typed their subject */
+  if (id !== UID) X.list.forEach(e => { if (e.official) e.subject = e.course; });
+  const today = todayISO(), now = new Date();
+  const t0 = parseD(today);
+  const first = isoOf(new Date(t0.getFullYear(), t0.getMonth(), 1));
+  const last = [plnHscEnd(X), addDays(today, 21)].sort().pop();
+  const start = addDays(first, -dowIdx(first)), end = addDays(last, 6 - dowIdx(last));
+  const priv = id !== UID && profileRow(id) && profileRow(id).hide_hours;
+  const hrs = {};
+  if (!priv) (sessions || []).forEach(x => { if (x.day >= start && x.day <= end) hrs[x.day] = (hrs[x.day] || 0) + x.minutes / 60; });
+  const theirs = new Map();
+  X.list.forEach(e => (theirs.get(e.date) || theirs.set(e.date, []).get(e.date)).push(e));
+  /* papers you sit too, so you can see where your exams line up */
+  const mineSet = id === UID ? new Set() : new Set(plnExams().list.map(e => e.date + "|" + e.course + "|" + e.paper));
+  const ahead = X.list.filter(e => e.endAt > now);
+  const nx = ahead[0], u = nx ? plnUntil(nx, now, true) : null;
+  const mon = d => parseD(d).toLocaleDateString("en-AU", { month: "long" });
+  const title = mon(first) === mon(last) ? parseD(first).toLocaleDateString("en-AU", { month: "long", year: "numeric" })
+    : `${mon(first)} – ${mon(last)} ${parseD(last).getFullYear()}`;
+  let shared = 0;
+  let h = `<div class="pfcal">
+    <div class="pfcal-top">
+      ${nx ? `<div class="pfcal-next" style="--c:${esc(nx.colour)}"><span>${u.live ? "In an exam now" : "Next exam"}</span><b>${plnBig(u)}</b><small>${esc(nx.subject)}${nx.label !== "Exam" ? " " + esc(nx.label) : ""} · ${esc(fmtD(nx.date))}${nx.start ? " · " + esc(plnTime(nx.start)) : ""}</small></div>`
+        : X.list.length ? `<div class="pfcal-next"><span>HSC</span><b>Done</b><small>Every paper is behind them</small></div>`
+        : `<div class="pfcal-next"><span>No HSC papers</span><small>None of their subjects match a course on the NESA timetable.</small></div>`}
+      <div class="pfcal-meta"><b>${ahead.length}</b> paper${ahead.length === 1 ? "" : "s"} to go${X.list.length ? ` · last on <b>${esc(fmtD(X.list[X.list.length - 1].date))}</b>` : ""}<span class="pfcal-shared"></span>${priv ? `<br><span class="pfcal-priv">Their hours are private.</span>` : ""}</div>
+    </div>
+    <div class="mc-title">${esc(title)}</div>
+    <div class="mc-grid">${DOW.map(d => `<span class="mc-dow">${d}</span>`).join("")}`;
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    const dt = parseD(d), dn = dt.getDate(), es = theirs.get(d) || [], hd = plnHscDays().get(d);
+    const both = es.filter(e => mineSet.has(e.date + "|" + e.course + "|" + e.paper));
+    shared += both.length;
+    const label = dn === 1 ? dt.toLocaleDateString("en-AU", { month: "short" }) + " " + dn : String(dn);
+    const tip = fmtD(d) + es.map(e => " · " + e.subject + (e.label !== "Exam" ? " " + e.label : "") + (e.start ? " " + e.start : "") + (both.includes(e) ? " (you too)" : "")).join("") + (hrs[d] ? " · " + f1(hrs[d]) + " h studied" : "");
+    h += `<div class="mc-day pf${d === today ? " today" : ""}${d < today ? " past" : ""}${es.length ? " ex" : ""}${dowIdx(d) > 4 ? " we" : ""}${dn === 1 ? " m1" : ""}" title="${esc(tip)}">
+      <span class="mc-n">${esc(label)}${hd ? `<i>D${hd}</i>` : ""}</span>
+      ${es.map(e => `<span class="mc-ex${both.includes(e) ? " both" : ""}" style="--c:${esc(e.colour)}"><b>${esc(plnShort(e.subject))}${e.label !== "Exam" ? " " + e.label : ""}</b>${e.start ? `<small>${esc(plnTime(e.start))}</small>` : ""}</span>`).join("")}
+      ${d <= today && hrs[d] >= 0.1 ? `<span class="mc-h">${f1(hrs[d])}h</span>` : ""}
+    </div>`;
+  }
+  h += `</div>${shared && id !== UID ? `<div class="pfcal-key"><i></i> Papers you sit too</div>` : ""}</div>`;
+  if (shared && id !== UID) h = h.replace('<span class="pfcal-shared"></span>', ` · <b>${shared}</b> with you`);
+  return h;
+}
+
 /* One calendar, not a page a month: from the start of this month to the
    week the year group's last paper falls in, so it carries straight on
    into November. */

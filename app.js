@@ -4929,6 +4929,9 @@ async function openProfile(id) {
         <div class="d">Best day ${f1(best)} h${withGoal ? " · goal hit " + f0(hit / withGoal * 100) + "%" : ""}</div></div>
     </div>
 
+    ${typeof planProfileCalHTML === "function" ? `<h3 class="sec">${mine ? "Your calendar" : "Their calendar"}</h3>
+    <div class="mb16">${planProfileCalHTML(id, subs, all)}</div>` : ""}
+
     <h3 class="sec">Hours by subject</h3>
     <div class="rail mb16">${subs.length ? subs.map(x => {
       const v = hSub[x.id] || 0;

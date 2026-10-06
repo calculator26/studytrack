@@ -270,3 +270,19 @@
 /* one running calendar: the 1st of a month is marked, not a new page */
 .mc-day.m1 .mc-n{color:var(--accent-ink)}
 .mc-day.m1{border-left:2px solid var(--accent)}
+/* someone's calendar, on their profile: read only */
+.pfcal{border:1px solid var(--rule-soft);border-radius:12px;padding:12px;background:var(--surface)}
+.pfcal-top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.pfcal-next{display:grid;gap:1px;padding:8px 12px;border-radius:10px;border-left:4px solid var(--c,var(--accent));background:var(--surface-2)}
+.pfcal-next span{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft)}
+.pfcal-next b{font-size:24px;font-weight:800;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.pfcal-next b small{font-size:.55em;opacity:.7;margin-left:1px}
+.pfcal-next>small{font-size:12px;color:var(--ink-mid)}
+.pfcal-meta{font-size:12.5px;color:var(--ink-mid);text-align:right;line-height:1.5}
+.pfcal-priv{font-size:11.5px;color:var(--ink-soft)}
+.mc-day.pf{cursor:default;min-height:62px}
+.mc-day.pf:hover{box-shadow:none;transform:none}
+.mc-ex.both{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--accent)}
+.pfcal-key{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11.5px;color:var(--ink-mid)}
+.pfcal-key i{width:12px;height:10px;border-radius:3px;background:var(--ink-soft);box-shadow:0 0 0 1.5px var(--surface),0 0 0 3px var(--accent)}
+@media (max-width:620px){ .pfcal{padding:9px} .pfcal-meta{text-align:left} .mc-day.pf{min-height:50px} }

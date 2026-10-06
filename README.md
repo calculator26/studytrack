@@ -526,6 +526,10 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
     sits your papers with you, and your pace against the year group.
   - **Your HSC timetable**, with **Add to my calendar** (an `.ics` file with a reminder the
     evening before each paper) and **Copy**.
+- **On anyone's profile:** their calendar, read only. Their papers (from their subjects, which
+  everyone can already see), a countdown to their next one, the hours they logged each day
+  (left blank for people in private mode), and a ring on the papers you sit too. Their plan
+  is never shown.
 - **Plans** are stored in `study_plan` (`plan.sql`), readable only by their owner and written
   only through `set_plan` / `set_plans`, which check the subject is yours and the day is
   still ahead.
