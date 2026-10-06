@@ -7,7 +7,7 @@
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
   const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [],
               notification_prefs: [], push_subscriptions: [], notification_log: [],
-              nudges: [], messages: [], timer_reactions: [], session_reactions: [] };
+              nudges: [], messages: [], timer_reactions: [], session_reactions: [], study_plan: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
@@ -34,11 +34,15 @@
     quiet_days: [], weekly_digest: true, feed_token: "00000000-0000-4000-8000-0000000000ff"
   }];
 
+  /* The real 2026 dates, as the onboarding picker fills them in, except
+     Enterprise Computing: typed in by hand with the wrong year, the way one
+     real member's was, so the Calendar tab's "fix the date" has something
+     to fix. */
   const subjectDefs = [
-    ["English Advanced", "#3E7CA6", add(today(), 34), ["Common Module — 1984","Module A — Hag-Seed","Module B — Eliot","Module C — Craft"]],
-    ["Business Studies", "#C0564C", add(today(), 47), ["Operations","Marketing","Finance","HR"]],
-    ["Mathematics Standard 2", "#3FA98A", add(today(), 40), ["Question Practice","Error Review"]],
-    ["Enterprise Computing", "#C9A227", add(today(), 50), ["Content","Technical"]]
+    ["English Advanced", "#3E7CA6", "2026-10-13", ["Common Module — 1984","Module A — Hag-Seed","Module B — Eliot","Module C — Craft"]],
+    ["Business Studies", "#C0564C", "2026-10-26", ["Operations","Marketing","Finance","HR","Past papers"]],
+    ["Mathematics Standard 2", "#3FA98A", "2026-10-19", ["Question Practice","Error Review"]],
+    ["Enterprise Computing", "#C9A227", "2008-10-29", ["Content","Technical"]]
   ];
   let sid = 100, aid = 500, ssid = 1000;
   people.forEach(p => {
@@ -494,6 +498,19 @@
             return Promise.resolve({ error: null, data: {
               received: [[uid(3), 41], [ME, 33], [uid(2), 20], [uid(4), 6]],
               given: [[uid(2), 57], [ME, 44], [uid(4), 12], [uid(3), 3]] } });
+          }
+          if (name === "set_plan" || name === "set_plans") {
+            const rows = name === "set_plan"
+              ? [{ day: args.p_day, subject_id: args.p_subject, hours: Number(args.p_hours) }]
+              : (args.rows || []).map(r => ({ day: r.day, subject_id: r.subject_id, hours: Number(r.hours) }));
+            let n = 0;
+            rows.forEach(r => {
+              if (!T.subjects.some(x => x.id === r.subject_id && x.user_id === ME) || r.day < today()) return;
+              T.study_plan = T.study_plan.filter(x => !(x.day === r.day && x.subject_id === r.subject_id));
+              if (r.hours > 0) T.study_plan.push({ user_id: ME, day: r.day, subject_id: r.subject_id, hours: Math.round(r.hours * 4) / 4 });
+              n++;
+            });
+            return Promise.resolve({ data: { ok: true, written: n, hours: rows[0] && rows[0].hours }, error: null });
           }
           if (name === "reaction_board") {
             const sus = args && args.which === "sus", all = args && args.since < "2001";

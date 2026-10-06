@@ -491,6 +491,42 @@ paused one is shown for thirty and then goes quiet. A session paused yesterday l
 no longer sits between two people who are actually working. Administrators can also clear
 anyone's timer outright, from **Members** in the console.
 
+### The Calendar tab: countdown, lead-up chart and plan
+The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`.
+
+- **Exam dates and times** come from `catalogue.js`: NESA's 2026 HSC written exam timetable,
+  checked line by line against the published PDF (version 01-05-26). Every one of the 48
+  papers matches. A subject typed by hand still finds its course (`catFor()` in `app.js`
+  understands "maths advanced", "Advanced English", "SOR 1", "German X"…); anything
+  ambiguous ("maths") is left unlinked rather than guessed.
+- **Masthead (wide screens):** your next paper with a live countdown, and every paper after
+  it on a line from today to your last.
+- **Today:** the countdown card, with the fortnight ahead, one useful nudge (a subject left
+  alone, a double day coming, your best revision window) and, the day before and the day of
+  an exam, a checklist: arrival time, student card, pens, clear bottle, calculator where
+  allowed, phone out of the room.
+- **Calendar tab:**
+  - **Hero:** next exam, papers done, study days left, last 7 days.
+  - **Check your exams:** flags a stored exam date that disagrees with NESA (one in the real
+    data had 2008) and subjects not linked to a course, with one-tap fixes.
+  - **Your lead-up:** a Gantt chart of every subject by every day up to its exam. Cells light
+    up in the subject's colour by hours studied, exams sit in bold boxes on their day,
+    today is marked, days after a subject's last paper are hatched, and a totals row shows
+    each day against your goal. Hover for the sessions, tap a past day for the detail (and
+    a button to log that subject for that day), tap a day ahead to plan hours.
+  - **Suggest a plan:** fills every unplanned day to your last paper with your daily goal,
+    weighted towards the nearest exam (the day before an exam is mostly that subject), pulls
+    back anything left alone for days, keeps exam days light. Undo puts it back.
+  - **Calendar:** a month view with your papers, HSC day numbers, hours studied and planned;
+    the year group's exams and how many of us sit each one.
+  - **Worth knowing:** double days, runs of exams in a row, your longest free stretches, who
+    sits your papers with you, and your pace against the year group.
+  - **Your HSC timetable**, with **Add to my calendar** (an `.ics` file with a reminder the
+    evening before each paper) and **Copy**.
+- **Plans** are stored in `study_plan` (`plan.sql`), readable only by their owner and written
+  only through `set_plan` / `set_plans`, which check the subject is yours and the day is
+  still ahead.
+
 ### Keeping it fast with the whole year group on
 Measured with `_test/index.html?big=1` (250 members, two months of sessions, 30 timers live):
 
@@ -634,6 +670,8 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `app.js` | All the logic — auth, data, timer, charts, import |
 | `styles.css` | The design system |
 | `play.js`, `play.css` | Levels, achievements, colour themes, the Your day chart and the Peloton stat cards |
+| `plan.js`, `plan.css` | The Calendar tab, the countdown on Today and in the masthead, the lead-up chart and plans |
+| `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
 | `config.js` | Your Supabase keys and group name |

@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="admin.css">
 <link rel="stylesheet" href="play.css">
+<link rel="stylesheet" href="plan.css">
 </head>
 <body>
 
@@ -169,6 +170,8 @@
         </div>
         <span class="crewchip" id="crewchip" hidden></span>
       </div>
+      <!-- Your next paper, and the line from today to your last (wide screens) -->
+      <div class="examstrip" id="examstrip" hidden></div>
       <div class="mastright">
         <!-- What you have done today, always in view. It is the one number on
              the whole page you can change right now. -->
@@ -186,9 +189,10 @@
     </div>
     <nav class="tabs" role="tablist">
       <button role="tab" aria-selected="true"  data-p="home">Today</button>
+      <button role="tab" aria-selected="false" data-p="cal">Calendar</button>
       <button role="tab" aria-selected="false" data-p="crew">Peloton</button>
       <button role="tab" aria-selected="false" data-p="chat">Chat<i class="tabdot" id="chatdot" hidden></i></button>
-      <button role="tab" aria-selected="false" data-p="me">My stats</button>
+      <button role="tab" aria-selected="false" data-p="me"><span class="tl-long">My stats</span><span class="tl-short">Stats</span></button>
       <button role="tab" aria-selected="false" data-p="setup">Setup</button>
     </nav>
   </div>
@@ -300,6 +304,11 @@
       <div class="body"><div class="rail" id="todayrail"></div></div>
     </div>
   </section>
+
+  <!-- ---------- CALENDAR ---------- -->
+  <!-- Filled by plan.js: the countdown, the lead-up chart, the month view and
+       your timetable (moved in from My stats when the page starts). -->
+  <section class="panel" id="p-cal"></section>
 
   <!-- ---------- CREW ---------- -->
   <section class="panel" id="p-crew">
@@ -787,6 +796,7 @@
 <script src="catalogue.js"></script>
 <script src="app.js"></script>
 <script src="play.js"></script>
+<script src="plan.js"></script>
 <script src="admin.js"></script>
 </body>
 </html>

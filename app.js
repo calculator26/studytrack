@@ -1318,6 +1318,42 @@ function subscribeRealtime() {
 /* The Knox subject catalogue — every HSC course, its 2026 papers and its syllabus
    sections. Purely a starting point: everything it fills in stays editable. */
 const CAT = window.HSC_CATALOGUE || { subjects: [], active: [], papers: [], categories: {}, byName: () => null };
+
+/* A subject typed by hand still finds its NESA course, so its exams are not
+   lost. The real data had "maths advanced", "Advanced English", "German X",
+   "Business": word order, abbreviations and missing words. Matching is on
+   the set of words after expanding the usual short forms, so "maths
+   advanced" and "advanced mathematics" both land on Mathematics Advanced.
+   Anything ambiguous ("maths", "english") is left unmatched rather than
+   guessed: a wrong exam date is worse than none. */
+const CAT_WORDS = { maths: "mathematics", math: "mathematics", adv: "advanced", std: "standard",
+  ext: "extension", x: "extension", eng: "english", engl: "english", hist: "history", 1: "1", 2: "2",
+  i: "1", ii: "2", sci: "science", tech: "technology", stds: "studies" };
+const CAT_WHOLE = { business: "Business Studies", legal: "Legal Studies", economics: "Economics", eco: "Economics",
+  econ: "Economics", ecos: "Economics", chem: "Chemistry", phys: "Physics", bio: "Biology", geo: "Geography",
+  geog: "Geography", pdhpe: "Health and Movement Science", hms: "Health and Movement Science",
+  sor: "Studies of Religion I", "sor 1": "Studies of Religion I", "sor i": "Studies of Religion I",
+  "sor 2": "Studies of Religion II", "sor ii": "Studies of Religion II", mx1: "Mathematics Extension 1",
+  mx2: "Mathematics Extension 2", ee1: "English Extension 1", modern: "Modern History", ancient: "Ancient History",
+  "mod hist": "Modern History", "ancient hist": "Ancient History", ees: "Earth and Environmental Science",
+  "software engineering": "Software Engineering", sdd: "Software Engineering", "ind tech": "Industrial Technology",
+  "d&t": "Design and Technology", "d and t": "Design and Technology", "music one": "Music 1", "music two": "Music 2" };
+const catTokens = name => String(name || "").toLowerCase().replace(/[^a-z0-9&\s]+/g, " ").trim().split(/\s+/)
+  .filter(Boolean).flatMap(w => (CAT_WORDS[w] || w).split(" ")).filter(w => w !== "and" && w !== "of").sort().join(" ");
+let CAT_INDEX = null;
+function catFor(name) {
+  const n = String(name || "").toLowerCase().replace(/[^a-z0-9&\s]+/g, " ").replace(/\s+/g, " ").trim();
+  const exact = CAT.byName(name);
+  /* a retired course's old name (PDHPE) goes to the course that replaced it */
+  if (exact && !(exact.retired && CAT_WHOLE[n])) return exact;
+  if (!n) return null;
+  if (CAT_WHOLE[n]) return CAT.byName(CAT_WHOLE[n]);
+  if (!CAT_INDEX) {
+    CAT_INDEX = new Map();
+    (CAT.subjects || []).forEach(c => { if (!c.retired) CAT_INDEX.set(catTokens(c.name), c); });
+  }
+  return CAT_INDEX.get(catTokens(n)) || null;
+}
 let obSubjects = [], obAvatarFile = null, obStep = 1;
 
 function startOnboarding() {
@@ -1531,6 +1567,7 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("cl
   if (b.dataset.p === "crew") { if (STALE.crew) renderCrew(); else if (LIVEHIST.rows.length) drawLiveHistory(); }
   if (b.dataset.p === "me" && STALE.me) renderMe();
   if (typeof playTabOpened === "function") playTabOpened(b.dataset.p);
+  if (typeof planTabOpened === "function") planTabOpened(b.dataset.p);
   /* Chat costs nothing until somebody actually looks at it. */
   if (b.dataset.p === "chat") {
     initChat();
@@ -2250,6 +2287,8 @@ function renderAll() {
   renderShell(); renderHome(); renderCrew(); renderMe(); renderSetup();
   /* levels, achievements and the study clock live in play.js */
   if (typeof playRender === "function") playRender();
+  /* the exam calendar, countdown and lead-up chart live in plan.js */
+  if (typeof planRender === "function") planRender();
   try { paintNudgeBar(); } catch (e) { console.error(e); }
   try { paintReminders(); } catch (e) { console.error(e); }
   const tot = crewTotals();
@@ -2489,6 +2528,9 @@ const daysUntil = iso =>
 function paintCountdown() {
   const box = $("countdown");
   if (!box) return;
+  /* Your own next paper, from plan.js, when you have one. This card is the
+     year group's fallback for anybody who has not added subjects yet. */
+  if (typeof planPaintCountdown === "function") { try { if (planPaintCountdown()) return; } catch (e) { console.error(e); } }
   const live = KEY_DATES().map(d => Object.assign({}, d, { left: daysUntil(d.on) }))
                          .filter(d => d.left >= 0)
                          .sort((a, b) => a.left - b.left);
@@ -4441,7 +4483,7 @@ function renderMeNow() {
      people was some time in October with weeks of exams still to come. */
   const examsOn = {};
   mySubjects(UID).forEach(s => {
-    const c = CAT.byName(s.name);
+    const c = catFor(s.name);
     const papers = c && c.exams && c.exams.length ? c.exams.map(e => ({ date: e.date, paper: e.paper || e.name || "", start: e.start }))
       : (s.exam_date ? [{ date: s.exam_date, paper: "", start: "" }] : []);
     papers.forEach(e => {
@@ -5143,7 +5185,7 @@ function renderTimetable() {
   const mine = mySubjects(UID);
   const papers = [];
   mine.forEach(s => {
-    const c = CAT.byName(s.name);
+    const c = catFor(s.name);
     if (c && c.exams.length) {
       c.exams.forEach(e => papers.push({
         subject: s.name, colour: s.colour, paper: e.paper,
@@ -5165,7 +5207,7 @@ function renderTimetable() {
   papers.sort((a, b) => a.date.localeCompare(b.date) || String(a.start).localeCompare(String(b.start)));
 
   const offList = mine.filter(s => {
-    const c = CAT.byName(s.name);
+    const c = catFor(s.name);
     return c && !c.exams.length;
   });
 
