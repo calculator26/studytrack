@@ -5332,7 +5332,19 @@ async function runImport(parsed) {
         day: r.day, minutes: Math.min(1440, Math.max(1, Math.round(r.minutes))),
         mode: r.mode, note: r.note };
     });
-    for (let i = 0; i < payload.length; i += 200) await sb.from("sessions").insert(payload.slice(i, i + 200));
+    /* The database refuses impossible rows (a future day, a day over 20 h,
+       more than 60 sessions in an hour: sessions_guard.sql), so a batch can
+       fail. Stop there and say how far it got rather than claim success. */
+    let saved = 0;
+    for (let i = 0; i < payload.length; i += 50) {
+      const { error } = await sb.from("sessions").insert(payload.slice(i, i + 50));
+      if (error) {
+        await refresh();
+        rep.innerHTML = `<div class="note bad">Imported ${saved} of ${payload.length} sessions, then stopped: ${esc(error.message)}. The ${saved} already in are kept, so importing the same file again would double them.</div>`;
+        return;
+      }
+      saved += Math.min(50, payload.length - i);
+    }
     const gs = Object.keys(parsed.goals || {});
     if (gs.length) {
       const gp = gs.map(d => ({ user_id: UID, day: d, hours: Number(parsed.goals[d]) }))

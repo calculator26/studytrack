@@ -675,6 +675,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `play.js`, `play.css` | Levels, achievements, colour themes, the Your day chart and the Peloton stat cards |
 | `plan.js`, `plan.css` | The Calendar tab, the countdown on Today and in the masthead, the lead-up chart and plans |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
+| `sessions_guard.sql` | What the database won't take in `sessions`: future days, over 20 h in a day, over 60 sessions an hour. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
 | `config.js` | Your Supabase keys and group name |
