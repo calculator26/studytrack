@@ -187,6 +187,9 @@
         default_goal: 2 + (i % 5), weekday_goals: null, created_at: joined(60), hide_hours: i % 23 === 0, hide_others: false });
       const sj = [["English Advanced","#3E7CA6"],["Mathematics Advanced","#3FA98A"],["Business Studies","#C0564C"]].map(([n, c], k) => {
         const r = { id: uid(subx++), user_id: id, name: n, colour: c, exam_date: null, position: k }; T.subjects.push(r); return r; });
+      /* a fourth subject, so the year group's papers run later than yours */
+      T.subjects.push({ id: uid(subx++), user_id: id, name: ["Chemistry", "Modern History", "Economics", "Japanese Continuers", "Physics", "Agriculture"][i % 6],
+        colour: cols[(i + 3) % 10], exam_date: null, position: 3 });
       for (let d = 60; d >= 0; d--) {
         if ((d * 13 + i) % 6 === 0) continue;
         const day = add(today(), -d);

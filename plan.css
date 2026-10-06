@@ -267,3 +267,13 @@
   .tl-long{display:none}
   .tl-short{display:inline}
 }
+/* the year group in the month view: who sits what */
+.mc-co[style*="--c"]::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--c);margin-right:3px;vertical-align:1px}
+.mc-co{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcd-who{font-size:11.5px;color:var(--ink-mid);margin-top:2px;line-height:1.35}
+.xhd a{color:var(--accent);font-weight:650}
+.mcd-ex:has(.mcd-who){align-items:start}
+.mcd-ex:has(.mcd-who) i{margin-top:4px}
+.xhd-days{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.xhd-days a{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--rule-soft);text-decoration:none;color:var(--ink)}
+.xhd-days a:hover{border-color:var(--accent)}
