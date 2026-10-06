@@ -516,10 +516,10 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
   - **Suggest a plan:** fills every unplanned day to your last paper with your daily goal,
     weighted towards the nearest exam (the day before an exam is mostly that subject), pulls
     back anything left alone for days, keeps exam days light. Undo puts it back.
-  - **Calendar:** a month view with your papers, HSC day numbers, hours studied and planned,
-    running to the year group's last paper (not just yours). The year group's exams are on by
-    default; tap a day to see who sits each paper. People in private mode are counted, never
-    named. "Worth knowing" says who is still sitting papers after you finish.
+  - **Calendar:** one running calendar from the start of this month to the last day of the
+    HSC (it doesn't stop when your own papers do), with your papers, HSC day numbers, hours
+    studied and planned;
+    the year group's exams and how many of us sit each one.
   - **Worth knowing:** double days, runs of exams in a row, your longest free stretches, who
     sits your papers with you, and your pace against the year group.
   - **Your HSC timetable**, with **Add to my calendar** (an `.ics` file with a reminder the

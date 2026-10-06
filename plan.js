@@ -25,7 +25,7 @@ const PLN = {
   plans: new Map(),          /* "day|subject_id" -> hours */
   plansLoaded: false, plansAt: 0,
   back: 14,                  /* how many days of history the chart shows */
-  cohort: true,              /* month view: show the year group's exams */
+  cohort: false,             /* month view: show the year group's exams */
   pick: null,                /* the chart cell whose detail is open */
   dayPick: null,             /* the month-view day whose detail is open */
   undo: null                 /* the plan before "Suggest a plan" */
@@ -726,77 +726,63 @@ function plnClosePop() {
    CALENDAR: the month view
    --------------------------------------------------------------------------- */
 function plnCohortExams() {
-  /* every course somebody in the year group takes, and who takes it */
+  /* every course somebody in the year group takes, with how many take it */
   const by = new Map();
   (DB.crewSubjects || []).forEach(g => {
     const c = catFor(g.label);
     if (!c || !c.exams || !c.exams.length) return;
-    const cur = by.get(c.name) || by.set(c.name, { c, who: new Set() }).get(c.name);
-    (g.takers || []).forEach(id => cur.who.add(id));
+    const n = Array.isArray(g.takers) ? g.takers.length : (g.takers && g.takers.size) || 0;
+    const cur = by.get(c.name);
+    by.set(c.name, { c, n: (cur ? cur.n : 0) + n });
   });
   const days = new Map();
-  by.forEach(({ c, who }) => c.exams.forEach(e => {
-    (days.get(e.date) || days.set(e.date, []).get(e.date)).push({ name: c.name, paper: e.paper, start: e.start, end: e.end, n: who.size, who: [...who], colour: c.colour });
+  by.forEach(({ c, n }) => c.exams.forEach(e => {
+    (days.get(e.date) || days.set(e.date, []).get(e.date)).push({ name: c.name, paper: e.paper, start: e.start, end: e.end, n, colour: c.colour });
   }));
   days.forEach(list => list.sort((a, b) => b.n - a.n));
   return days;
 }
-/* The last day anyone in the year group (or you) has a paper: the end of the
-   HSC as far as this crew is concerned. */
+/* The last day of the HSC: the calendar and the chart run to here for
+   everyone, so neither stops the day your own papers finish. */
 function plnHscEnd(X) {
-  let end = X.list.length ? X.list[X.list.length - 1].date : "";
-  plnCohortExams().forEach((list, d) => { if (list.some(c => c.n) && d > end) end = d; });
-  return end || [...plnHscDays().keys()].pop() || "";
+  let end = [...plnHscDays().keys()].pop() || "";
+  if (X.list.length && X.list[X.list.length - 1].date > end) end = X.list[X.list.length - 1].date;
+  return end;
 }
-/* Who sits a paper, by name. People in private mode are counted, never named. */
-function plnWho(ids, cap) {
-  const pub = [], me = ids.includes(UID);
-  let hidden = 0;
-  ids.forEach(id => {
-    if (id === UID) return;
-    const p = profileRow(id);
-    if (!p) return;
-    if (p.hide_hours) hidden++; else pub.push(p.display_name || "someone");
-  });
-  pub.sort((a, b) => a.localeCompare(b));
-  const shown = cap ? pub.slice(0, cap) : pub;
-  const parts = (me ? ["you"] : []).concat(shown.map(esc));
-  const more = pub.length - shown.length + hidden;
-  if (!more) return parts.join(", ");
-  return parts.length ? parts.join(", ") + ` +${more} more` : `${more} ${more === 1 ? "person" : "people"}`;
-}
-
+/* One calendar, not a page a month: from the start of this month to the
+   week the year group's last paper falls in, so it carries straight on
+   into November. */
 function plnMonthsHTML(X) {
   const today = todayISO();
-  const last = plnHscEnd(X) || addDays(today, 30);
-  const months = [];
-  for (let m = new Date(parseD(today).getFullYear(), parseD(today).getMonth(), 1); isoOf(m) <= last; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) months.push(new Date(m));
+  const t0 = parseD(today);
+  const first = isoOf(new Date(t0.getFullYear(), t0.getMonth(), 1));
+  const last = [plnHscEnd(X), addDays(today, 21)].sort().pop();
+  const start = addDays(first, -dowIdx(first)), end = addDays(last, 6 - dowIdx(last));
   const { cells } = plnStudied();
   const cohort = PLN.cohort ? plnCohortExams() : null;
   const mine = new Map();
   X.list.forEach(e => (mine.get(e.date) || mine.set(e.date, []).get(e.date)).push(e));
-  return months.map(m0 => {
-    const first = isoOf(m0), y = m0.getFullYear(), mo = m0.getMonth();
-    const n = new Date(y, mo + 1, 0).getDate();
-    let h = `<div class="mc"><div class="mc-title">${esc(m0.toLocaleDateString("en-AU", { month: "long", year: "numeric" }))}</div>
-      <div class="mc-grid">${DOW.map(d => `<span class="mc-dow">${d}</span>`).join("")}`;
-    for (let k = 0; k < dowIdx(first); k++) h += `<span class="mc-pad"></span>`;
-    for (let dn = 1; dn <= n; dn++) {
-      const d = isoOf(new Date(y, mo, dn));
-      const es = mine.get(d) || [], hd = plnHscDays().get(d);
-      let m = 0; cells.forEach((v, k) => { if (k.startsWith(d + "|")) m += v; });
-      const plan = plnPlanDay(d);
-      const co = cohort && cohort.get(d);
-      h += `<button type="button" class="mc-day${d === today ? " today" : ""}${d < today ? " past" : ""}${es.length ? " ex" : ""}${dowIdx(d) > 4 ? " we" : ""}${PLN.dayPick === d ? " sel" : ""}" data-mcday="${d}">
-        <span class="mc-n">${dn}${hd ? `<i>D${hd}</i>` : ""}</span>
-        ${es.map(e => `<span class="mc-ex" style="--c:${esc(e.colour)}"><b>${esc(plnShort(e.subject))}${e.label !== "Exam" ? " " + e.label : ""}</b>${e.start ? `<small>${esc(plnTime(e.start))}</small>` : ""}</span>`).join("")}
-        ${co && !es.length ? co.filter(c => c.n).slice(0, 2).map(c => `<span class="mc-co" style="--c:${esc(c.colour)}">${esc(plnShort(c.name))} · ${c.n}</span>`).join("") + (co.filter(c => c.n).length > 2 ? `<span class="mc-co">+${co.filter(c => c.n).length - 2} more</span>` : "") : ""}
-        ${co && es.length && co.length > es.length ? `<span class="mc-co">+${co.length - es.length} more</span>` : ""}
-        ${d <= today ? `<span class="mc-h">${m >= 6 ? f1(m / 60) + "h" : ""}</span>` : plan ? `<span class="mc-h pl" title="${f1(plan)} h planned"><b>${f1(plan).replace(/\.0$/, "")}h</b><small> planned</small></span>` : ""}
-      </button>`;
-    }
-    return h + `</div></div>`;
-  }).join("");
+  const mon = d => parseD(d).toLocaleDateString("en-AU", { month: "long" });
+  const title = mon(first) === mon(last) ? parseD(first).toLocaleDateString("en-AU", { month: "long", year: "numeric" })
+    : `${mon(first)} – ${mon(last)} ${parseD(last).getFullYear()}`;
+  let h = `<div class="mc"><div class="mc-title">${esc(title)}</div>
+    <div class="mc-grid">${DOW.map(d => `<span class="mc-dow">${d}</span>`).join("")}`;
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    const dt = parseD(d), dn = dt.getDate();
+    const es = mine.get(d) || [], hd = plnHscDays().get(d);
+    let m = 0; cells.forEach((v, k) => { if (k.startsWith(d + "|")) m += v; });
+    const plan = plnPlanDay(d);
+    const co = cohort && cohort.get(d);
+    const label = dn === 1 ? dt.toLocaleDateString("en-AU", { month: "short" }) + " " + dn : String(dn);
+    h += `<button type="button" class="mc-day${d === today ? " today" : ""}${d < today ? " past" : ""}${es.length ? " ex" : ""}${dowIdx(d) > 4 ? " we" : ""}${dn === 1 ? " m1" : ""}${PLN.dayPick === d ? " sel" : ""}" data-mcday="${d}">
+      <span class="mc-n">${esc(label)}${hd ? `<i>D${hd}</i>` : ""}</span>
+      ${es.map(e => `<span class="mc-ex" style="--c:${esc(e.colour)}"><b>${esc(plnShort(e.subject))}${e.label !== "Exam" ? " " + e.label : ""}</b>${e.start ? `<small>${esc(plnTime(e.start))}</small>` : ""}</span>`).join("")}
+      ${co && !es.length ? `<span class="mc-co">${co.length} paper${co.length === 1 ? "" : "s"} · ${co.reduce((a, x) => a + x.n, 0)} sitting</span>` : ""}
+      ${co && es.length && co.length > es.length ? `<span class="mc-co">+${co.length - es.length} more</span>` : ""}
+      ${d <= today ? `<span class="mc-h">${m >= 6 ? f1(m / 60) + "h" : ""}</span>` : plan ? `<span class="mc-h pl" title="${f1(plan)} h planned"><b>${f1(plan).replace(/\.0$/, "")}h</b><small> planned</small></span>` : ""}
+    </button>`;
+  }
+  return h + `</div></div>`;
 }
 function plnDayDetailHTML(d, X) {
   const es = X.list.filter(e => e.date === d);
@@ -809,7 +795,7 @@ function plnDayDetailHTML(d, X) {
   return `<div class="mcd">
     <div class="mcd-h"><b>${esc(fmtLong(d))}</b>${hd ? `<span>HSC day ${hd}${plnHscWeek(d) ? " · week " + plnHscWeek(d) : ""}</span>` : ""}<button class="x" data-mcclose aria-label="Close">&times;</button></div>
     ${es.length ? `<div class="mcd-sec">Your exams</div>${es.map(e => `<div class="mcd-ex" style="--c:${esc(e.colour)}"><i></i><div><b>${esc(e.subject)}</b><small>${esc(e.paper || "")}</small></div><span>${esc(e.start ? e.start + " – " + e.end : "time TBC")}</span></div>`).join("")}` : ""}
-    ${co.length ? `<div class="mcd-sec">The year group's exams</div>${co.map(c => `<div class="mcd-ex" style="--c:${esc(c.colour)}"><i></i><div><b>${esc(c.name)}</b><small>${c.paper && c.paper !== c.name ? esc(c.paper) + " · " : ""}${esc(c.start)}</small>${c.n ? `<div class="mcd-who">${plnWho(c.who)}</div>` : ""}</div><span>${c.n || ""}</span></div>`).join("")}` : (hd ? "" : `<div class="mcd-none">No HSC exams on this day.</div>`)}
+    ${co.length ? `<div class="mcd-sec">The year group's exams</div><div class="mcd-co">${co.map(c => `<span style="--c:${esc(c.colour)}"><b>${esc(c.name)}</b>${c.paper && c.paper !== c.name ? " · " + esc(c.paper) : ""} · ${esc(c.start)}${c.n ? ` · <em>${c.n} of us</em>` : ""}</span>`).join("")}</div>` : (hd ? "" : `<div class="mcd-none">No HSC exams on this day.</div>`)}
     ${studied.length ? `<div class="mcd-sec">You studied</div><div class="mcd-co">${studied.map(([s, m]) => `<span style="--c:${esc(s.colour)}"><b>${esc(s.name)}</b> · ${hm(m / 60)}</span>`).join("")}</div>` : ""}
     ${planned.length ? `<div class="mcd-sec">Planned</div><div class="mcd-co">${planned.map(([s, h]) => `<span style="--c:${esc(s.colour)}"><b>${esc(s.name)}</b> · ${f1(h)} h</span>`).join("")}</div>` : ""}
   </div>`;
@@ -850,17 +836,6 @@ function plnHeadsHTML(X) {
     const big = shared.slice().sort((a, b) => b[1] - a[1])[0];
     items.push(["crew", `<b>${big[1]} of the year group</b> sit ${esc(big[0].course)} with you on ${esc(fmtD(big[0].date))}.`]);
   }
-  /* the year group: who is still sitting papers after you finish */
-  const end = plnHscEnd(X);
-  if (end && end > last.date) {
-    const late = [];
-    co.forEach((list, d) => { if (d > last.date) list.forEach(c => { if (c.n) late.push([d, c]); }); });
-    late.sort((a, b) => b[0].localeCompare(a[0]));
-    const [d0, c0] = late[0];
-    const lastDays = [...new Set(late.map(x => x[0]))].slice(0, 4);
-    items.push(["late", `You finish on ${esc(fmtD(last.date))}. The year group goes on until <b>${esc(fmtD(d0))}</b>, finishing with ${esc(c0.name)} (${plnWho(c0.who, 3)}). The last ones out:
-      <span class="xhd-days">${lastDays.map(d => `<a href="#" data-mcjump="${d}">${esc(fmtD(d))} · ${late.filter(x => x[0] === d).map(x => esc(plnShort(x[1].name))).join(", ")}</a>`).join("")}</span>`]);
-  }
   /* the year group's pace on your next subject */
   const crew7 = typeof PL !== "undefined" && PL.subjects && PL.subjects[7];
   if (crew7 && ahead.length) {
@@ -871,7 +846,7 @@ function plnHeadsHTML(X) {
       items.push(["pace", `${esc(nx.course)}, last 7 days: you <b>${f1(mine / 60)} h</b>, the year group's average <b>${f1(row.minutes / row.people / 60)} h</b> per person who studied it.`]);
     }
   }
-  const icon = { cal: "📅", two: "⚠️", run: "🔁", gap: "🪟", clock: "⏳", crew: "👥", pace: "📈", late: "🏁" };
+  const icon = { cal: "📅", two: "⚠️", run: "🔁", gap: "🪟", clock: "⏳", crew: "👥", pace: "📈" };
   return `<div class="xhd">${items.map(([k, t]) => `<div class="xhd-row"><span>${icon[k] || "•"}</span><div>${t}</div></div>`).join("")}</div>`;
 }
 
@@ -975,8 +950,6 @@ function plnWire(p) {
     if (skip) { plnSkipCourse(skip.dataset.plskip); return; }
     const fix = e.target.closest("[data-plfix]");
     if (fix) { fix.disabled = true; plnFixSubject(fix.dataset.plfix, fix.dataset.plcourse); return; }
-    const mj = e.target.closest("[data-mcjump]");
-    if (mj) { e.preventDefault(); PLN.dayPick = mj.dataset.mcjump; plnPaintMonths(); const m = $("cal-month-card"); if (m) m.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const md = e.target.closest("[data-mcday]");
     if (md) { PLN.dayPick = PLN.dayPick === md.dataset.mcday ? null : md.dataset.mcday; plnPaintMonths(); return; }
     const c = e.target.closest("[data-gx]");
