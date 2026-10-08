@@ -157,6 +157,11 @@ function blvHTML() {
     const cur = mine.find(s => s.endAt > now) || mine[mine.length - 1];
     const state = cur.endAt <= now ? "done" : now >= cur.at ? "live" : "pre";
     const u = plnUntil(cur, now, true);
+    /* the band always goes to the minute: "4d 21h 07m", "2h 19m" */
+    if (state === "pre") {
+      const mins = Math.max(0, Math.floor((cur.at - now) / 6e4)), d = Math.floor(mins / 1440), h = Math.floor(mins / 60) % 24, m = mins % 60;
+      u.big = d ? `${d}d ${h}h ${pad(m)}m` : h ? `${h}h ${pad(m)}m` : `${m}m`;
+    }
     if (blvHidden(day)) {
       return `<button type="button" class="blv-slim" data-blvshow>${state === "pre" ? `<b>Believe</b> · ${esc(cur.title)} in ${esc(u.big)}` : state === "live" ? `<b>Believe</b> · in the exam now` : `<b>${esc(cur.title)}</b> · done`}<span>Show</span></button>`;
     }
