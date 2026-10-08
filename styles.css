@@ -1211,6 +1211,13 @@ table.lh-t tr:last-child td{border-bottom:0}
 .cdcard.near{border-color:var(--accent);background:var(--accent-wash)}
 .cdcard.near .cdnum{color:var(--accent-ink)}
 .cdcard.today .cdnum{font-size:22px}
+.cdcard.cdlive{grid-column:1 / -1;flex-wrap:wrap;color:#fff;border-color:transparent;
+  background:linear-gradient(150deg,rgba(0,0,0,.24),rgba(0,0,0,0) 55%,rgba(255,255,255,.16)),var(--c)}
+.cdcard.cdlive .cdnum{color:#fff;font-size:30px;font-variant-numeric:tabular-nums;margin-top:2px}
+.cdcard.cdlive .cdnum small{font-size:.55em;opacity:.75;margin-left:1px}
+.cdcard.cdlive .cdunit,.cdcard.cdlive .cdwhen{color:rgba(255,255,255,.85)}
+.cdcard.cdlive .cdwhat{color:#fff}
+.cdcard.cdlive.heat-3,.cdcard.cdlive.heat-4{animation:xcglow 2.4s ease-in-out infinite}
 
 /* ---- private mode ----------------------------------------------------- */
 .privrow{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;
