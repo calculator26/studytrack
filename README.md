@@ -505,7 +505,7 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
   an exam, a checklist: arrival time, student card, pens, clear bottle, calculator where
   allowed, phone out of the room.
 - **Calendar tab:**
-  - **Hero:** next exam, papers done, study days left, last 7 days.
+  - **Hero:** next exam, papers done (with how many days until your last paper ends), study days left, last 7 days.
   - **Check your exams:** flags a stored exam date that disagrees with NESA (one in the real
     data had 2008) and subjects not linked to a course, with one-tap fixes.
   - **Your lead-up:** a Gantt chart of every subject by every day up to its exam. Cells light
@@ -540,49 +540,6 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
 - **Plans** are stored in `study_plan` (`plan.sql`), readable only by their owner and written
   only through `set_plan` / `set_plans`, which check the subject is yours and the day is
   still ahead.
-
-### The countdowns tick, and warm up
-The next-exam figure on Today and on the Calendar hero counts to the second
-(`4d 13h 52m 07s`) whenever the paper has a real start time, from one shared one-second
-clock (`plnTick` in `plan.js`); the cards themselves are still rebuilt only every 30
-seconds. The card's colour comes from how far away the paper is (`plnHeat`). It shifts a
-little every day: navy a month out, then indigo, violet a fortnight out, crimson in the
-last week, red on the morning. It also picks up a glow under a fortnight, a slow pulse
-under three days and a quicker one under a day. The subject's own colour moves to a small
-swatch beside its name. Reduced-motion turns the pulses off. The Today fallback card
-(for people with no subjects yet) counts down to English Paper 1 the same way.
-
-**All done in:** under the next exam, a second ticking countdown to the end of *your*
-last paper, from your own subjects, with a bar of papers done. It turns into "Your last
-paper" when there is one left.
-
-### The day planner (Calendar tab)
-A to-do list per day, under the countdown hero. All of it is in `planner.js` and
-`planner.css`.
-
-- **Top 3:** star up to three to-dos per day. They sit at the top, and the card says when
-  the day is won. A fourth star is refused, both in the page and in the database.
-- **Subject and area:** a to-do can carry a subject and an area within it (the same areas
-  as the session timer).
-- **Timing, two ways:** a time block (From – To), or just a session length. From and To
-  fill in the length; From and a length fill in To; moving From keeps the length. A
-  length on its own puts the to-do under Anytime, showing "45m".
-- **Schedule:** to-dos with a time block, in order, with your exams that day as fixed
-  blocks and a red *now* line through today.
-- **Anytime:** everything else.
-- **▶** on a to-do with a subject (today only) starts the session timer on that subject and area,
-  so the work is logged as hours. The to-do's wording never goes on the timer, so the
-  year group still only sees the subject.
-- **Carry over:** the first time you open the app each day, unfinished to-dos from days
-  already over move to today, marked "↻ from Tue 7 Oct". They lose their time block (but
-  keep their length) and their star, so today's Top 3 is chosen fresh.
-- ‹ Today › moves between days, and a day in the month view has **Open in the day
-  planner**. The header shows to-dos done, Top 3 progress and the time planned (blocked
-  or not) against the day's goal.
-- Stored in `study_todos` (`planner.sql`), readable only by the owner and written only
-  through `todo_save` / `todo_delete` / `todo_carry`. **Run `planner.sql` once in the
-  Supabase SQL editor.** Until then the card says the planner isn't switched on, and
-  nothing else is affected.
 
 ### Keeping it fast with the whole year group on
 Measured with `_test/index.html?big=1` (250 members, two months of sessions, 30 timers live):
@@ -731,8 +688,6 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `believe.js`, `believe.css`, `believe.webp` | Exam days: the Believe band and wishing people luck |
 | `believe.sql` | `exam_wishes`, `wish_luck()`, `exam_wishes_on()` and the `believe_demo` preview flag. Safe to re-run |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
-| `planner.js`, `planner.css` | The day planner on the Calendar tab: Top 3, schedule, to-dos, carry-over |
-| `planner.sql` | `study_todos` and `todo_save` / `todo_delete` / `todo_carry`. Safe to re-run |
 | `sessions_guard.sql` | What the database won't take in `sessions`: future days, over 20 h in a day, over 60 sessions an hour. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
