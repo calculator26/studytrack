@@ -2541,19 +2541,8 @@ function paintCountdown() {
     box.hidden = false;
     return;
   }
-  /* English Paper 1 has a start time in the catalogue, so it ticks to the
-     second and warms by the day like the per-paper card in plan.js does. */
-  const ep1 = (CAT.papers || []).find(p => p.date === englishPaper1() && /^English (Advanced|Standard|EAL)/.test(p.subject) && /Paper 1/i.test(p.paper));
-  const ep1At = ep1 && typeof plnAt === "function" ? plnAt(ep1.date, ep1.start) : null;
   box.innerHTML = live.map(d => {
     const today = d.left === 0, near = d.left <= 7;
-    if (d.what === "English Paper 1" && ep1At && ep1At > new Date() && typeof plnTick === "function") {
-      const h = plnHeat(ep1At - new Date());
-      return `<div class="cdcard cdlive heat-${h.level}" style="--c:${h.colour}">
-        <div><div class="cdunit">HSC starts in</div><div class="cdnum">${plnTick(ep1At)}</div></div>
-        <div><div class="cdwhat">${esc(d.what)}</div><div class="cdwhen">${esc(fmtLong(d.on))} · ${esc(plnTime(ep1.start))}</div></div>
-      </div>`;
-    }
     return `<div class="cdcard${today ? " today near" : near ? " near" : ""}">
       <div style="text-align:center;min-width:52px">
         <div class="cdnum">${today ? "Today" : d.left}</div>
