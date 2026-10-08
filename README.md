@@ -555,18 +555,23 @@ A to-do list per day, under the countdown hero. All of it is in `planner.js` and
 
 - **Top 3:** star up to three to-dos per day. They sit at the top, and the card says when
   the day is won. A fourth star is refused, both in the page and in the database.
-- **Schedule:** to-dos with a start time (an end time defaults to an hour later), in
-  order, with your exams that day as fixed blocks and a red *now* line through today.
+- **Subject and area:** a to-do can carry a subject and an area within it (the same areas
+  as the session timer).
+- **Timing, two ways:** a time block (From – To), or just a session length. From and To
+  fill in the length; From and a length fill in To; moving From keeps the length. A
+  length on its own puts the to-do under Anytime, showing "45m".
+- **Schedule:** to-dos with a time block, in order, with your exams that day as fixed
+  blocks and a red *now* line through today.
 - **Anytime:** everything else.
-- **▶** on a to-do with a subject (today only) starts the session timer on that subject,
+- **▶** on a to-do with a subject (today only) starts the session timer on that subject and area,
   so the work is logged as hours. The to-do's wording never goes on the timer, so the
   year group still only sees the subject.
 - **Carry over:** the first time you open the app each day, unfinished to-dos from days
-  already over move to today, marked "↻ from Tue 7 Oct". They lose their time and star, so
-  today's Top 3 is chosen fresh.
+  already over move to today, marked "↻ from Tue 7 Oct". They lose their time block (but
+  keep their length) and their star, so today's Top 3 is chosen fresh.
 - ‹ Today › moves between days, and a day in the month view has **Open in the day
-  planner**. The header shows to-dos done, Top 3 progress and hours blocked out against
-  the day's goal.
+  planner**. The header shows to-dos done, Top 3 progress and the time planned (blocked
+  or not) against the day's goal.
 - Stored in `study_todos` (`planner.sql`), readable only by the owner and written only
   through `todo_save` / `todo_delete` / `todo_carry`. **Run `planner.sql` once in the
   Supabase SQL editor.** Until then the card says the planner isn't switched on, and

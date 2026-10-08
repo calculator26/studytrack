@@ -58,13 +58,14 @@
      yesterday so todo_carry has something to bring forward. */
   {
     const mine = T.subjects.filter(s => s.user_id === ME);
-    const td = (day, title, si, st, et, pri, done) => T.study_todos.push({ id: uid(ssid++), user_id: ME, day, title,
+    const td = (day, title, si, st, et, pri, done, mins, ai) => T.study_todos.push({ id: uid(ssid++), user_id: ME, day, title,
       subject_id: si === null ? null : mine[si].id, start_time: st, end_time: et, priority: pri, done, carried_from: null,
+      minutes: mins || null, area_id: ai == null ? null : T.areas.filter(a => a.subject_id === mine[si].id)[ai].id,
       position: T.study_todos.length, created_at: new Date().toISOString() });
     td(today(), "Paper 1 practice: unseen texts, timed", 0, "09:00:00", "10:30:00", true, true);
-    td(today(), "Business: finance syllabus dot points", 1, "11:00:00", "12:30:00", true, false);
+    td(today(), "Business: finance syllabus dot points", 1, "11:00:00", "12:30:00", true, false, 90, 2);
     td(today(), "Maths Std 2: 2024 HSC paper, Section II", 2, "14:00:00", "16:00:00", false, false);
-    td(today(), "Error log review", 2, null, null, false, false);
+    td(today(), "Error log review", 2, null, null, false, false, 30, 1);
     td(today(), "Pack pens, student card, clear bottle", null, null, null, false, false);
     td(add(today(), -1), "Rewrite Module C reflection", 0, "16:00:00", "17:00:00", true, false);
     td(add(today(), 1), "Business case study flashcards", 1, null, null, true, false);
@@ -527,12 +528,20 @@
             const day = v("day"), title = String(v("title") || "").trim();
             if (!title) return Promise.resolve({ data: { ok: false, why: "Give it a name" }, error: null });
             if ((!cur || day !== cur.day) && day < today()) return Promise.resolve({ data: { ok: false, why: "That day is already over" }, error: null });
-            const st = v("start_time") || null, et = st ? v("end_time") || null : null, pri = !!v("priority");
+            const st = v("start_time") || null, pri = !!v("priority");
+            let et = st ? v("end_time") || null : null, mins = v("minutes") === "" || v("minutes") == null ? null : Number(v("minutes"));
+            const hm = t => { const [h, m] = String(t).split(":").map(Number); return h * 60 + m; };
+            const tt = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+            if (st && et) mins = hm(et) - hm(st);
+            else if (st && mins) et = tt(hm(st) + mins);
+            const sub = v("subject_id") || null;
+            let area = v("area_id") || null;
+            if (area && !T.areas.some(a => a.id === area && a.user_id === ME && a.subject_id === sub)) area = null;
             if (pri && T.study_todos.filter(r => r.user_id === ME && r.day === day && r.priority && r.id !== id).length >= 3)
               return Promise.resolve({ data: { ok: false, why: "You already have a Top 3 for that day. Unstar one first." }, error: null });
             const row = Object.assign(cur || { id: uid(ssid++), user_id: ME, created_at: new Date().toISOString(), carried_from: null,
               position: T.study_todos.filter(r => r.day === day).length }, {
-              day, title, subject_id: v("subject_id") || null, start_time: st && st.length === 5 ? st + ":00" : st,
+              day, title, subject_id: sub, area_id: area, minutes: mins, start_time: st && st.length === 5 ? st + ":00" : st,
               end_time: et && et.length === 5 ? et + ":00" : et, priority: pri, done: !!v("done") });
             if (!cur) T.study_todos.push(row);
             return Promise.resolve({ data: { ok: true, todo: Object.assign({}, row) }, error: null });

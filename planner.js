@@ -37,7 +37,14 @@ function tdClock(t) {
   const h = Math.floor(m / 60);
   return `${h % 12 || 12}.${pad(m % 60)} ${h < 12 ? "am" : "pm"}`;
 }
-const tdSpan = x => x.start_time ? tdClock(x.start_time) + (x.end_time ? " – " + tdClock(x.end_time) : "") : "";
+/* minutes from a time block if there is one, otherwise the length given */
+function tdLen(x) {
+  const a = tdMins(x.start_time), b = tdMins(x.end_time);
+  if (a !== null && b !== null && b > a) return b - a;
+  return Number(x.minutes) || 0;
+}
+const tdHM = m => pad(Math.floor(m / 60)) + ":" + pad(m % 60);
+const tdSpan = x =>x.start_time ? tdClock(x.start_time) + (x.end_time ? " – " + tdClock(x.end_time) : "") : "";
 
 /* ---------------------------------------------------------------------------
    Reading and writing
@@ -60,7 +67,7 @@ async function tdLoad(force) {
       }
     }
     const { data, error } = await sb.from("study_todos")
-      .select("id,day,title,subject_id,start_time,end_time,priority,done,carried_from,position,created_at")
+      .select("id,day,title,subject_id,area_id,start_time,end_time,minutes,priority,done,carried_from,position,created_at")
       .gte("day", addDays(todayISO(), -14));
     if (error) { TD.missing = true; TD.loaded = true; plannerPaint(); return; }
     TD.missing = false;
@@ -124,10 +131,13 @@ function tdMount() {
         <form class="td-form" id="td-form" autocomplete="off">
           <input type="text" id="td-title" maxlength="200" placeholder="What needs doing? e.g. Chem 2023 paper, Q21–30" aria-label="To-do">
           <select id="td-subj" aria-label="Subject"></select>
-          <span class="td-times">
-            <input type="time" id="td-start" step="300" aria-label="Starts">
+          <select id="td-area" aria-label="Area" disabled><option value="">Whole subject</option></select>
+          <span class="td-times" title="A time block puts it in the Schedule. A length on its own puts it under Anytime.">
+            <input type="time" id="td-start" step="300" aria-label="From">
             <span>–</span>
-            <input type="time" id="td-end" step="300" aria-label="Ends">
+            <input type="time" id="td-end" step="300" aria-label="To">
+            <span class="td-or">or</span>
+            <span class="td-len"><input type="number" id="td-len" min="5" max="720" step="5" inputmode="numeric" placeholder="45" aria-label="Session length in minutes"><span>min</span></span>
           </span>
           <label class="td-starbox" title="Make it one of the day's Top 3"><input type="checkbox" id="td-pri"><span>★ Top 3</span></label>
           <span class="td-formbtns">
@@ -153,9 +163,12 @@ function tdRow(x) {
   const nowM = new Date().getHours() * 60 + new Date().getMinutes();
   const st = tdMins(x.start_time), et = tdMins(x.end_time);
   const now = isToday && !x.done && st !== null && st <= nowM && (et === null ? nowM < st + 60 : nowM < et);
+  const a = x.area_id ? areaById(x.area_id) : null;
+  const len = tdLen(x);
   const meta = [
     x.start_time ? `<span class="td-time">${esc(tdSpan(x))}</span>` : "",
-    s ? `<span class="td-subj" style="--c:${esc(s.colour || "#7B8D98")}">${esc(s.name)}</span>` : "",
+    len ? `<span class="td-dur">${esc(hm(len / 60))}</span>` : "",
+    s ? `<span class="td-subj" style="--c:${esc(s.colour || "#7B8D98")}">${esc(s.name)}${a ? `<b> · ${esc(a.name)}</b>` : ""}</span>` : "",
     x.carried_from ? `<span class="td-carry" title="First planned for ${esc(fmtLong(x.carried_from))}">↻ from ${esc(fmtD(x.carried_from))}</span>` : "",
     now ? `<span class="td-nowtag">Now</span>` : ""
   ].filter(Boolean).join("");
@@ -203,15 +216,15 @@ function plannerPaint() {
 
   /* the numbers that say how the day is going */
   const done = items.filter(x => x.done).length;
-  let schedMins = 0;
-  items.forEach(x => { const a = tdMins(x.start_time), b = tdMins(x.end_time); if (a !== null && b !== null) schedMins += b - a; });
+  let planMins = 0, schedMins = 0;
+  items.forEach(x => { const m = tdLen(x); planMins += m; if (x.start_time) schedMins += m; });
   const goal = goalFor(UID, day);
   const planned = typeof plnPlanDay === "function" ? plnPlanDay(day) : 0;
   const topDone = top.filter(x => x.done).length;
   $("td-stats").innerHTML = items.length ? `<div class="td-stats">
       <div class="td-prog"><b>${done}<small> / ${items.length} done</small></b><i class="td-bar"><i style="width:${(done / items.length * 100).toFixed(1)}%"></i></i></div>
       <div class="td-stat"><span>Top 3</span><b>${top.length ? `${topDone}/${top.length}` : "—"}</b></div>
-      <div class="td-stat"><span>Time blocked</span><b>${hm(schedMins / 60)}</b><small>${goal ? `of a ${f1(goal)} h goal` : "no goal set"}${planned ? ` · ${f1(planned)} h planned on the chart` : ""}</small></div>
+      <div class="td-stat"><span>Time planned</span><b>${hm(planMins / 60)}</b><small>${goal ? `of a ${f1(goal)} h goal` : "no goal set"}${planMins ? ` · ${hm(schedMins / 60)} in the schedule` : ""}${planned ? ` · ${f1(planned)} h on the chart` : ""}</small></div>
     </div>
     ${top.length && topDone === top.length ? `<div class="td-win">Top ${top.length === 1 ? "one" : top.length} done. That's the day won. Anything else is a bonus.</div>` : ""}` : "";
 
@@ -248,11 +261,40 @@ function plannerPaint() {
    --------------------------------------------------------------------------- */
 function tdResetForm() {
   TD.edit = null;
-  ["td-title", "td-start", "td-end"].forEach(id => { $(id).value = ""; });
+  ["td-title", "td-start", "td-end", "td-len"].forEach(id => { $(id).value = ""; });
   $("td-subj").value = "";
+  tdPaintArea("");
   $("td-pri").checked = false;
   $("td-add").textContent = "Add";
   $("td-cancel").hidden = true;
+}
+
+/* The area list follows the subject, using the same areas as the timer. */
+function tdPaintArea(keep) {
+  const sid = $("td-subj").value, sel = $("td-area");
+  const n = sid ? myAreas(UID).filter(a => a.subject_id === sid).length : 0;
+  sel.innerHTML = sid ? areaOptionsHTML(sid) : `<option value="">Whole subject</option>`;
+  sel.value = keep && sel.querySelector(`[value="${CSS.escape(keep)}"]`) ? keep : "";
+  sel.disabled = !n;
+}
+
+/* From and To fill in the length; From and a length fill in To. A length
+   on its own is fine too: that to-do goes under Anytime. */
+function tdSync(changed) {
+  const st = tdMins($("td-start").value), et = tdMins($("td-end").value);
+  const len = Number($("td-len").value) || 0;
+  if (changed === "len") {
+    if (st !== null && len >= 5 && st + len < 24 * 60) $("td-end").value = tdHM(st + len);
+    return;
+  }
+  if (changed === "start") {
+    if (st === null) { $("td-end").value = ""; return; }
+    /* moving the start keeps the length, as a calendar does */
+    const m = len >= 5 ? len : et !== null && et > st ? et - st : 60;
+    if (st + m < 24 * 60) { $("td-end").value = tdHM(st + m); $("td-len").value = m; }
+    return;
+  }
+  if (st !== null && et !== null && et > st) $("td-len").value = et - st;
 }
 
 function tdWire() {
@@ -262,12 +304,15 @@ function tdWire() {
     const title = $("td-title").value.trim();
     if (!title) { $("td-title").focus(); return; }
     const st = $("td-start").value, et = $("td-end").value;
-    if (et && !st) { toast("Give it a start time too"); return; }
+    const len = $("td-len").value ? Math.round(Number($("td-len").value)) : null;
+    if (et && !st) { toast("Give it a From time too, or just a length"); return; }
     if (st && et && et <= st) { toast("It has to finish after it starts"); return; }
+    if (len !== null && (len < 5 || len > 720)) { toast("A session is between 5 minutes and 12 hours"); $("td-len").focus(); return; }
     const pri = $("td-pri").checked;
     const others = TD.list.filter(x => x.day === tdDay() && x.priority && x.id !== TD.edit).length;
     if (pri && others >= 3) { toast("You already have a Top 3 for this day. Unstar one first.", 3600); return; }
-    const patch = { title, subject_id: $("td-subj").value || "", start_time: st || "", end_time: et || "", priority: pri };
+    const patch = { title, subject_id: $("td-subj").value || "", area_id: $("td-area").value || "",
+      start_time: st || "", end_time: st ? et || "" : "", minutes: len === null ? "" : len, priority: pri };
     if (!TD.edit) patch.day = tdDay();
     TD.busy = true;
     try {
@@ -276,11 +321,10 @@ function tdWire() {
     } finally { TD.busy = false; }
   });
   $("td-cancel").addEventListener("click", tdResetForm);
-  /* a start time with no end gets an hour, which can be changed */
-  $("td-start").addEventListener("change", () => {
-    const m = tdMins($("td-start").value);
-    if (m !== null && !$("td-end").value && m < 23 * 60) $("td-end").value = pad(Math.floor((m + 60) / 60)) + ":" + pad(m % 60);
-  });
+  $("td-subj").addEventListener("change", () => tdPaintArea(""));
+  $("td-start").addEventListener("change", () => tdSync("start"));
+  $("td-end").addEventListener("change", () => tdSync("end"));
+  $("td-len").addEventListener("input", () => tdSync("len"));
 
   $("cal-planner").addEventListener("click", e => {
     const b = e.target.closest("button");
@@ -309,8 +353,10 @@ function tdWire() {
       TD.edit = x.id;
       $("td-title").value = x.title;
       $("td-subj").value = x.subject_id || "";
+      tdPaintArea(x.area_id || "");
       $("td-start").value = tdHHMM(x.start_time);
       $("td-end").value = tdHHMM(x.end_time);
+      $("td-len").value = tdLen(x) || "";
       $("td-pri").checked = !!x.priority;
       $("td-add").textContent = "Save";
       $("td-cancel").hidden = false;
@@ -337,12 +383,13 @@ function tdStartTimer(id) {
   }
   const tab = document.querySelector('nav.tabs button[data-p="home"]');
   if (tab) tab.click();
-  setPair("tm-subj", "tm-area", x.subject_id, null);
+  setPair("tm-subj", "tm-area", x.subject_id, x.area_id || null);
   const start = $("tm-start");
   if (!start) return;
   start.click();
   start.scrollIntoView({ block: "center", behavior: "smooth" });
-  toast(`Timer started on ${(subjById(x.subject_id) || {}).name || "that subject"}. Tick the to-do off when you're done.`, 3600);
+  const ar = x.area_id ? areaById(x.area_id) : null;
+  toast(`Timer started on ${(subjById(x.subject_id) || {}).name || "that subject"}${ar ? " · " + ar.name : ""}${tdLen(x) ? ", planned for " + hm(tdLen(x) / 60) : ""}. Tick the to-do off when you're done.`, 4200);
 }
 
 /* "Open in the day planner" from a day picked in the month view. */
