@@ -73,7 +73,7 @@
 @media (prefers-reduced-motion:reduce){ .xc.soon .xc-big{animation:none} }
 
 /* ---------- Calendar: hero ---------- */
-.xh{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:12px}
+.xh{display:grid;grid-template-columns:1.5fr 1.25fr repeat(2,1fr);gap:12px}
 .xh-next{border-radius:var(--r);padding:16px 20px;color:#fff;box-shadow:var(--sh-1);
   background:linear-gradient(150deg,rgba(0,0,0,.24),rgba(0,0,0,0) 55%,rgba(255,255,255,.16)),var(--c)}
 .xh-k{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85}
@@ -286,3 +286,16 @@
 .pfcal-key{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11.5px;color:var(--ink-mid)}
 .pfcal-key i{width:12px;height:10px;border-radius:3px;background:var(--ink-soft);box-shadow:0 0 0 1.5px var(--surface),0 0 0 3px var(--accent)}
 @media (max-width:620px){ .pfcal{padding:9px} .pfcal-meta{text-align:left} .mc-day.pf{min-height:50px} }
+
+/* ---------- The finish line: All your exams done in (plnFinish) ---------- */
+.xc-fin{margin-top:14px;padding:10px 12px 9px;border-radius:var(--r-sm);background:rgba(0,0,0,.2)}
+.xc-fin-k{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.9}
+.xc-fin-big{font-size:26px;font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-top:3px;font-variant-numeric:tabular-nums}
+.xc-fin-big small{font-size:.55em;font-weight:700;margin-left:1px;opacity:.75}
+.xc-fin-bar,.xh-fin .xh-bar{display:block;height:6px;border-radius:999px;overflow:hidden;margin:7px 0 5px}
+.xc-fin-bar{background:rgba(255,255,255,.22)}
+.xc-fin-bar i,.xh-fin .xh-bar i{display:block;height:100%;min-width:6px;border-radius:999px;background:linear-gradient(90deg,#3DDC97,#19A974)}
+.xc-fin-s{font-size:11.5px;opacity:.88}
+.xh-fin{border-color:#BFE6D3;background:linear-gradient(160deg,var(--good-wash),var(--surface) 70%)}
+.xh-fin>span{color:var(--good)}
+.xh-fin b{font-size:32px}
