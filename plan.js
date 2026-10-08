@@ -120,7 +120,91 @@ function plnUntil(ex, now, precise) {
   return { soon: true, today: true, big: h ? `${h}h ${pad(m)}m` : `${m}m`, unit: "to go" };
 }
 /* "6d 14h" with the letters drawn smaller than the figures. */
-const plnBig = u => esc(u.big).replace(/(\d)([dhm])\b/g, '$1<small>$2</small>');
+const plnBig = u => esc(u.big).replace(/(\d)([dhms])\b/g, '$1<small>$2</small>');
+
+/* ---------------------------------------------------------------------------
+   The live countdowns: to the second, and warmer every day
+   --------------------------------------------------------------------------- */
+/* "4d 13h 22m 07s"; under a day, "13h 22m 07s". */
+function plnDHMS(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
+  return (d ? `${d}d ${pad(h)}h ` : `${h}h `) + `${pad(m)}m ${pad(s % 60)}s`;
+}
+/* A figure that ticks: the one-second clock below rewrites anything carrying
+   data-cdto, so the card itself is only rebuilt when something real changes. */
+const plnTick = at => `<span class="cd-live" data-cdto="${at.getTime()}">${plnBig({ big: plnDHMS(at - Date.now()) })}</span>`;
+/* The next-exam figure: ticking when the paper has a real start time, the
+   old whole-day wording when it doesn't. */
+function plnNextBig(nx, u) {
+  if (!u.done && !u.live && nx.start) return plnTick(nx.at) + `<span>to go</span>`;
+  return plnBig(u) + (u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : "");
+}
+
+/* How close it is, as a colour. A month out the card is a calm navy; it warms
+   a little every single day, through indigo and violet a fortnight out and
+   crimson in the last week, to red on the morning. (Not through amber: blue
+   blended into orange goes a muddy olive on the days in between.) The level
+   drives the glow and the pulse:
+     0  more than a fortnight     2  under a week     4  under a day
+     1  under a fortnight         3  under three days                      */
+const PLN_HEAT = [[30, [43, 97, 119]], [21, [67, 72, 160]], [14, [118, 58, 160]], [7, [184, 40, 112]], [3, [214, 48, 40]], [0, [165, 18, 28]]];
+function plnHeat(ms) {
+  const d = Math.max(0, ms / 864e5);
+  let rgb = PLN_HEAT[0][1];
+  for (let i = 1; i < PLN_HEAT.length; i++) {
+    const [hiD, hi] = PLN_HEAT[i - 1], [loD, lo] = PLN_HEAT[i];
+    if (d <= hiD && d >= loD) {
+      const t = (hiD - d) / (hiD - loD);
+      rgb = hi.map((v, k) => Math.round(v + (lo[k] - v) * t));
+      break;
+    }
+  }
+  return { colour: `rgb(${rgb.join(",")})`, level: d >= 14 ? 0 : d >= 7 ? 1 : d >= 3 ? 2 : d >= 1 ? 3 : 4 };
+}
+/* style + class for a card counting down to nx */
+function plnHeatAttrs(nx, now) {
+  const h = plnHeat(now >= nx.at ? 0 : nx.at - now);
+  return { cls: ` heat-${h.level}`, style: `--c:${h.colour};--sc:${esc(nx.colour)}` };
+}
+
+/* The finish line under the next-exam figure, on Today and on the Calendar. */
+function plnFinishHTML(X, now, cls) {
+  const f = plnFinish(X, now);
+  if (!f) return "";
+  const lastOne = f.ahead.length === 1;
+  return `<div class="${cls}">
+    <div class="${cls}-k">${lastOne ? "Your last paper" : "🎓 All your exams done in"}</div>
+    ${lastOne ? `<div class="${cls}-s">Finish this one and you're done with the HSC.</div>`
+      : `<div class="${cls}-big">${plnTick(f.last.endAt)}</div>`}
+    <i class="${cls}-bar" title="${f.done} of ${f.total} papers done"><i style="width:${f.pct.toFixed(1)}%"></i></i>
+    <div class="${cls}-s">${f.done} of ${f.total} papers done · last is ${esc(plnShort(f.last.subject))}, ${esc(fmtD(f.last.date))}</div>
+  </div>`;
+}
+
+/* Your finish line: the end of your last paper. */
+function plnFinish(X, now) {
+  const ahead = X.list.filter(e => e.endAt > now);
+  if (!ahead.length) return null;
+  const last = X.list[X.list.length - 1];
+  return { last, done: X.list.length - ahead.length, total: X.list.length, ahead,
+    pct: X.list.length ? (X.list.length - ahead.length) / X.list.length * 100 : 0 };
+}
+
+/* One clock for every ticking figure on the page. When one runs out the
+   cards are rebuilt, so "4s" becomes "Now" rather than "0s". */
+setInterval(() => {
+  if (document.hidden) return;
+  const now = Date.now();
+  let ran = false;
+  document.querySelectorAll("[data-cdto]").forEach(el => {
+    const ms = Number(el.dataset.cdto) - now;
+    if (ms <= 0) { ran = true; return; }
+    const h = plnBig({ big: plnDHMS(ms) });
+    if (el.innerHTML !== h) el.innerHTML = h;
+  });
+  if (ran && typeof UID !== "undefined" && UID) { try { plnDirty(); planPaintCountdown(); plnPaintCal(); } catch (e) { /* next time */ } }
+}, 1000);
 
 /* All the HSC exam days, for the "Day 7" marks. */
 let PLN_HSCDAYS = null;
@@ -416,12 +500,14 @@ function planPaintCountdown() {
       <b>${esc(plnShort(e.subject))}${e.label !== "Exam" ? " " + e.label : ""}</b><span>${n === 0 ? "today" : n === 1 ? "tmrw" : n + "d"}</span></span>`;
   }).join("");
   const tip = plnTip(X, now);
-  const html = `<div class="xc${u.soon || u.live ? " soon" : ""}" style="--c:${esc(nx.colour)}">
+  const heat = plnHeatAttrs(nx, now);
+  const html = `<div class="xc${u.soon || u.live ? " soon" : ""}${heat.cls}" style="${heat.style}">
     <div class="xc-hero">
       <div class="xc-k">${u.live ? "In the exam room" : "Next exam"}${plnHscDays().get(nx.date) ? ` · HSC day ${plnHscDays().get(nx.date)}` : ""}</div>
-      <div class="xc-big">${plnBig(u)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
-      <div class="xc-what">${esc(nx.subject)}${nx.paper && nx.paper !== nx.subject && nx.label !== "Exam" ? `<small>${esc(nx.paper)}</small>` : ""}</div>
+      <div class="xc-big">${plnNextBig(nx, u)}</div>
+      <div class="xc-what"><i class="xc-sw"></i>${esc(nx.subject)}${nx.paper && nx.paper !== nx.subject && nx.label !== "Exam" ? `<small>${esc(nx.paper)}</small>` : ""}</div>
       <div class="xc-when">${esc(fmtLong(nx.date))}${nx.start ? " · " + esc(nx.start + " – " + nx.end) : ""}</div>
+      ${plnFinishHTML(X, now, "xc-fin")}
     </div>
     <div class="xc-side">
       <div class="xc-chips">${chips}${ahead.length > 9 ? `<span class="xc-more">+${ahead.length - 9}</span>` : ""}</div>
@@ -454,17 +540,23 @@ function plnHero(X) {
   const nx = ahead[0];
   const u = nx ? plnUntil(nx, now, true) : null;
   const last = X.list.length ? X.list[X.list.length - 1] : null;
+  const heat = nx ? plnHeatAttrs(nx, now) : { cls: "", style: "--c:var(--good)" };
+  const fin = plnFinish(X, now);
   return `<div class="xh">
-    <div class="xh-next" style="--c:${esc(nx ? nx.colour : "var(--accent)")}">
+    <div class="xh-next${heat.cls}${u && (u.soon || u.live) ? " soon" : ""}" style="${heat.style}">
       ${nx ? `<div class="xh-k">${u.live ? "In the exam room now" : "Next exam"}</div>
-        <div class="xh-big" id="xh-big">${plnBig(u)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
-        <div class="xh-what">${esc(nx.subject)}${nx.label !== "Exam" ? " · " + esc(nx.paper || nx.label) : ""}</div>
+        <div class="xh-big" id="xh-big">${plnNextBig(nx, u)}</div>
+        <div class="xh-what"><i class="xc-sw"></i>${esc(nx.subject)}${nx.label !== "Exam" ? " · " + esc(nx.paper || nx.label) : ""}</div>
         <div class="xh-when">${esc(fmtLong(nx.date))}${nx.start ? " · " + esc(nx.start + " – " + nx.end) : ""}</div>`
       : X.list.length ? `<div class="xh-k">That's the HSC</div><div class="xh-big">Done</div><div class="xh-what">Every paper is behind you. Go and enjoy it.</div>`
       : `<div class="xh-k">No exams yet</div><div class="xh-what">Add your subjects from the Knox list in Setup and every paper arrives with them.</div>`}
     </div>
-    <div class="xh-tile"><span>Papers done</span><b>${done}<small> / ${X.list.length}</small></b>
-      <i class="xh-bar"><i style="width:${X.list.length ? (done / X.list.length * 100).toFixed(1) : 0}%"></i></i></div>
+    ${fin && fin.ahead.length > 1
+      ? `<div class="xh-tile xh-fin"><span>🎓 All done in</span><b>${plnTick(fin.last.endAt)}</b>
+          <i class="xh-bar"><i style="width:${fin.pct.toFixed(1)}%"></i></i>
+          <small>${done} of ${X.list.length} papers done · last is ${esc(plnShort(fin.last.subject))}, ${esc(fmtD(fin.last.date))}</small></div>`
+      : `<div class="xh-tile"><span>Papers done</span><b>${done}<small> / ${X.list.length}</small></b>
+          <i class="xh-bar"><i style="width:${X.list.length ? (done / X.list.length * 100).toFixed(1) : 0}%"></i></i>${fin ? `<small>One to go. Then you're done.</small>` : ""}</div>`}
     <div class="xh-tile"><span>Study days left</span><b>${plnStudyDays(ahead)}</b><small>to ${last ? esc(fmtD(last.date)) : "—"}, not counting exam days</small></div>
     <div class="xh-tile"><span>Last 7 days</span><b>${f1(last7)}<small> h</small></b><small>${plan7 ? f1(plan7) + " h planned for the next 7" : "nothing planned for the next 7 yet"}</small></div>
   </div>`;
@@ -861,6 +953,7 @@ function plnDayDetailHTML(d, X) {
     ${co.length ? `<div class="mcd-sec">The year group's exams</div><div class="mcd-co">${co.map(c => `<span style="--c:${esc(c.colour)}"><b>${esc(c.name)}</b>${c.paper && c.paper !== c.name ? " · " + esc(c.paper) : ""} · ${esc(c.start)}${c.n ? ` · <em>${c.n} of us</em>` : ""}</span>`).join("")}</div>` : (hd ? "" : `<div class="mcd-none">No HSC exams on this day.</div>`)}
     ${studied.length ? `<div class="mcd-sec">You studied</div><div class="mcd-co">${studied.map(([s, m]) => `<span style="--c:${esc(s.colour)}"><b>${esc(s.name)}</b> · ${hm(m / 60)}</span>`).join("")}</div>` : ""}
     ${planned.length ? `<div class="mcd-sec">Planned</div><div class="mcd-co">${planned.map(([s, h]) => `<span style="--c:${esc(s.colour)}"><b>${esc(s.name)}</b> · ${f1(h)} h</span>`).join("")}</div>` : ""}
+    ${typeof plannerPaint === "function" ? `<button class="btn ghost sm mcd-plan" type="button" data-tdplan="${esc(d)}">${d < todayISO() ? "See that day's to-dos" : "Open in the day planner"}</button>` : ""}
   </div>`;
 }
 
@@ -1133,6 +1226,7 @@ function plnPaintCal() {
   plnMount();
   const X = plnExams();
   $("cal-hero").innerHTML = plnHero(X);
+  if (typeof plannerPaint === "function") { try { plannerPaint(); } catch (e) { console.error("planner", e); } }
   $("cal-fix").innerHTML = plnFixHTML(X);
   plnPaintChart();
   plnPaintMonths();
@@ -1174,8 +1268,9 @@ document.addEventListener("click", e => {
   if (go.dataset.plday) setTimeout(() => { const m = $("cal-month-card"); if (m) m.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
 });
 
-/* The countdown moves by itself: once every 30 seconds is plenty for a
-   figure in minutes, and only while the page is in view. */
+/* The cards are rebuilt every 30 seconds while the page is in view, which
+   keeps the colour, the tips and "Now" honest; the seconds in between are
+   the one-second clock's job (plnTick). */
 setInterval(() => {
   if (!UID || !ME || document.hidden) return;
   try {
@@ -1185,9 +1280,10 @@ setInterval(() => {
     if (nx && $("p-home") && $("p-home").classList.contains("on")) planPaintCountdown();
     const xb = $("xh-big");
     if (nx && xb && $("p-cal") && $("p-cal").classList.contains("on")) {
-      const u = plnUntil(nx, new Date(), true);
-      const h = plnBig(u) + (u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : "");
-      if (xb.innerHTML !== h) xb.innerHTML = h;
+      const now = new Date(), u = plnUntil(nx, now, true);
+      xb.innerHTML = plnNextBig(nx, u);
+      const card = xb.closest(".xh-next"), heat = plnHeatAttrs(nx, now);
+      if (card) { card.setAttribute("style", heat.style); card.className = "xh-next" + heat.cls + (u.soon || u.live ? " soon" : ""); }
     }
   } catch (e) { /* next time */ }
 }, 30000);

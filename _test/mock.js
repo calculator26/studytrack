@@ -7,7 +7,7 @@
   const uid = (n) => "00000000-0000-4000-8000-" + String(n).padStart(12, "0");
   const T = { profiles: [], subjects: [], areas: [], sessions: [], goals: [], live_timers: [], admin_audit: [],
               notification_prefs: [], push_subscriptions: [], notification_log: [],
-              nudges: [], messages: [], timer_reactions: [], session_reactions: [], study_plan: [] };
+              nudges: [], messages: [], timer_reactions: [], session_reactions: [], study_plan: [], study_todos: [] };
   const ME = uid(1);
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
@@ -53,6 +53,22 @@
         position: j, target_hours: 10 + j * 4, current_pct: 78 + ((j * 7 + i * 5) % 22) }));
     });
   });
+
+  /* A day planner with something in it, and one to-do left over from
+     yesterday so todo_carry has something to bring forward. */
+  {
+    const mine = T.subjects.filter(s => s.user_id === ME);
+    const td = (day, title, si, st, et, pri, done) => T.study_todos.push({ id: uid(ssid++), user_id: ME, day, title,
+      subject_id: si === null ? null : mine[si].id, start_time: st, end_time: et, priority: pri, done, carried_from: null,
+      position: T.study_todos.length, created_at: new Date().toISOString() });
+    td(today(), "Paper 1 practice: unseen texts, timed", 0, "09:00:00", "10:30:00", true, true);
+    td(today(), "Business: finance syllabus dot points", 1, "11:00:00", "12:30:00", true, false);
+    td(today(), "Maths Std 2: 2024 HSC paper, Section II", 2, "14:00:00", "16:00:00", false, false);
+    td(today(), "Error log review", 2, null, null, false, false);
+    td(today(), "Pack pens, student card, clear bottle", null, null, null, false, false);
+    td(add(today(), -1), "Rewrite Module C reflection", 0, "16:00:00", "17:00:00", true, false);
+    td(add(today(), 1), "Business case study flashcards", 1, null, null, true, false);
+  }
 
   /* Everyone above is given identical subject names, which is not what real
      data looks like. These four rename one person's subject each so the
@@ -501,6 +517,35 @@
             return Promise.resolve({ error: null, data: {
               received: [[uid(3), 41], [ME, 33], [uid(2), 20], [uid(4), 6]],
               given: [[uid(2), 57], [ME, 44], [uid(4), 12], [uid(3), 3]] } });
+          }
+          /* Mirror planner.sql: todo_save / todo_delete / todo_carry. */
+          if (name === "todo_save") {
+            const p = (args && args.p) || {}, id = args && args.p_id;
+            const cur = id ? T.study_todos.find(r => r.id === id && r.user_id === ME) : null;
+            if (id && !cur) return Promise.resolve({ data: { ok: false, why: "That to-do is not there any more" }, error: null });
+            const v = k => (k in p ? p[k] : cur ? cur[k] : null);
+            const day = v("day"), title = String(v("title") || "").trim();
+            if (!title) return Promise.resolve({ data: { ok: false, why: "Give it a name" }, error: null });
+            if ((!cur || day !== cur.day) && day < today()) return Promise.resolve({ data: { ok: false, why: "That day is already over" }, error: null });
+            const st = v("start_time") || null, et = st ? v("end_time") || null : null, pri = !!v("priority");
+            if (pri && T.study_todos.filter(r => r.user_id === ME && r.day === day && r.priority && r.id !== id).length >= 3)
+              return Promise.resolve({ data: { ok: false, why: "You already have a Top 3 for that day. Unstar one first." }, error: null });
+            const row = Object.assign(cur || { id: uid(ssid++), user_id: ME, created_at: new Date().toISOString(), carried_from: null,
+              position: T.study_todos.filter(r => r.day === day).length }, {
+              day, title, subject_id: v("subject_id") || null, start_time: st && st.length === 5 ? st + ":00" : st,
+              end_time: et && et.length === 5 ? et + ":00" : et, priority: pri, done: !!v("done") });
+            if (!cur) T.study_todos.push(row);
+            return Promise.resolve({ data: { ok: true, todo: Object.assign({}, row) }, error: null });
+          }
+          if (name === "todo_delete") {
+            T.study_todos = T.study_todos.filter(r => !(r.id === args.p_id && r.user_id === ME));
+            return Promise.resolve({ data: { ok: true }, error: null });
+          }
+          if (name === "todo_carry") {
+            let n = 0;
+            T.study_todos.forEach(r => { if (r.user_id === ME && r.day < today() && !r.done) {
+              r.carried_from = r.carried_from || r.day; r.day = today(); r.start_time = r.end_time = null; r.priority = false; n++; } });
+            return Promise.resolve({ data: { ok: true, carried: n }, error: null });
           }
           if (name === "set_plan" || name === "set_plans") {
             const rows = name === "set_plan"
