@@ -2289,6 +2289,7 @@ function renderAll() {
   if (typeof playRender === "function") playRender();
   /* the exam calendar, countdown and lead-up chart live in plan.js */
   if (typeof planRender === "function") planRender();
+  if (typeof believeRender === "function") believeRender();
   try { paintNudgeBar(); } catch (e) { console.error(e); }
   try { paintReminders(); } catch (e) { console.error(e); }
   const tot = crewTotals();

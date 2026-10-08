@@ -530,6 +530,13 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
   everyone can already see), a countdown to their next one, the hours they logged each day
   (left blank for people in private mode), and a ring on the papers you sit too. Their plan
   is never shown.
+- **Exam days (Believe):** from midnight on the day of a paper, everyone sitting it gets a blue
+  band above every tab: the paper, a live countdown, one short line and the Believe sign. It
+  turns to "In the exam" at the start time and "Done." at pens down. People can wish everyone
+  sitting a paper good luck; the people sitting it see how many did, and who (private mode is
+  counted, never named). On days you have nothing, a yellow strip shows the papers the year
+  group is sitting. The × shrinks it to one line for the day. Nothing shows before the first
+  HSC paper; `profiles.believe_demo` previews it on your own next paper.
 - **Plans** are stored in `study_plan` (`plan.sql`), readable only by their owner and written
   only through `set_plan` / `set_plans`, which check the subject is yours and the day is
   still ahead.
@@ -678,6 +685,8 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `styles.css` | The design system |
 | `play.js`, `play.css` | Levels, achievements, colour themes, the Your day chart and the Peloton stat cards |
 | `plan.js`, `plan.css` | The Calendar tab, the countdown on Today and in the masthead, the lead-up chart and plans |
+| `believe.js`, `believe.css`, `believe.webp` | Exam days: the Believe band and wishing people luck |
+| `believe.sql` | `exam_wishes`, `wish_luck()`, `exam_wishes_on()` and the `believe_demo` preview flag. Safe to re-run |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
 | `sessions_guard.sql` | What the database won't take in `sessions`: future days, over 20 h in a day, over 60 sessions an hour. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |

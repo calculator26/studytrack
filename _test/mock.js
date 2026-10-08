@@ -9,6 +9,7 @@
               notification_prefs: [], push_subscriptions: [], notification_log: [],
               nudges: [], messages: [], timer_reactions: [], session_reactions: [], study_plan: [] };
   const ME = uid(1);
+  const CAT_MOCK_SITTINGS = ["2026-10-13|9.50 am|Paper 1 — Texts and Human Experiences", "2026-10-13|2.00 pm|Japanese Continuers"];
   const today = () => { const d = new Date(); const p = n => String(n).padStart(2,"0");
     return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate()); };
   const add = (s, n) => { const d = new Date(s); d.setDate(d.getDate()+n); const p=x=>String(x).padStart(2,"0");
@@ -16,7 +17,7 @@
 
   const joined = n => new Date(Date.now() - n * 864e5).toISOString();
   const people = [
-    { id: ME,     display_name: "Lewis Christie", colour: "#2FCFA6", onboarded: !/onboard=1/.test(location.search), default_goal: 3, weekday_goals: [3,3,3,3,2,5,5] },
+    { id: ME,     display_name: "Lewis Christie", colour: "#2FCFA6", onboarded: !/onboard=1/.test(location.search), default_goal: 3, weekday_goals: [3,3,3,3,2,5,5], believe_demo: /believe=1/.test(location.search) },
     { id: uid(2), display_name: "Sam Whitfield",  colour: "#C0564C", onboarded: true, default_goal: 4, weekday_goals: [4,4,4,4,3,6,6] },
     { id: uid(3), display_name: "Priya Raman",    colour: "#7A6BB5", onboarded: true, default_goal: 5, weekday_goals: [5,5,5,5,4,7,7] },
     { id: uid(4), display_name: "Tom Beckett",    colour: "#C9A227", onboarded: true, default_goal: 2, weekday_goals: [2,2,2,2,2,4,4] }
@@ -501,6 +502,27 @@
             return Promise.resolve({ error: null, data: {
               received: [[uid(3), 41], [ME, 33], [uid(2), 20], [uid(4), 6]],
               given: [[uid(2), 57], [ME, 44], [uid(4), 12], [uid(3), 3]] } });
+          }
+          /* exam-day wishes (believe.sql); a few already in, from the others */
+          if (name === "exam_wishes_on") {
+            if (!T.exam_wishes) {
+              T.exam_wishes = [];
+              const others = T.profiles.filter(p => p.id !== ME).slice(0, 40);
+              (CAT_MOCK_SITTINGS || []).forEach(k => others.forEach((p, i) => { if (i % 3 !== 2) T.exam_wishes.push({ user_id: p.id, sitting: k, at: i }); }));
+            }
+            const out = {};
+            T.exam_wishes.filter(w => (args.p_dates || []).includes(w.sitting.slice(0, 10))).forEach(w => {
+              const o = out[w.sitting] || (out[w.sitting] = { n: 0, who: [], mine: false });
+              o.n++; if (w.user_id === ME) o.mine = true;
+              const p = T.profiles.find(x => x.id === w.user_id);
+              if (p && !p.hide_hours) o.who.unshift(w.user_id);
+            });
+            return Promise.resolve({ data: out, error: null });
+          }
+          if (name === "wish_luck") {
+            T.exam_wishes = (T.exam_wishes || []).filter(w => !(w.user_id === ME && w.sitting === args.p_sitting));
+            if (args.p_on !== false) T.exam_wishes.push({ user_id: ME, sitting: args.p_sitting, at: 999 });
+            return Promise.resolve({ data: { ok: true, n: T.exam_wishes.filter(w => w.sitting === args.p_sitting).length }, error: null });
           }
           if (name === "set_plan" || name === "set_plans") {
             const rows = name === "set_plan"
