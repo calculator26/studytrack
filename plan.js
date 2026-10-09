@@ -296,9 +296,12 @@ function planPaintStrip(X) {
       <span class="xs-n" style="--c:${esc(nx.colour)}">${esc(plnShort(nx.subject))}${nx.label !== "Exam" ? " " + esc(nx.label) : ""}</span>
       <span class="xs-v">${esc(when)}</span>
     </button>`;
+  /* Checking it fits means measuring the header, which costs a layout of the
+     whole page: only when the text changes (or the window does, below). */
+  const changed = el.dataset.sig !== html || el.hidden;
   if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
   el.hidden = false;
-  plnStripFit();
+  if (changed) plnStripFit();
 }
 function plnStripFit() {
   const el = $("examstrip"), mast = el && el.parentElement;
@@ -1115,9 +1118,17 @@ function plnPaintChart() {
   if (!g) return;
   const X = plnExams();
   document.querySelectorAll("[data-plback]").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.plback) === PLN.back)));
-  if (!mySubjects(UID).length) { g.innerHTML = `<div class="empty">Add your subjects in Setup and your lead-up appears here.</div>`; return; }
+  if (!mySubjects(UID).length) { g.dataset.sig = ""; g.innerHTML = `<div class="empty">Add your subjects in Setup and your lead-up appears here.</div>`; return; }
+  /* A refresh that changed nothing on the chart leaves it alone: rebuilding
+     a few thousand cells and measuring them again is what made it stutter. */
+  const html = plnChartHTML(X);
+  if (g.dataset.sig === html) {
+    if (PLN.pick) { const [d, sid] = PLN.pick.split("|"); $("cal-detail").innerHTML = plnDetailHTML(d, sid); }
+    return;
+  }
+  g.dataset.sig = html;
   const keepLeft = g.dataset.drawn ? g.scrollLeft : null;
-  g.innerHTML = plnChartHTML(X);
+  g.innerHTML = html;
   $("cal-legend").innerHTML = plnLegend();
   const cw = parseFloat(getComputedStyle(g.querySelector(".gx")).getPropertyValue("--cw")) || 34;
   if (keepLeft === null) {
@@ -1132,8 +1143,10 @@ function plnPaintMonths() {
   if (!el) return;
   const X = plnExams();
   $("pl-cohort") && $("pl-cohort").setAttribute("aria-pressed", String(PLN.cohort));
-  el.innerHTML = plnMonthsHTML(X);
-  $("cal-daydetail").innerHTML = PLN.dayPick ? plnDayDetailHTML(PLN.dayPick, X) : "";
+  const html = plnMonthsHTML(X);
+  if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+  const dd = PLN.dayPick ? plnDayDetailHTML(PLN.dayPick, X) : "", box = $("cal-daydetail");
+  if (box && box.dataset.sig !== dd) { box.innerHTML = dd; box.dataset.sig = dd; }
 }
 function plnPaintCal() {
   const p = $("p-cal");

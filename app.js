@@ -184,7 +184,25 @@ const daysBetween = (a, b) => Math.round((parseD(b) - parseD(a)) / 864e5);
 const initials = n => String(n||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase() || "?";
 const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
+/* The database's own limits (limits.sql, sessions_guard.sql), said in words
+   rather than as a constraint name, wherever an error ends up on screen. */
+const DB_LIMITS = {
+  profiles_name_len: "Names can be 1 to 48 characters",
+  profiles_colour_hex: "That colour isn't a valid colour",
+  profiles_avatar_len: "That picture link is too long",
+  subjects_name_len: "Subject names can be up to 80 characters",
+  subjects_colour_hex: "That colour isn't a valid colour",
+  areas_name_len: "Area names can be up to 120 characters",
+  sessions_note_len: "Notes can be up to 1,000 characters",
+  live_timers_label_len: "That label is too long",
+  messages_body_len: "That message is too long"
+};
+function friendlyError(msg) {
+  const m = /violates check constraint "([a-z_]+)"/.exec(String(msg || ""));
+  return m && DB_LIMITS[m[1]] ? DB_LIMITS[m[1]] : msg;
+}
 function toast(msg, ms) {
+  msg = String(msg || "").replace(/new row for relation "\w+" violates check constraint "[a-z_]+"/, x => friendlyError(x));
   const t = $("toast"); t.textContent = msg; t.classList.add("on");
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), ms || 2600);
 }
@@ -3930,14 +3948,17 @@ let LH_PX = 0;
   if (!wrap || typeof ResizeObserver === "undefined") return;
   new ResizeObserver(es => {
     const w = es[0].contentRect.width;
-    const was = LH_PX < 560;
     LH_PX = w;
-    if (w > 0 && (w < 560) !== was && LIVEHIST.rows.length) drawLiveHistory();
+    /* redraw when the shape drawn (narrow or wide) no longer fits */
+    if (w > 0 && (w < 560) !== (LH_GEO.W === 420) && LIVEHIST.rows.length) drawLiveHistory();
   }).observe(wrap);
 })();
 function lhGeo() {
   const wrap = $("livegraph-wrap");
-  const px = LH_PX || (wrap ? wrap.getBoundingClientRect().width : 900);
+  /* Before the ResizeObserver has reported, go by the window rather than
+     measuring the box: measuring here, mid-render, forces a layout of the
+     whole Peloton page. The observer redraws if the guess was wrong. */
+  const px = LH_PX || (wrap ? Math.min(window.innerWidth - 40, 1180) : 900);
   /* hidden: no width to go on, so keep whatever it was last drawn at */
   const narrow = px === 0 ? LH_GEO.W === 420 : px < 560;
   LH_GEO.W  = narrow ? 420 : 900;
