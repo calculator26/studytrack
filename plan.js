@@ -425,6 +425,7 @@ function planPaintCountdown() {
       <div class="xc-big">${plnBig(u)}${u.unit && !u.soon ? `<span>${esc(u.unit)}</span>` : ""}</div>
       <div class="xc-what">${esc(nx.subject)}${nx.paper && nx.paper !== nx.subject && nx.label !== "Exam" ? `<small>${esc(nx.paper)}</small>` : ""}</div>
       <div class="xc-when">${esc(fmtLong(nx.date))}${nx.start ? " · " + esc(nx.start + " – " + nx.end) : ""}</div>
+      ${plnFinishStrip(X, now)}
     </div>
     <div class="xc-side">
       <div class="xc-chips">${chips}${ahead.length > 9 ? `<span class="xc-more">+${ahead.length - 9}</span>` : ""}</div>
@@ -443,12 +444,32 @@ function planPaintCountdown() {
 /* ---------------------------------------------------------------------------
    CALENDAR: the hero numbers
    --------------------------------------------------------------------------- */
-/* The finish line, in whole days: the end of your last paper. */
-function plnFinishLine(ahead, last, today) {
-  if (!ahead.length || !last) return "";
-  if (ahead.length === 1) return `<small>One to go. Then you're done.</small>`;
-  const n = daysBetween(today, last.date);
-  return `<small>🎓 All done in ${n} day${n === 1 ? "" : "s"} · last is ${esc(plnShort(last.subject))}, ${esc(fmtD(last.date))}</small>`;
+/* The finish line: the end of your last paper. Days and hours, like the
+   next-exam figure, and calm: it moves with the 30-second repaint, it
+   doesn't tick or change colour. It points at the end rather than the next
+   threat, so it gets room of its own on Today and on the Calendar. */
+function plnDH(ms) {
+  const m = Math.max(0, Math.floor(ms / 6e4)), d = Math.floor(m / 1440), h = Math.floor(m / 60) % 24;
+  return d ? `${d}d ${h}h` : `${h}h ${pad(m % 60)}m`;
+}
+function plnFinish(X, now) {
+  const ahead = X.list.filter(e => e.endAt > now);
+  if (!ahead.length) return null;
+  const last = X.list[X.list.length - 1], done = X.list.length - ahead.length;
+  return { ahead, last, done, total: X.list.length, lastOne: ahead.length === 1,
+    big: plnBig({ big: plnDH(last.endAt - now) }), pct: done / X.list.length * 100,
+    sub: `${done} of ${X.list.length} papers done · last is ${esc(plnShort(last.subject))}, ${esc(fmtD(last.date))}` };
+}
+/* The strip under the next exam on Today. */
+function plnFinishStrip(X, now) {
+  const f = plnFinish(X, now);
+  if (!f) return "";
+  return `<div class="xc-fin">
+    <div class="xc-fin-k">${f.lastOne ? "Your last paper" : "🎓 All your exams done in"}</div>
+    ${f.lastOne ? `<div class="xc-fin-s">Finish this one and you're done with the HSC.</div>` : `<div class="xc-fin-big">${f.big}</div>`}
+    <i class="xc-fin-bar"><i style="width:${f.pct.toFixed(1)}%"></i></i>
+    <div class="xc-fin-s">${f.sub}</div>
+  </div>`;
 }
 
 function plnHero(X) {
@@ -474,8 +495,13 @@ function plnHero(X) {
       : X.list.length ? `<div class="xh-k">That's the HSC</div><div class="xh-big">Done</div><div class="xh-what">Every paper is behind you. Go and enjoy it.</div>`
       : `<div class="xh-k">No exams yet</div><div class="xh-what">Add your subjects from the Knox list in Setup and every paper arrives with them.</div>`}
     </div>
-    <div class="xh-tile"><span>Papers done</span><b>${done}<small> / ${X.list.length}</small></b>
-      <i class="xh-bar"><i style="width:${X.list.length ? (done / X.list.length * 100).toFixed(1) : 0}%"></i></i>${plnFinishLine(ahead, last, today)}</div>
+    ${(() => {
+      const f = plnFinish(X, now);
+      if (f && !f.lastOne) return `<div class="xh-tile xh-fin"><span>🎓 All your exams done in</span><b>${f.big}</b>
+        <i class="xh-bar"><i style="width:${f.pct.toFixed(1)}%"></i></i><small>${f.sub}</small></div>`;
+      return `<div class="xh-tile xh-fin"><span>Papers done</span><b>${done}<small> / ${X.list.length}</small></b>
+        <i class="xh-bar"><i style="width:${X.list.length ? (done / X.list.length * 100).toFixed(1) : 0}%"></i></i>${f ? `<small>One to go. Then you're done.</small>` : ""}</div>`;
+    })()}
     <div class="xh-tile"><span>Study days left</span><b>${plnStudyDays(ahead)}</b><small>to ${last ? esc(fmtD(last.date)) : "—"}, not counting exam days</small></div>
     <div class="xh-tile"><span>Last 7 days</span><b>${f1(last7)}<small> h</small></b><small>${plan7 ? f1(plan7) + " h planned for the next 7" : "nothing planned for the next 7 yet"}</small></div>
   </div>`;
@@ -872,6 +898,7 @@ function plnDayDetailHTML(d, X) {
     ${co.length ? `<div class="mcd-sec">The year group's exams</div><div class="mcd-co">${co.map(c => `<span style="--c:${esc(c.colour)}"><b>${esc(c.name)}</b>${c.paper && c.paper !== c.name ? " · " + esc(c.paper) : ""} · ${esc(c.start)}${c.n ? ` · <em>${c.n} of us</em>` : ""}</span>`).join("")}</div>` : (hd ? "" : `<div class="mcd-none">No HSC exams on this day.</div>`)}
     ${studied.length ? `<div class="mcd-sec">You studied</div><div class="mcd-co">${studied.map(([s, m]) => `<span style="--c:${esc(s.colour)}"><b>${esc(s.name)}</b> · ${hm(m / 60)}</span>`).join("")}</div>` : ""}
     ${planned.length ? `<div class="mcd-sec">Planned</div><div class="mcd-co">${planned.map(([s, h]) => `<span style="--c:${esc(s.colour)}"><b>${esc(s.name)}</b> · ${f1(h)} h</span>`).join("")}</div>` : ""}
+    ${typeof plannerPaint === "function" ? `<button class="btn ghost sm mcd-plan" type="button" data-tdplan="${esc(d)}">${d < todayISO() ? "See that day's to-dos" : "Open in the day planner"}</button>` : ""}
   </div>`;
 }
 
@@ -1156,6 +1183,7 @@ function plnPaintCal() {
   $("cal-hero").innerHTML = plnHero(X);
   $("cal-fix").innerHTML = plnFixHTML(X);
   plnPaintChart();
+  if (typeof plannerPaint === "function") { try { plannerPaint(); } catch (e) { console.error("planner", e); } }
   plnPaintMonths();
   $("cal-heads").innerHTML = plnHeadsHTML(X);
   if (typeof renderTimetable === "function") { try { renderTimetable(); } catch (e) { console.error(e); } }
@@ -1163,7 +1191,11 @@ function plnPaintCal() {
 /* after a plan changes: only what shows plans */
 function plnRepaint() {
   try {
-    if ($("p-cal") && $("p-cal").classList.contains("on")) { plnPaintChart(); plnPaintMonths(); $("cal-hero").innerHTML = plnHero(plnExams()); }
+    if ($("p-cal") && $("p-cal").classList.contains("on")) {
+      plnPaintChart(); plnPaintMonths(); $("cal-hero").innerHTML = plnHero(plnExams());
+      /* the planner shows the plan's hours for the day it's on */
+      if (typeof plannerPaint === "function") plannerPaint();
+    }
     planPaintCountdown();
   } catch (e) { console.error("plan", e); }
 }

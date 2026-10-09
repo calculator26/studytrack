@@ -1,0 +1,145 @@
+/* =========================================================================
+   PLANNER — the day planner card on the Calendar tab (planner.js)
+   ========================================================================= */
+
+/* ---------- how the day is going ---------- */
+.td-stats{display:grid;grid-template-columns:1.4fr .6fr 1.4fr;gap:10px;margin-bottom:14px}
+.td-prog,.td-stat{background:var(--surface-2);border:1px solid var(--rule-soft);border-radius:var(--r-sm);padding:10px 12px;min-width:0}
+.td-prog b{font-size:22px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.td-prog b small{font-size:12.5px;font-weight:600;color:var(--ink-soft);letter-spacing:0}
+.td-bar{display:block;height:6px;border-radius:999px;background:var(--surface-3);overflow:hidden;margin-top:6px}
+.td-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#3DDC97,var(--good));transition:width .4s var(--ease)}
+.td-stat span{display:block;font-size:10.5px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em}
+.td-stat b{font-size:20px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.td-stat small{display:block;font-size:11.5px;color:var(--ink-mid)}
+.td-win{margin:-4px 0 14px;padding:9px 12px;border-radius:var(--r-sm);background:var(--good-wash);color:var(--good);font-size:13px;font-weight:650}
+
+/* ---------- adding ---------- */
+.td-form{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center;margin-bottom:16px}
+.td-form .td-starbox{justify-self:start}
+.td-form .td-formbtns{justify-self:end}
+.td-form select:disabled{opacity:.55;cursor:not-allowed}
+.td-form[hidden]{display:none}
+.td-times{display:flex;align-items:center;gap:4px;color:var(--ink-soft);flex-wrap:wrap}
+.td-or{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:0 6px}
+.td-len{display:inline-flex;align-items:center;border:1px solid var(--rule);border-radius:var(--r-sm);background:var(--surface);padding-right:10px}
+.td-len:focus-within{border-color:var(--ink-mid);box-shadow:0 0 0 3.5px rgba(90,100,114,.14)}
+.td-len input{width:64px;border:0 !important;box-shadow:none !important;background:none;padding:8px 4px 8px 10px;font:inherit;font-size:13px;
+  color:var(--ink);font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.td-len input::-webkit-outer-spin-button,.td-len input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.td-len input:focus{outline:none}
+.td-len span{font-size:12px;font-weight:600;color:var(--ink-soft)}
+.td-form input[type=time]{font:inherit;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--rule);
+  border-radius:var(--r-sm);padding:8px 8px;width:108px;font-variant-numeric:tabular-nums}
+.td-form input[type=time]:focus{outline:none;border-color:var(--ink-mid);box-shadow:0 0 0 3.5px rgba(90,100,114,.14)}
+.td-starbox{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:650;color:var(--ink-mid);cursor:pointer;
+  padding:7px 10px;border:1px solid var(--rule);border-radius:var(--r-sm);background:var(--surface);white-space:nowrap;user-select:none}
+.td-starbox input{position:absolute;opacity:0;pointer-events:none}
+.td-starbox:has(input:checked){background:#FFF6DD;border-color:#E9C26A;color:#8A5A00}
+.td-starbox:has(input:focus-visible){box-shadow:0 0 0 3.5px rgba(232,64,42,.32)}
+.td-formbtns{display:flex;gap:6px}
+
+/* ---------- the three lists ---------- */
+.td-cols{display:grid;grid-template-columns:1fr 1fr;grid-template-areas:"top sched" "any sched";gap:14px 18px;align-items:start}
+.td-top3{grid-area:top}
+.td-sched{grid-area:sched}
+.td-any{grid-area:any}
+.td-sec h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);margin:0 0 8px}
+.td-top3 h3{color:#A06A00}
+.td-sec{display:flex;flex-direction:column;gap:6px;min-width:0}
+.td-none{font-size:12.5px;color:var(--ink-soft);padding:10px 12px;border:1px dashed var(--rule);border-radius:var(--r-sm)}
+
+.td-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 8px 8px 10px;
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-sm);box-shadow:inset 3px 0 0 var(--c);
+  transition:background var(--fast) var(--ease),opacity var(--fast) var(--ease)}
+.td-row:hover{background:var(--surface-2)}
+.td-row.pri{border-color:#E9C26A;background:#FFFCF2}
+.td-row.now{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--c),0 0 0 1px var(--accent)}
+.td-row.done{opacity:.6}
+.td-row.done .td-t{text-decoration:line-through;color:var(--ink-soft)}
+
+.td-chk{appearance:none;width:24px;height:24px;border-radius:7px;border:1.6px solid #B7BFCB;background:var(--surface);
+  cursor:pointer;display:grid;place-items:center;padding:0;transition:all var(--fast) var(--ease)}
+.td-chk svg{width:14px;height:14px;fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.td-chk:hover{border-color:var(--good)}
+.td-chk[aria-pressed="true"]{background:var(--good);border-color:var(--good)}
+.td-chk[aria-pressed="true"] svg{opacity:1}
+.td-chk:focus-visible,.td-ic:focus-visible,.td-go:focus-visible,.td-slot:focus-visible{outline:none;box-shadow:0 0 0 3.5px rgba(232,64,42,.32)}
+
+.td-t{font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.3;overflow-wrap:anywhere}
+.td-m{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:11.5px;color:var(--ink-mid)}
+.td-time{font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.td-dur{font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.td-time+.td-dur{font-weight:600;color:var(--ink-soft)}
+.td-subj b{font-weight:500}
+.td-subj::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--c);margin-right:5px;vertical-align:1px}
+.td-carry{color:#8A5A00}
+.td-nowtag{font-weight:800;color:var(--accent-ink);text-transform:uppercase;letter-spacing:.06em;font-size:10.5px}
+
+.td-act{display:flex;gap:2px;align-items:center}
+.td-ic,.td-go{appearance:none;border:0;background:none;font:inherit;cursor:pointer;width:28px;height:28px;border-radius:7px;
+  color:var(--ink-soft);font-size:14px;line-height:1;display:grid;place-items:center;padding:0}
+.td-ic:hover{background:var(--surface-3);color:var(--ink)}
+.td-ic.on{color:#D69A0B}
+.td-go{width:auto;padding:0 10px;font-size:11px;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;height:24px}
+.td-go:hover{background:var(--accent-ink)}
+.td-row:not(:hover) .td-ic:not(.on){opacity:.55}
+
+.td-slot{appearance:none;font:inherit;text-align:left;cursor:pointer;padding:11px 12px;border:1.5px dashed #E3CB8A;border-radius:var(--r-sm);
+  background:#FFFCF2;color:#8A6A1E;font-size:12.5px;font-weight:600}
+.td-slot:hover{background:#FFF6DD}
+
+.td-exam{grid-template-columns:26px minmax(0,1fr);background:var(--c);border-color:transparent;color:#fff;box-shadow:none}
+.td-exam:hover{background:var(--c)}
+.td-exam .td-t,.td-exam .td-time{color:#fff}
+.td-exam .td-m{color:rgba(255,255,255,.85)}
+.td-pen{display:grid;place-items:center;font-size:15px}
+
+.td-nowline{position:relative;height:14px;display:flex;align-items:center}
+.td-nowline::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;background:var(--accent);border-radius:2px}
+.td-nowline span{position:relative;background:var(--accent);color:#fff;font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;
+  letter-spacing:.02em;font-variant-numeric:tabular-nums}
+
+.mcd-plan{margin-top:10px}
+
+@media (max-width:1080px){
+  .td-form{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .td-form #td-title,.td-times{grid-column:1 / -1}
+}
+@media (max-width:760px){
+  .td-cols{grid-template-columns:1fr;grid-template-areas:"top" "sched" "any"}
+  .td-stats{grid-template-columns:1fr 1fr}
+  .td-prog{grid-column:1 / -1}
+}
+@media (max-width:520px){
+  .td-form{grid-template-columns:auto 1fr}
+  .td-form #td-title,.td-form #td-subj,.td-form #td-area,.td-times{grid-column:1 / -1}
+  .td-times{justify-content:flex-start}
+  .td-form input[type=time]{flex:1;width:auto;min-width:0}
+  .td-or{flex-basis:100%;margin:2px 0}
+  .td-len{flex:1}
+  .td-len input{flex:1;width:auto}
+  .td-formbtns .btn{flex:1}
+  .td-act{gap:0}
+  .td-ic{width:26px}
+}
+
+/* ---------- unticked to-dos from earlier: an offer, not a move ---------- */
+.td-leftbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;
+  border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--rule)}
+.td-leftbar>div{flex:1;min-width:200px;font-size:13px;color:var(--ink-2)}
+.td-leftbar>div span{display:block;font-size:12px;color:var(--ink-soft);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- From your plan: the lead-up chart's hours for this day ---------- */
+.td-plan{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:-2px 0 14px}
+.td-plan-k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);margin-right:4px}
+.td-pchip{appearance:none;font:inherit;display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 8px;border-radius:999px;
+  font-size:12px;color:var(--ink-mid);background:var(--surface);border:1.5px dashed var(--c);cursor:pointer;
+  transition:background var(--fast) var(--ease)}
+.td-pchip b{color:var(--ink);font-weight:650}
+.td-pchip i{font-style:normal;font-weight:700;color:var(--c)}
+button.td-pchip:hover{background:var(--surface-2)}
+button.td-pchip:focus-visible{outline:none;box-shadow:0 0 0 3.5px rgba(232,64,42,.32)}
+.td-pchip.ok{border-style:solid;cursor:default;opacity:.75}
+.td-plan-none{font-size:12.5px;color:var(--ink-soft)}
+.td-link{appearance:none;border:0;background:none;font:inherit;font-weight:650;color:var(--accent-ink);padding:0;cursor:pointer;text-decoration:underline}

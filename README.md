@@ -480,6 +480,32 @@ out of the catalogue rather than typed in a second place, so it cannot drift fro
 timetable. Either card disappears once its day has passed, and once both have gone the
 space says the HSC is underway.
 
+### Start-up never waits forever
+A request that stalls without failing (school wifi does this) used to leave the loading
+spinner up for good. Every start-up wait now has a ceiling (`withTimeout` in `app.js`):
+reading the saved sign-in gets 15 s, loading your data gets 15 s, then 30, 45 and 60 s on
+later tries so a genuinely slow line still gets in. Running out of time shows the existing
+"Could not load your data, trying again" screen with **Try now**, and it retries by itself.
+If the saved sign-in can't be read (usually another Study Track tab holding it), the screen
+says to close other tabs.
+
+### Problem reports (`diag.js`, `diag.sql`)
+When the app goes wrong on someone's machine, the browser sends one small row to
+`client_diag`: a slow start (over 10 s), a stalled or failed start-up, a freeze of 2 s or
+more (with the script responsible, in Chrome), JavaScript memory over 1 GB, or the first
+uncaught error. A normal visit sends nothing. Each report is a few hundred bytes of
+timings and counts (load time, memory, page size, people on the clock, browser, network,
+error text); no names, notes, subjects or to-dos.
+
+It's capped so it can't crowd the database or the plan: one report per browser per half
+hour; in the database at most 5 an hour per person and 300 an hour in all, never more than
+5,000 rows (each under 4 KB), and anything older than 14 days is deleted as new ones
+arrive. Nobody can read it from the app. Read it in the SQL editor:
+
+```sql
+select at, kind, data->>'detail' as detail, data from public.client_diag order by at desc limit 50;
+```
+
 ### Timers that look after themselves
 A timer left running overnight is the commonest way this app produces a wrong number, so
 one that has been going **six hours** pauses itself and clamps to that figure — past any
@@ -505,7 +531,8 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
   an exam, a checklist: arrival time, student card, pens, clear bottle, calculator where
   allowed, phone out of the room.
 - **Calendar tab:**
-  - **Hero:** next exam, papers done (with how many days until your last paper ends), study days left, last 7 days.
+  - **Hero:** next exam, **All your exams done in** (days and hours to the end of your last
+    paper, with a bar of papers done; "One to go" on the last one), study days left, last 7 days.
   - **Check your exams:** flags a stored exam date that disagrees with NESA (one in the real
     data had 2008) and subjects not linked to a course, with one-tap fixes.
   - **Your lead-up:** a Gantt chart of every subject by every day up to its exam. Cells light
@@ -518,6 +545,7 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
     (the day before an exam is mostly that subject, capped near 60% of the day), pulls back
     anything left alone for days. Exam days get the afternoon: about 2.5 h less, never under
     half the goal. Undo puts it back.
+  - **Day planner:** under the lead-up chart, see below.
   - **Calendar:** one running calendar from the start of this month to the last day of the
     HSC (it doesn't stop when your own papers do), with your papers, HSC day numbers, hours
     studied and planned;
@@ -540,6 +568,35 @@ The run-in to the HSC, a day at a time. All of it is in `plan.js` and `plan.css`
 - **Plans** are stored in `study_plan` (`plan.sql`), readable only by their owner and written
   only through `set_plan` / `set_plans`, which check the subject is yours and the day is
   still ahead.
+- **All your exams done in** also sits under the next exam on Today. Like the next-exam figure
+  it's days and hours, moves with the 30-second repaint, and never ticks or changes colour:
+  it points at the finish line, not the next threat.
+
+### The day planner (Calendar tab)
+The lead-up chart and **Suggest a plan** decide how many hours each subject gets on a day;
+the planner, directly under it, turns one day's hours into the things to actually do. All of
+it is in `planner.js` and `planner.css`.
+
+- **From your plan:** each subject's planned hours for the day that aren't in the list yet,
+  as chips ("Business 30m to plan + Add"). A tap adds a to-do of that subject and length;
+  a subject that's covered shows ✓. No hours planned? It points at Suggest a plan.
+- **Top 3:** star up to three to-dos per day; they sit at the top, and the card says when
+  the day is won. A fourth star is refused, in the page and in the database.
+- **Subject and area:** a to-do can carry a subject and an area within it (the timer's areas).
+- **Timing, two ways:** a time block (From – To) or just a session length. From and To fill in
+  the length; From and a length fill in To; moving From keeps the length. A length on its
+  own puts the to-do under Anytime.
+- **Schedule:** to-dos with a time block, in order, with your exams that day as fixed blocks
+  and a red *now* line through today. **Anytime:** everything else.
+- **▶** on a to-do with a subject (today only) starts the session timer on that subject and
+  area. The to-do's wording never goes on the timer, so the year group only sees the subject.
+- **Unfinished to-dos are offered, never moved.** If anything from an earlier day wasn't
+  ticked off, the planner asks: **Bring to today** moves it (keeping its length, dropping its
+  time slot and star, marked "↻ from Thu 8 Oct"); **Leave them** hides the question until
+  tomorrow and leaves them on their own day.
+- ‹ Today › moves between days, and a day in the month view has **Open in the day planner**.
+- Stored in `study_todos` (`planner.sql`, already run on the live project), readable only by
+  the owner and written only through `todo_save` / `todo_delete` / `todo_carry`.
 
 ### Keeping it fast with the whole year group on
 Measured with `_test/index.html?big=1` (250 members, two months of sessions, 30 timers live):
@@ -688,7 +745,10 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `believe.js`, `believe.css`, `believe.webp` | Exam days: the Believe band and wishing people luck |
 | `believe.sql` | `exam_wishes`, `wish_luck()`, `exam_wishes_on()` and the `believe_demo` preview flag. Safe to re-run |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
+| `diag.js`, `diag.sql` | Problem reports from browsers (slow start, freezes, memory, errors), capped and kept for 14 days |
 | `limits.sql` | How long anything people type can be (names 48, subjects 80, areas 120, notes 1,000, …) and that colours are real colours; sign-up trims a long name instead of failing. Safe to re-run |
+| `planner.js`, `planner.css` | The day planner under the lead-up chart: from your plan, Top 3, schedule, to-dos |
+| `planner.sql` | `study_todos` and `todo_save` / `todo_delete` / `todo_carry`. Safe to re-run |
 | `sessions_guard.sql` | What the database won't take in `sessions`: future days, over 20 h in a day, over 60 sessions an hour. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
