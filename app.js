@@ -3896,14 +3896,17 @@ let LH_PX = 0;
   if (!wrap || typeof ResizeObserver === "undefined") return;
   new ResizeObserver(es => {
     const w = es[0].contentRect.width;
-    const was = LH_PX < 560;
     LH_PX = w;
-    if (w > 0 && (w < 560) !== was && LIVEHIST.rows.length) drawLiveHistory();
+    /* redraw when the shape drawn (narrow or wide) no longer fits */
+    if (w > 0 && (w < 560) !== (LH_GEO.W === 420) && LIVEHIST.rows.length) drawLiveHistory();
   }).observe(wrap);
 })();
 function lhGeo() {
   const wrap = $("livegraph-wrap");
-  const px = LH_PX || (wrap ? wrap.getBoundingClientRect().width : 900);
+  /* Before the ResizeObserver has reported, go by the window rather than
+     measuring the box: measuring here, mid-render, forces a layout of the
+     whole Peloton page. The observer redraws if the guess was wrong. */
+  const px = LH_PX || (wrap ? Math.min(window.innerWidth - 40, 1180) : 900);
   /* hidden: no width to go on, so keep whatever it was last drawn at */
   const narrow = px === 0 ? LH_GEO.W === 420 : px < 560;
   LH_GEO.W  = narrow ? 420 : 900;

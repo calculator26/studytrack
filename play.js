@@ -475,8 +475,29 @@ function plTypicalLine(dow) {
 /* 24 stacked bars. rows[h] = [[colour, minutes, label], ...] */
 /* Charts are drawn at the width they will be shown at, so the axis text stays
    11px on a laptop and a phone alike rather than scaling with the box. */
+/* Measuring a box straight after the page has changed makes the browser lay
+   the whole page out there and then, on every refresh. So each box is
+   measured once, and a ResizeObserver keeps the figure right (and redraws)
+   when the window actually changes size. */
+const PL_W = new Map();
+let PL_RO = null;
+const plWKey = box => ((box.closest && box.closest("[id]")) || {}).id || "pl";
 function plWidth(box) {
-  const w = box && box.clientWidth;
+  if (!box) return 720;
+  const key = plWKey(box);
+  let w = PL_W.get(key);
+  if (!w) { w = box.clientWidth; if (w > 200) PL_W.set(key, Math.round(w)); }
+  if (typeof ResizeObserver === "function" && !box.__plRO) {
+    if (!PL_RO) PL_RO = new ResizeObserver(entries => {
+      let changed = false;
+      entries.forEach(e => {
+        const k = plWKey(e.target), nw = Math.round(e.target.clientWidth);
+        if (nw > 200 && Math.abs(nw - (PL_W.get(k) || 0)) > 6) { PL_W.set(k, nw); changed = true; }
+      });
+      if (changed) setTimeout(() => { try { plPaintDay(); } catch (err) { /* next refresh */ } }, 60);
+    });
+    PL_RO.observe(box); box.__plRO = true;
+  }
   return w && w > 200 ? Math.round(w) : 720;
 }
 function plHourChart(rows, opts) {
