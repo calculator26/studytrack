@@ -45,7 +45,7 @@
     <div id="au-msg"></div>
     <div class="field" id="au-namefield" style="display:none">
       <label class="fl" for="au-name">Your name</label>
-      <input type="text" id="au-name" autocomplete="name" placeholder="How you want to appear on the leaderboard">
+      <input type="text" id="au-name" maxlength="48" autocomplete="name" placeholder="How you want to appear on the leaderboard">
     </div>
     <div class="field">
       <label class="fl" for="au-email">Email</label>
@@ -86,7 +86,7 @@
             <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Optional. Square images look best.</div>
           </div>
         </div>
-        <div><label class="fl" for="ob-name">Display name</label><input type="text" id="ob-name"></div>
+        <div><label class="fl" for="ob-name">Display name</label><input type="text" id="ob-name" maxlength="48"></div>
         <div style="margin-top:12px;display:flex;gap:14px;align-items:end;flex-wrap:wrap">
           <div><label class="fl" for="ob-colour">Your colour</label><input type="color" id="ob-colour" value="#2FCFA6"></div>
           <div style="font-size:12.5px;color:var(--ink-soft);padding-bottom:9px">Used for your line on the peloton charts.</div>
@@ -117,7 +117,7 @@
             Not on the list? Type one in by hand</button>
           <div id="ob-manual" hidden style="margin-top:12px">
             <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end">
-              <div><label class="fl" for="ob-subname">Subject name</label><input type="text" id="ob-subname" placeholder="e.g. Business Studies"></div>
+              <div><label class="fl" for="ob-subname">Subject name</label><input type="text" id="ob-subname" maxlength="80" placeholder="e.g. Business Studies"></div>
               <div><label class="fl" for="ob-subexam">Exam date</label><input type="date" id="ob-subexam"></div>
               <div><label class="fl">&nbsp;</label><input type="color" id="ob-subcolour" value="#3E7CA6"></div>
               <div><button class="btn" id="ob-addsub">Add</button></div>
@@ -281,7 +281,7 @@
               <div><button class="btn" id="f-add">Add</button></div>
             </div>
             <div style="margin-top:10px"><label class="fl" for="f-note">What did you do? (optional — everyone can read this)</label>
-              <textarea id="f-note" placeholder="e.g. Two body paragraphs under time. Second one ran long."></textarea></div>
+              <textarea id="f-note" maxlength="1000" placeholder="e.g. Two body paragraphs under time. Second one ran long."></textarea></div>
             <div class="controls" style="margin-top:9px">
               <span style="font-size:11.5px;color:var(--ink-soft)">Quick</span>
               <button class="chip" data-min="25">25</button><button class="chip" data-min="45">45</button>
@@ -507,7 +507,7 @@
             <div><label class="fl">Change picture</label>
               <input type="file" id="s-avfile" accept="image/jpeg,image/png,image/webp" style="font-size:12.5px"></div>
           </div>
-          <div><label class="fl" for="s-name">Display name</label><input type="text" id="s-name"></div>
+          <div><label class="fl" for="s-name">Display name</label><input type="text" id="s-name" maxlength="48"></div>
           <div style="margin-top:12px;display:flex;gap:14px;align-items:end">
             <div><label class="fl" for="s-colour">Your colour</label><input type="color" id="s-colour"></div>
             <button class="btn ghost sm" id="s-colourpick" type="button"
@@ -599,7 +599,7 @@
             Not on the list? Type one in by hand</button>
           <div id="s-manual" hidden style="margin-top:12px">
             <div class="grid" style="grid-template-columns:1fr 130px 44px auto;gap:9px;align-items:end;margin-bottom:6px">
-              <div><label class="fl" for="s-subname">New subject</label><input type="text" id="s-subname" placeholder="Subject name"></div>
+              <div><label class="fl" for="s-subname">New subject</label><input type="text" id="s-subname" maxlength="80" placeholder="Subject name"></div>
               <div><label class="fl" for="s-subexam">Exam date</label><input type="date" id="s-subexam"></div>
               <div><label class="fl">&nbsp;</label><input type="color" id="s-subcolour" value="#3E7CA6"></div>
               <div><button class="btn" id="s-addsub">Add subject</button></div>
@@ -682,7 +682,7 @@
         <div><label class="fl" for="ms-min">Minutes</label><input type="number" id="ms-min" min="1" max="1440" step="1"></div>
       </div>
       <div style="margin-top:12px"><label class="fl" for="ms-note">What did you get done? (the peloton can read this)</label>
-        <textarea id="ms-note" style="min-height:84px"></textarea></div>
+        <textarea id="ms-note" maxlength="1000" style="min-height:84px"></textarea></div>
       <div class="controls" style="margin-top:14px;justify-content:flex-end">
         <button class="btn ghost" id="ms-discard">Discard</button>
         <button class="btn" id="ms-save">Save session</button>
@@ -698,7 +698,7 @@
     <div class="body">
       <div id="ma-list" style="margin-bottom:16px"></div>
       <div class="grid" style="grid-template-columns:1fr 84px 74px auto;gap:9px;align-items:end">
-        <div><label class="fl" for="ma-name">New area</label><input type="text" id="ma-name" placeholder="e.g. Module B — Eliot"></div>
+        <div><label class="fl" for="ma-name">New area</label><input type="text" id="ma-name" maxlength="120" placeholder="e.g. Module B — Eliot"></div>
         <div><label class="fl" for="ma-target">Target h</label><input type="number" id="ma-target" min="0" step="0.5"></div>
         <div><label class="fl" for="ma-pct">Mark %</label><input type="number" id="ma-pct" min="0" max="100" step="1"></div>
         <div><button class="btn" id="ma-add">Add</button></div>
@@ -753,7 +753,7 @@
         <div><label class="fl" for="e-min">Minutes</label><input type="number" id="e-min" min="1" max="1440" step="1"></div>
       </div>
       <div style="margin-top:12px"><label class="fl" for="e-note">What did you get done? (the peloton can read this)</label>
-        <textarea id="e-note" style="min-height:84px"></textarea></div>
+        <textarea id="e-note" maxlength="1000" style="min-height:84px"></textarea></div>
       <div class="controls" style="margin-top:14px;justify-content:space-between">
         <button class="btn ghost sm" id="e-del" style="color:var(--loss);border-color:#E7BEBA">Delete session</button>
         <span class="controls" style="gap:9px">

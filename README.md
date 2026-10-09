@@ -688,6 +688,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `believe.js`, `believe.css`, `believe.webp` | Exam days: the Believe band and wishing people luck |
 | `believe.sql` | `exam_wishes`, `wish_luck()`, `exam_wishes_on()` and the `believe_demo` preview flag. Safe to re-run |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
+| `limits.sql` | How long anything people type can be (names 48, subjects 80, areas 120, notes 1,000, …) and that colours are real colours; sign-up trims a long name instead of failing. Safe to re-run |
 | `sessions_guard.sql` | What the database won't take in `sessions`: future days, over 20 h in a day, over 60 sessions an hour. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |
