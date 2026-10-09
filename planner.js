@@ -181,6 +181,15 @@ function tdRow(x) {
   </div>`;
 }
 
+/* The planner's four boxes. Writing one leaves it alone when nothing in it
+   changed, so the 30-second refresh doesn't rebuild the list (and lose the
+   hover or the button you were about to press) for nothing. */
+const TDV = {};
+["left", "plan", "stats", "cols"].forEach(k => Object.defineProperty(TDV, k, { set(html) {
+  const el = $("td-" + k);
+  if (el && el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+} }));
+
 function plannerPaint() {
   const p = $("p-cal");
   if (!p || !p.classList.contains("on") || !UID) return;
@@ -198,11 +207,11 @@ function plannerPaint() {
   $("td-form").hidden = past || TD.missing;
 
   if (TD.missing) {
-    $("td-stats").innerHTML = "";
-    $("td-cols").innerHTML = `<div class="empty">The planner isn't switched on yet. Whoever runs Study Track needs to run <b>planner.sql</b> in Supabase once.</div>`;
+    TDV.stats = "";
+    TDV.cols = `<div class="empty">The planner isn't switched on yet. Whoever runs Study Track needs to run <b>planner.sql</b> in Supabase once.</div>`;
     return;
   }
-  if (!TD.loaded) { $("td-cols").innerHTML = `<div class="empty">Loading your list…</div>`; return; }
+  if (!TD.loaded) { TDV.cols = `<div class="empty">Loading your list…</div>`; return; }
 
   const items = TD.list.filter(x => x.day === day)
     .sort((a, b) => (a.start_time || "99").localeCompare(b.start_time || "99") || a.position - b.position || String(a.created_at).localeCompare(String(b.created_at)));
@@ -214,7 +223,7 @@ function plannerPaint() {
   let leftHide = null;
   try { leftHide = localStorage.getItem("studytrack-todo-leave-" + UID); } catch (e) { /* private window */ }
   const left = day === today && leftHide !== today ? TD.list.filter(x => x.day < today && !x.done) : [];
-  $("td-left").innerHTML = left.length ? `<div class="td-leftbar">
+  TDV.left = left.length ? `<div class="td-leftbar">
       <div><b>${left.length} to-do${left.length === 1 ? "" : "s"} from earlier ${left.length === 1 ? "wasn't" : "weren't"} ticked off.</b>
         <span>${left.slice(0, 3).map(x => esc(x.title)).join(" · ")}${left.length > 3 ? " …" : ""}</span></div>
       <button class="btn sm" type="button" data-tdcarry="1">Bring to today</button>
@@ -228,7 +237,7 @@ function plannerPaint() {
     const listed = items.filter(x => x.subject_id === sj.id).reduce((n, x) => n + tdLen(x), 0);
     return { sj, planned, gap: Math.round((planned - listed) / 5) * 5 };
   }).filter(r => r.planned > 0);
-  $("td-plan").innerHTML = fromPlan.length ? `<div class="td-plan">
+  TDV.plan = fromPlan.length ? `<div class="td-plan">
       <span class="td-plan-k">From your plan</span>
       ${fromPlan.map(r => r.gap >= 15
         ? `<button type="button" class="td-pchip" style="--c:${esc(r.sj.colour || "#7B8D98")}" data-tdfromplan="${esc(r.sj.id)}" data-min="${r.gap}"
@@ -243,7 +252,7 @@ function plannerPaint() {
   const goal = goalFor(UID, day);
   const planned = typeof plnPlanDay === "function" ? plnPlanDay(day) : 0;
   const topDone = top.filter(x => x.done).length;
-  $("td-stats").innerHTML = items.length ? `<div class="td-stats">
+  TDV.stats = items.length ? `<div class="td-stats">
       <div class="td-prog"><b>${done}<small> / ${items.length} done</small></b><i class="td-bar"><i style="width:${(done / items.length * 100).toFixed(1)}%"></i></i></div>
       <div class="td-stat"><span>Top 3</span><b>${top.length ? `${topDone}/${top.length}` : "—"}</b></div>
       <div class="td-stat"><span>Time planned</span><b>${hm(planMins / 60)}</b><small>${goal ? `of a ${f1(goal)} h goal` : "no goal set"}${planMins ? ` · ${hm(schedMins / 60)} in the schedule` : ""}${planned ? ` · ${f1(planned)} h on the chart` : ""}</small></div>
@@ -270,7 +279,7 @@ function plannerPaint() {
 
   const slots = past ? "" : Array.from({ length: Math.max(0, 3 - top.length) }, (_, i) =>
     `<button type="button" class="td-slot" data-tdslot="1">${top.length + i + 1}. ${i === 0 && !top.length ? "What would make today a win? Star it." : "Star another"}</button>`).join("");
-  $("td-cols").innerHTML = `
+  TDV.cols = `
     <section class="td-sec td-top3"><h3>Top 3</h3>${top.map(x => tdRow(x)).join("")}${slots}</section>
     <section class="td-sec td-sched"><h3>Schedule</h3>${blocks.length ? blocks.map(b => b.html).join("")
       : `<div class="td-none">${past ? "Nothing was blocked out." : "Give a to-do a start time and it lands here, in order."}</div>`}</section>
