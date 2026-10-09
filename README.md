@@ -480,6 +480,32 @@ out of the catalogue rather than typed in a second place, so it cannot drift fro
 timetable. Either card disappears once its day has passed, and once both have gone the
 space says the HSC is underway.
 
+### Start-up never waits forever
+A request that stalls without failing (school wifi does this) used to leave the loading
+spinner up for good. Every start-up wait now has a ceiling (`withTimeout` in `app.js`):
+reading the saved sign-in gets 15 s, loading your data gets 15 s, then 30, 45 and 60 s on
+later tries so a genuinely slow line still gets in. Running out of time shows the existing
+"Could not load your data, trying again" screen with **Try now**, and it retries by itself.
+If the saved sign-in can't be read (usually another Study Track tab holding it), the screen
+says to close other tabs.
+
+### Problem reports (`diag.js`, `diag.sql`)
+When the app goes wrong on someone's machine, the browser sends one small row to
+`client_diag`: a slow start (over 10 s), a stalled or failed start-up, a freeze of 2 s or
+more (with the script responsible, in Chrome), JavaScript memory over 1 GB, or the first
+uncaught error. A normal visit sends nothing. Each report is a few hundred bytes of
+timings and counts (load time, memory, page size, people on the clock, browser, network,
+error text); no names, notes, subjects or to-dos.
+
+It's capped so it can't crowd the database or the plan: one report per browser per half
+hour; in the database at most 5 an hour per person and 300 an hour in all, never more than
+5,000 rows (each under 4 KB), and anything older than 14 days is deleted as new ones
+arrive. Nobody can read it from the app. Read it in the SQL editor:
+
+```sql
+select at, kind, data->>'detail' as detail, data from public.client_diag order by at desc limit 50;
+```
+
 ### Timers that look after themselves
 A timer left running overnight is the commonest way this app produces a wrong number, so
 one that has been going **six hours** pauses itself and clamps to that figure — past any
@@ -688,6 +714,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `believe.js`, `believe.css`, `believe.webp` | Exam days: the Believe band and wishing people luck |
 | `believe.sql` | `exam_wishes`, `wish_luck()`, `exam_wishes_on()` and the `believe_demo` preview flag. Safe to re-run |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
+| `diag.js`, `diag.sql` | Problem reports from browsers (slow start, freezes, memory, errors), capped and kept for 14 days |
 | `sessions_guard.sql` | What the database won't take in `sessions`: future days, over 20 h in a day, over 60 sessions an hour. Safe to re-run |
 | `perf.sql` | Row level policies that check who you are once per query, the shared `stats_cache`, and indexes. Safe to re-run |
 | `stats.sql` | The four read-only functions behind them (`crew_clock`, `crew_subject_hours`, `kudos_board`, `reaction_board`, `badge_stats`). Safe to re-run |

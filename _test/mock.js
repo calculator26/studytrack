@@ -201,7 +201,8 @@
             mode: null, note: null, created_at: (t.getTime() > Date.now() ? new Date(Date.now() - 36e5) : t).toISOString() });
         }
       }
-      if (i < 30) T.live_timers.push({ user_id: id, label: sj[i % 3].name, subject_id: null, area_id: null,
+      /* ?live=N: how many people are on the clock (30 unless asked) */
+      if (i < (Number((/live=(\d+)/.exec(location.search) || [])[1]) || 30)) T.live_timers.push({ user_id: id, label: sj[i % 3].name, subject_id: null, area_id: null,
         started_at: new Date(Date.now() - (5 + i * 3) * 60000).toISOString(), acc_ms: 0, running: i % 4 !== 0,
         updated_at: new Date().toISOString() });
     }
@@ -321,7 +322,12 @@
             T[table] = T[table].filter(r => !g2.includes(r)); return Promise.resolve({ data: null, error: null }); };
           return q; };
         return p; },
-      then(res) { return Promise.resolve({ data: apply(), error: null }).then(res); }
+      /* ?hang=1: the first read of sessions never comes back, the way a
+         request can stall on school wifi, so start-up has to give up on it */
+      then(res) {
+        if (table === "sessions" && /hang=1/.test(location.search) && !window.__hung) { window.__hung = true; return new Promise(() => {}); }
+        return Promise.resolve({ data: apply(), error: null }).then(res);
+      }
     };
     function apply() {
       let out = (T[table] || []).filter(r => filters.every(([c, v, op]) =>
@@ -524,6 +530,9 @@
             if (args.p_on !== false) T.exam_wishes.push({ user_id: ME, sitting: args.p_sitting, at: 999 });
             return Promise.resolve({ data: { ok: true, n: T.exam_wishes.filter(w => w.sitting === args.p_sitting).length }, error: null });
           }
+          /* diag_report: kept so a test can see what would have been sent */
+          if (name === "diag_report") { (window.__diag = window.__diag || []).push(args.p);
+            return Promise.resolve({ data: { ok: true }, error: null }); }
           if (name === "set_plan" || name === "set_plans") {
             const rows = name === "set_plan"
               ? [{ day: args.p_day, subject_id: args.p_subject, hours: Number(args.p_hours) }]

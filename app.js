@@ -785,6 +785,31 @@ $("signout").addEventListener("click", async () => { await sb.auth.signOut(); lo
 function show(which) {
   ["boot","auth","onb","app"].forEach(id => $(id).classList.toggle("hide", id !== which));
 }
+/* ---------------------------------------------------------------------------
+   Nothing at start-up may wait forever.
+   A request that stalls without failing (school wifi does this) used to leave
+   the spinner up for good, because loadFailed only ever heard about requests
+   that came back with an error. Each wait now has a ceiling, and running out
+   of patience is treated as a failure: the "trying again" screen, the backoff
+   and the Try now button all take it from there. The stalled request is left
+   to finish or not; nothing waits on it any more.
+   --------------------------------------------------------------------------- */
+const BOOT_PATIENCE_MS = 15000;
+function withTimeout(promise, ms, why) {
+  let t;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(t)),
+    new Promise((_, no) => { t = setTimeout(() => no(Object.assign(new Error(why), { timedOut: true })), ms); })
+  ]);
+}
+/* Reading the saved sign-in can wait on another Study Track tab holding the
+   same lock. Say so, rather than spin. */
+const SESSION_STUCK = "Couldn't read your sign-in from this browser. If Study Track is open in other tabs, close them and press Try now.";
+async function readSession() {
+  const { data } = await withTimeout(sb.auth.getSession(), BOOT_PATIENCE_MS, SESSION_STUCK);
+  return data;
+}
+
 (async function boot() {
   if (!sb) {
     show("auth");
@@ -795,12 +820,15 @@ function show(which) {
     return;
   }
   paintAuthMode();
-  const { data } = await sb.auth.getSession();
+  let data = null;
+  try { data = await readSession(); }
+  catch (err) { if (typeof diagReport === "function") diagReport("boot-session", err.message); loadFailed(err); }
 
   /* A reset link hands back a perfectly good session. Entering it would drop
      them into the app with the password they could not remember still set,
      and the reason they came would quietly not happen. */
   if (ARRIVED_TO_RESET) { enterRecovery(); return; }
+  if (!data) data = { session: undefined };
 
   await enterSession(data.session);
 
@@ -846,6 +874,7 @@ function show(which) {
 /* One way in, whoever calls it, and safe to call twice for the same session. */
 let entering = null;
 async function enterSession(session) {
+  if (session === undefined) return;          /* not known yet: readSession timed out, the retry will ask again */
   if (!session) { UID = null; ME = null; show("auth"); return; }
   if (entering === session.user.id) return;
   entering = session.user.id;
@@ -877,7 +906,8 @@ async function onSession(session) {
   UID = session.user.id;
   show("boot");
   try {
-    await loadAll();
+    /* a slow line that really needs longer gets it: 15 s, then 30, 45, 60 */
+    await withTimeout(loadAll(), BOOT_PATIENCE_MS * Math.min(4, 1 + loadRetry), "Loading your data took too long. Trying again.");
     ME = DB.profiles.find(p => p.id === UID) || await ensureProfile(session);
     if (!ME) {
       /* Also not a reason to show the password box. Whatever is wrong with the
@@ -904,6 +934,7 @@ async function onSession(session) {
        that has not re-run schema.sql simply has no console. */
     if (typeof adminBoot === "function") adminBoot();
     loadSucceeded();
+    if (typeof diagBootDone === "function") diagBootDone();
     /* One line in the record saying you were here. Promise.resolve because
        what rpc() hands back only has then() on it — .catch would throw, which
        is the mistake that once threw everybody back to the login screen. */
@@ -912,6 +943,7 @@ async function onSession(session) {
     } catch (e) { /* a project without the record: nothing to do */ }
   } catch (err) {
     console.error(err);
+    if (typeof diagReport === "function") diagReport(err && err.timedOut ? "boot-timeout" : "boot-error", err && err.message);
     /* Being unable to read is not being signed out, and it must never look
        like it: dropping somebody on the login screen makes them retype a
        password that was never the problem, and a password cannot fix a
@@ -960,7 +992,9 @@ function loadFailed(err) {
 async function retryLoadNow() {
   if (loadRetryHandle) { clearTimeout(loadRetryHandle); loadRetryHandle = null; }
   if (!sb) return;
-  const { data } = await sb.auth.getSession();
+  let data;
+  try { data = await readSession(); }
+  catch (err) { loadFailed(err); return; }
   /* Genuinely signed out — the only route to the login screen from here. */
   if (!data || !data.session) { UID = null; ME = null; show("auth"); return; }
   const box = $("boot");
