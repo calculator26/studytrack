@@ -497,6 +497,15 @@ uncaught error. A normal visit sends nothing. Each report is a few hundred bytes
 timings and counts (load time, memory, page size, people on the clock, browser, network,
 error text); no names, notes, subjects or to-dos.
 
+Freezes name the app functions that held the page, outermost first, e.g.
+`6200 ms blocked in renderAll 6150ms > renderHome 6100ms > drawLiveHistory 6050ms`.
+`diagWatch()` puts a thin timer round the app's larger functions once it has opened
+(short helpers count inside their callers; no measurable cost). A page that freezes for
+good can't send anything, so while those functions run the outermost few are noted in
+localStorage, next to a heartbeat every 2 s. If a visit ends with a note newer than its
+last heartbeat and without the page closing normally, it died frozen, and the next visit
+sends a `hang` report naming where.
+
 It's capped so it can't crowd the database or the plan: one report per browser per half
 hour; in the database at most 5 an hour per person and 300 an hour in all, never more than
 5,000 rows (each under 4 KB), and anything older than 14 days is deleted as new ones
@@ -745,7 +754,7 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `believe.js`, `believe.css`, `believe.webp` | Exam days: the Believe band and wishing people luck |
 | `believe.sql` | `exam_wishes`, `wish_luck()`, `exam_wishes_on()` and the `believe_demo` preview flag. Safe to re-run |
 | `plan.sql` | `study_plan` and the two functions that write it. Safe to re-run |
-| `diag.js`, `diag.sql` | Problem reports from browsers (slow start, freezes, memory, errors), capped and kept for 14 days |
+| `diag.js`, `diag.sql` | Problem reports from browsers (slow start, freezes and hangs with the functions responsible, memory, errors), capped and kept for 14 days |
 | `limits.sql` | How long anything people type can be (names 48, subjects 80, areas 120, notes 1,000, …) and that colours are real colours; sign-up trims a long name instead of failing. Safe to re-run |
 | `planner.js`, `planner.css` | The day planner under the lead-up chart: from your plan, Top 3, schedule, to-dos |
 | `planner.sql` | `study_todos` and `todo_save` / `todo_delete` / `todo_carry`. Safe to re-run |
