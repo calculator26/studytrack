@@ -6800,10 +6800,20 @@ async function dismissPokes() {
 
 /* The inbox loads after the first render, so whichever bar wins has to be
    settled again once it arrives rather than only at render time. */
+/* Once at a time. paintMentionBar and paintPokeBar call this, and this calls
+   paintMentionBar, so without the guard they called each other until the
+   stack ran out — and the catches below swallowed each overflow and started
+   again, which froze the page for seconds on every load (minutes on a slow
+   laptop). client_diag found it: "paintPokeBar > paintMentionBar > ...". */
+let reconcilingBars = false;
 function reconcileBars() {
-  try { paintNudgeBar(); } catch (e) { /* not wired up yet */ }
-  try { paintMentionBar(); } catch (e) { /* not wired up yet */ }
-  try { paintReactBar(); } catch (e) { /* not wired up yet */ }
+  if (reconcilingBars) return;
+  reconcilingBars = true;
+  try {
+    try { paintNudgeBar(); } catch (e) { /* not wired up yet */ }
+    try { paintMentionBar(); } catch (e) { /* not wired up yet */ }
+    try { paintReactBar(); } catch (e) { /* not wired up yet */ }
+  } finally { reconcilingBars = false; }
 }
 
 function paintPokeBar() {
