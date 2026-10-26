@@ -33,8 +33,11 @@ function blvDays(X, now) {
   const days = span ? [today, addDays(today, 1)].filter(d => d >= span[0] && d <= span[1]) : [];
   return days.length ? days : null;
 }
-/* "9:30am" today, "Tomorrow 9:30am" otherwise. */
-const blvWhen = s => (s.date === todayISO() ? "" : "Tomorrow ") + plnTime(s.start);
+/* "9:30am" today, "Tomorrow 9:30am" otherwise, and once it has started,
+   that it is on now. */
+const blvLive = (s, now) => now >= s.at && now < s.endAt;
+const blvWhen = (s, now) => blvLive(s, now || new Date()) ? `In the exam now · pens down ${plnTime(s.end)}`
+  : (s.date === todayISO() ? "" : "Tomorrow ") + plnTime(s.start);
 
 /* Every paper on a day, one entry per sitting: English Standard and Advanced
    sit the same Paper 1 at the same time, so they are one sitting. */
@@ -194,7 +197,7 @@ function blvHTML() {
           ${sitters ? blvWishBtn(cur, `Wish the other ${sitters} luck`) : ""}
         </div>
         ${BLV.open === cur.key && w.n ? blvWhoList(w) : ""}
-        ${others.length ? `<div class="blv-also"><span>Also ${soonLabel}</span>${others.map(s => `<span class="blv-chip">${esc(s.title)} · ${esc(blvWhen(s))} · ${s.n} sitting ${blvWishBtn(s)}</span>`).join("")}</div>` : ""}
+        ${others.length ? `<div class="blv-also"><span>Also ${soonLabel}</span>${others.map(s => `<span class="blv-chip">${esc(s.title)} · ${esc(blvWhen(s, now))} · ${s.n} sitting ${blvWishBtn(s)}</span>`).join("")}</div>` : ""}
       </div>
       <img class="blv-img" src="${BLV_IMG}" alt="Believe" width="2000" height="1295" decoding="async">
       <button type="button" class="blv-x" data-blvhide aria-label="Make this smaller for today" title="Make this smaller for today">&times;</button>
@@ -205,14 +208,14 @@ function blvHTML() {
      sitting, and a way to wish them luck. */
   if (!others.length) return "";
   const head = soonLabel === "today" ? "Today in the HSC" : "Coming up in the HSC";
-  if (blvHidden(today)) return `<button type="button" class="blv-slim lite" data-blvshow><b>${head}</b> · ${others.length} paper${others.length === 1 ? "" : "s"}<span>Show</span></button>`;
+  if (blvHidden(today)) return `<button type="button" class="blv-slim lite" data-blvshow><b>${head}</b> · ${others.some(s => blvLive(s, now)) ? `${esc(others.find(s => blvLive(s, now)).title)} on now` : `${others.length} paper${others.length === 1 ? "" : "s"}`}<span>Show</span></button>`;
   return `<section class="blv lite" aria-label="Today in the HSC">
     <img class="blv-mark" src="${BLV_IMG}" alt="Believe" width="2000" height="1295" decoding="async">
     <div class="blv-body">
       <div class="blv-k">${demo && days[0] !== today ? `<span class="blv-tag">Preview</span>${esc(fmtD(days[0]))}` : head}</div>
       <div class="blv-sits">${others.map(s => {
         const w = BLV.wishes.get(s.key) || {};
-        return `<div class="blv-sit" style="--c:${esc(s.colour)}"><i></i><div><b>${esc(s.title)}</b><small>${esc(blvWhen(s))} · ${s.n} of us sitting${w.n ? ` · ${w.n} wished them luck` : ""}</small></div>${blvWishBtn(s)}</div>`;
+        return `<div class="blv-sit${blvLive(s, now) ? " live" : ""}" style="--c:${esc(s.colour)}"><i></i><div><b>${esc(s.title)}</b><small>${esc(blvWhen(s, now))} · ${s.n} of us sitting${w.n ? ` · ${w.n} wished them luck` : ""}</small></div>${blvWishBtn(s)}</div>`;
       }).join("")}</div>
     </div>
     <button type="button" class="blv-x" data-blvhide aria-label="Make this smaller for today" title="Make this smaller for today">&times;</button>
