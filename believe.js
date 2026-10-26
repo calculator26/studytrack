@@ -1,10 +1,11 @@
 /* =========================================================================
    BELIEVE — exam days
    -------------------------------------------------------------------------
-   From midnight on the day of a paper, everyone sitting it gets a band at the
-   top of every tab: the paper, a live countdown, one short line and the
-   year's Believe sign. Anyone can wish the people sitting a paper good luck,
-   and the people sitting it see how many did, and who.
+   From 24 hours before a paper starts until pens down, everyone sitting it
+   gets a band at the top of every tab: the paper, a live countdown, one
+   short line and the year's Believe sign. Anyone can wish the people sitting
+   a paper good luck, and the people sitting it see how many did, and who.
+   The sign itself sits in the masthead all the time (index.html).
 
    Nothing shows before the first HSC paper. profiles.believe_demo shows the
    band early on your own next paper, so it can be looked at (believe.sql).
@@ -18,18 +19,22 @@ function blvHscSpan() {
   const days = [...plnHscDays().keys()];
   return days.length ? [days[0], days[days.length - 1]] : null;
 }
-/* The day the band is about: today, or with the preview on, the day of your
-   next paper. Null when there is nothing to show. */
-function blvDay(X, now) {
+/* The band comes up this long before a paper starts. */
+const BLV_LEAD = 24 * 36e5;
+/* The days a paper in the band can be on: today and tomorrow, or with the
+   preview on, the day of your next paper. Null when there is nothing to show. */
+function blvDays(X, now) {
   const today = todayISO();
   if (blvDemo()) {
     const nx = X.list.find(e => e.endAt > now);
-    return nx ? nx.date : today;
+    return [nx ? nx.date : today];
   }
   const span = blvHscSpan();
-  if (!span || today < span[0] || today > span[1]) return null;
-  return today;
+  const days = span ? [today, addDays(today, 1)].filter(d => d >= span[0] && d <= span[1]) : [];
+  return days.length ? days : null;
 }
+/* "9:30am" today, "Tomorrow 9:30am" otherwise. */
+const blvWhen = s => (s.date === todayISO() ? "" : "Tomorrow ") + plnTime(s.start);
 
 /* Every paper on a day, one entry per sitting: English Standard and Advanced
    sit the same Paper 1 at the same time, so they are one sitting. */
@@ -73,12 +78,13 @@ function blvLine(s, state, left) {
 }
 
 /* ---- wishes ----------------------------------------------------------- */
-async function blvLoad(day, force) {
-  if (!day || typeof sb === "undefined") return;
-  if (!force && BLV.loadedKey === day && Date.now() - BLV.at < 45000) return;
-  BLV.at = Date.now(); BLV.loadedKey = day;
+async function blvLoad(days, force) {
+  if (!days || !days.length || typeof sb === "undefined") return;
+  const key = days.join(",");
+  if (!force && BLV.loadedKey === key && Date.now() - BLV.at < 45000) return;
+  BLV.at = Date.now(); BLV.loadedKey = key;
   try {
-    const { data, error } = await sb.rpc("exam_wishes_on", { p_dates: [day] });
+    const { data, error } = await sb.rpc("exam_wishes_on", { p_dates: days });
     if (error) return;
     BLV.wishes = new Map(Object.entries(data || {}));
     believeRender(true);
@@ -137,72 +143,76 @@ function believeRender(quiet) {
   if (!html) { if (!box.hidden) { box.hidden = true; box.innerHTML = ""; box.dataset.sig = ""; } return; }
   if (box.dataset.sig !== html) { box.innerHTML = html; box.dataset.sig = html; }
   box.hidden = false;
-  if (!quiet) blvLoad(box.dataset.day);
+  if (!quiet) blvLoad(box.dataset.days.split(","));
 }
 
 function blvHTML() {
   const now = new Date(), X = plnExams();
-  const day = blvDay(X, now);
+  const days = blvDays(X, now);
   const box = $("believe");
-  if (!day) return "";
-  box.dataset.day = day;
+  if (!days) return "";
+  const today = todayISO();
+  /* "smaller for today" lasts until midnight, whichever paper it was about */
+  box.dataset.day = today;
+  box.dataset.days = days.join(",");
   const demo = blvDemo();
-  const all = blvSittings(day);
-  const mineKeys = new Set(X.list.filter(e => e.date === day && e.official).map(e => `${e.date}|${e.start}|${e.paper}`));
+  /* A paper is in the band from 24 hours before it starts until pens down;
+     the preview shows the whole day of your next one. */
+  const all = days.flatMap(blvSittings).filter(s => s.endAt > now && (demo || s.at - now <= BLV_LEAD));
+  const mineKeys = new Set(X.list.filter(e => days.includes(e.date) && e.official).map(e => `${e.date}|${e.start}|${e.paper}`));
   const mine = all.filter(s => mineKeys.has(s.key));
-  const others = all.filter(s => !mineKeys.has(s.key) && s.n > 0 && s.endAt > now);
+  const others = all.filter(s => !mineKeys.has(s.key) && s.n > 0);
+  const soonLabel = others.every(s => s.date === today) ? "today" : "coming up";
   const left = X.list.filter(e => e.endAt > now).length;
 
-  /* Once your last paper of the day is over the band goes away, and comes
-     back at midnight on the morning of your next one. */
-  if (mine.length && mine.every(s => s.endAt <= now)) return "";
   if (mine.length) {
-    const cur = mine.find(s => s.endAt > now) || mine[mine.length - 1];
-    const state = cur.endAt <= now ? "done" : now >= cur.at ? "live" : "pre";
+    const cur = mine[0];
+    const state = now >= cur.at ? "live" : "pre";
     const u = plnUntil(cur, now, true);
     /* the band always goes to the minute: "4d 21h 07m", "2h 19m" */
     if (state === "pre") {
       const mins = Math.max(0, Math.floor((cur.at - now) / 6e4)), d = Math.floor(mins / 1440), h = Math.floor(mins / 60) % 24, m = mins % 60;
       u.big = d ? `${d}d ${h}h ${pad(m)}m` : h ? `${h}h ${pad(m)}m` : `${m}m`;
     }
-    if (blvHidden(day)) {
+    if (blvHidden(today)) {
       return `<button type="button" class="blv-slim" data-blvshow>${state === "pre" ? `<b>Believe</b> · ${esc(cur.title)} in ${esc(u.big)}` : state === "live" ? `<b>Believe</b> · in the exam now` : `<b>${esc(cur.title)}</b> · done`}<span>Show</span></button>`;
     }
     const w = BLV.wishes.get(cur.key) || { n: 0, who: [], mine: false };
-    const kicker = demo && day !== todayISO()
-      ? `<span class="blv-tag">Preview, only you can see this</span>${esc(fmtD(day))} · ${esc(plnTime(cur.start))}`
-      : state === "pre" ? `Today · ${esc(plnTime(cur.start))}` : state === "live" ? "Right now" : "Today";
-    const big = state === "pre" ? `in ${plnBig(u)}` : state === "live" ? "In the exam" : "Done.";
+    const kicker = demo && cur.date !== today
+      ? `<span class="blv-tag">Preview, only you can see this</span>${esc(fmtD(cur.date))} · ${esc(plnTime(cur.start))}`
+      : state === "pre" ? `${cur.date === today ? "Today" : "Tomorrow"} · ${esc(plnTime(cur.start))}` : "Right now";
+    const big = state === "pre" ? `in ${plnBig(u)}` : "In the exam";
     const sitters = Math.max(0, cur.n - 1);
     return `<section class="blv blv-${state}" style="--c:${esc(cur.colour || "#4652A0")}" aria-label="Exam day">
       <div class="blv-body">
         <div class="blv-k">${kicker}</div>
         <div class="blv-title">${esc(cur.title)}</div>
         <div class="blv-big">${big}</div>
-        <div class="blv-msg">${esc(blvLine(cur, state, state === "done" ? left : left - 1))}</div>
+        <div class="blv-msg">${esc(blvLine(cur, state, left - 1))}</div>
         <div class="blv-row">
           ${w.n ? `<button type="button" class="blv-pill" data-blvopen="${esc(cur.key)}">${blvWho(w, w.n)}</button>` : ""}
-          ${state !== "done" && sitters ? blvWishBtn(cur, `Wish the other ${sitters} luck`) : ""}
+          ${sitters ? blvWishBtn(cur, `Wish the other ${sitters} luck`) : ""}
         </div>
         ${BLV.open === cur.key && w.n ? blvWhoList(w) : ""}
-        ${others.length ? `<div class="blv-also"><span>Also today</span>${others.map(s => `<span class="blv-chip">${esc(s.title)} · ${esc(plnTime(s.start))} · ${s.n} sitting ${blvWishBtn(s)}</span>`).join("")}</div>` : ""}
+        ${others.length ? `<div class="blv-also"><span>Also ${soonLabel}</span>${others.map(s => `<span class="blv-chip">${esc(s.title)} · ${esc(blvWhen(s))} · ${s.n} sitting ${blvWishBtn(s)}</span>`).join("")}</div>` : ""}
       </div>
       <img class="blv-img" src="${BLV_IMG}" alt="Believe" width="2000" height="1295" decoding="async">
       <button type="button" class="blv-x" data-blvhide aria-label="Make this smaller for today" title="Make this smaller for today">&times;</button>
     </section>`;
   }
 
-  /* Nothing of yours today: the papers the year group is sitting, and a way
-     to wish them luck. */
+  /* Nothing of yours in the next 24 hours: the papers the year group is
+     sitting, and a way to wish them luck. */
   if (!others.length) return "";
-  if (blvHidden(day)) return `<button type="button" class="blv-slim lite" data-blvshow><b>Today in the HSC</b> · ${others.length} paper${others.length === 1 ? "" : "s"}<span>Show</span></button>`;
+  const head = soonLabel === "today" ? "Today in the HSC" : "Coming up in the HSC";
+  if (blvHidden(today)) return `<button type="button" class="blv-slim lite" data-blvshow><b>${head}</b> · ${others.length} paper${others.length === 1 ? "" : "s"}<span>Show</span></button>`;
   return `<section class="blv lite" aria-label="Today in the HSC">
     <img class="blv-mark" src="${BLV_IMG}" alt="Believe" width="2000" height="1295" decoding="async">
     <div class="blv-body">
-      <div class="blv-k">${demo && day !== todayISO() ? `<span class="blv-tag">Preview</span>${esc(fmtD(day))}` : "Today in the HSC"}</div>
+      <div class="blv-k">${demo && days[0] !== today ? `<span class="blv-tag">Preview</span>${esc(fmtD(days[0]))}` : head}</div>
       <div class="blv-sits">${others.map(s => {
         const w = BLV.wishes.get(s.key) || {};
-        return `<div class="blv-sit" style="--c:${esc(s.colour)}"><i></i><div><b>${esc(s.title)}</b><small>${esc(plnTime(s.start))} · ${s.n} of us sitting${w.n ? ` · ${w.n} wished them luck` : ""}</small></div>${blvWishBtn(s)}</div>`;
+        return `<div class="blv-sit" style="--c:${esc(s.colour)}"><i></i><div><b>${esc(s.title)}</b><small>${esc(blvWhen(s))} · ${s.n} of us sitting${w.n ? ` · ${w.n} wished them luck` : ""}</small></div>${blvWishBtn(s)}</div>`;
       }).join("")}</div>
     </div>
     <button type="button" class="blv-x" data-blvhide aria-label="Make this smaller for today" title="Make this smaller for today">&times;</button>
@@ -223,7 +233,7 @@ document.addEventListener("click", e => {
 /* The countdown moves; the wishes come in. Only while the page is in view. */
 setInterval(() => {
   if (!UID || !ME || document.hidden) return;
-  try { believeRender(true); const box = $("believe"); if (box && !box.hidden) blvLoad(box.dataset.day); } catch (e) { /* next time */ }
+  try { believeRender(true); const box = $("believe"); if (box && !box.hidden) blvLoad(box.dataset.days.split(",")); } catch (e) { /* next time */ }
 }, 30000);
 
 if (typeof UID !== "undefined" && UID && typeof ME !== "undefined" && ME) believeRender();
