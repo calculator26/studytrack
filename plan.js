@@ -692,6 +692,15 @@ function plnLegend() {
   </div>`;
 }
 
+/* When a session happened: its recorded times (the timer's stretches, or a
+   hand-logged From and To), else the old guess of "saved, minus its length". */
+function plnSpan(x) {
+  const runs = Array.isArray(x.runs) && x.runs.length ? x.runs : null;
+  if (runs) return [new Date(runs.reduce((m, r) => r[0] < m ? r[0] : m, runs[0][0])),
+                    new Date(runs.reduce((m, r) => r[1] > m ? r[1] : m, runs[0][1]))];
+  const end = x.created_at ? new Date(x.created_at) : null;
+  return [end ? new Date(end.getTime() - x.minutes * 60000) : null, end];
+}
 function plnCellTip(day, sid) {
   const s = subjById(sid) || { name: "No subject", colour: "#7B8D98" };
   const { lists, cells } = plnStudied();
@@ -703,8 +712,7 @@ function plnCellTip(day, sid) {
   const ss = (lists.get(k) || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   ss.forEach(x => {
     const ar = x.area_id && areaById(x.area_id);
-    const end = x.created_at ? new Date(x.created_at) : null;
-    const st = end ? new Date(end.getTime() - x.minutes * 60000) : null;
+    const [st, end] = plnSpan(x);
     t += `${st && x.day === isoOf(end) ? esc(clockOf(st)) + " · " : ""}${esc(ar ? ar.name : s.name)} · ${hm(x.minutes / 60)}<br>`;
   });
   if (m && !ss.length) t += `${hm(m / 60)} running now<br>`;
@@ -726,7 +734,7 @@ function plnDetailHTML(day, sid) {
       <button class="x" data-gxclose aria-label="Close">&times;</button></div>
     ${ss.length ? `<div class="gxd-list">${ss.map(x => {
       const ar = x.area_id && areaById(x.area_id);
-      const end = x.created_at ? new Date(x.created_at) : null, st = end ? new Date(end.getTime() - x.minutes * 60000) : null;
+      const [st, end] = plnSpan(x);
       return `<div class="gxd-row"><span>${st && x.day === isoOf(end) ? esc(clockOf(st)) + "–" + esc(clockOf(end)) : "time not recorded"}</span>
         <b>${esc(ar ? ar.name : "Whole subject")}</b><span>${hm(x.minutes / 60)}</span>${x.note ? `<small>${esc(x.note)}</small>` : ""}</div>`;
     }).join("")}</div>` : ""}

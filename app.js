@@ -2526,7 +2526,8 @@ $("tm-stop").addEventListener("click", () => {
   const mins = Math.max(1, Math.round(elapsedMs() / 60000));
   $("ms-subj").innerHTML = subjectOptionsHTML();
   setPair("ms-subj", "ms-area", localTimer.subject_id, localTimer.area_id);
-  $("ms-min").value = mins;
+  /* the timer is the record: less than it ran, never more (sessions_cap.sql) */
+  $("ms-min").value = mins; $("ms-min").max = mins;
   $("ms-note").value = "";
   const parts = splitByDay(timerRunsNow(localTimer), mins, localTimer.day || todayISO());
   $("ms-sub").textContent = parts.length > 1
@@ -2550,6 +2551,14 @@ $("ms-save").addEventListener("click", async () => {
   let runs = timerRunsNow(localTimer);
   /* a stretch shorter than the 30 s timerRunsNow ignores: it ended now */
   if (!runs.length) runs = [[new Date(Date.now() - elapsedMs()).toISOString(), new Date().toISOString()]];
+  const ran = Math.max(1, Math.round(runsMs(runs) / 6e4));
+  if (+$("ms-min").value > ran) {
+    $("ms-min").value = ran;
+    savingSession = false; $("ms-save").disabled = false;
+    logRuleWarn(`The timer ran for ${ran} min, so that's the most this session can be. ` +
+      "Studied before you started it? Log that part with From and To.");
+    return;
+  }
   try { saved = await addSession(day, t, +$("ms-min").value, $("ms-note").value.trim(), runs, true); }
   finally { savingSession = false; $("ms-save").disabled = false; }
 
@@ -4022,6 +4031,8 @@ $("e-save").addEventListener("click", async () => {
     const broke = logRuleBreak(day, minutes, before) ||
       (grows && !runs && "This session has no start and end time, so it can only be shortened or re-noted. " +
         "Delete it and log it again with From and To.") ||
+      (grows && runs && runs.length > 1 && minutes > Math.round(runsMs(runs) / 6e4) + 2 &&
+        `The timer ran for ${Math.round(runsMs(runs) / 6e4)} min, so that's the most this session can be.`) ||
       (grows && runs && overlapBreak(runs, id, true)) ||
       ((grows || !before || before.subject_id !== t.subject_id) && runs && examOverBreak(t.subject_id, runs));
     if (broke) { logRuleWarn(broke); return; }
