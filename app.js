@@ -2551,6 +2551,19 @@ $("ms-save").addEventListener("click", async () => {
   let runs = timerRunsNow(localTimer);
   /* a stretch shorter than the 30 s timerRunsNow ignores: it ended now */
   if (!runs.length) runs = [[new Date(Date.now() - elapsedMs()).toISOString(), new Date().toISOString()]];
+  /* a timer left going through one of your exams: the exam comes out */
+  const clash = examClashes(t.subject_id, runs);
+  if (clash.length) {
+    runs = cutExams(runs, clash);
+    if (!runs.length) {
+      savingSession = false; $("ms-save").disabled = false;
+      logRuleWarn(`This timer only ran while you were in your ${clash[0].subject} exam, so there's nothing to log. Discard it.`);
+      return;
+    }
+    const left = Math.max(1, Math.round(runsMs(runs) / 6e4));
+    if (+$("ms-min").value > left) $("ms-min").value = left;
+    toast(`Took out the time you were in your ${clash.map(e => e.subject).join(" and ")} exam`, 5000);
+  }
   const ran = Math.max(1, Math.round(runsMs(runs) / 6e4));
   if (+$("ms-min").value > ran) {
     $("ms-min").value = ran;
@@ -2656,6 +2669,32 @@ function overlapBreak(runs, exceptId, timerToo) {
   return null;
 }
 
+/* Your own papers a session's times run into, other than the ones for its own
+   course: nobody studies Geography while sitting Health and Movement Science.
+   exam_clash.sql refuses the same. */
+function examClashes(subjectId, runs) {
+  if (!runs || !runs.length || typeof plnExams !== "function") return [];
+  const sj = subjectId && subjById(subjectId), c = sj && catFor(sj.name);
+  return plnExams().list.filter(e => e.official && (!c || e.course !== c.name) &&
+    runs.some(r => Math.min(new Date(r[1]), e.endAt) - Math.max(new Date(r[0]), e.at) > 60000));
+}
+function examClashBreak(subjectId, runs) {
+  const e = examClashes(subjectId, runs)[0];
+  return e ? `That runs into your ${e.subject} exam (${clockOf(e.at, true)} to ${clockOf(e.endAt, true)}, ${fmtD(e.date)}). ` +
+    `Take the exam out of it, or log it under ${e.subject}.` : null;
+}
+/* runs with the exam times taken out */
+function cutExams(runs, exams) {
+  return exams.reduce((rs, e) => rs.flatMap(r => {
+    const a = new Date(r[0]), b = new Date(r[1]);
+    if (b <= e.at || a >= e.endAt) return [r];
+    const out = [];
+    if (a < e.at) out.push([r[0], e.at.toISOString()]);
+    if (b > e.endAt) out.push([e.endAt.toISOString(), r[1]]);
+    return out;
+  }), runs).filter(r => new Date(r[1]) - new Date(r[0]) >= 1000);
+}
+
 /* Answers whether the session actually reached the database. Callers that are
    about to throw away the timer it came from have to know: binning a running
    timer on the strength of a save that never happened loses the hours for
@@ -2672,7 +2711,8 @@ async function addSession(day, target, minutes, note, runs, fromTimer) {
   const broke = (minutes > LOG_MAX_SESSION && logRuleBreak(day, minutes)) ||
     parts.map(p => logRuleBreak(p.day, p.minutes)).find(Boolean) ||
     parts.map(p => p.runs && overlapBreak(p.runs, null, !fromTimer)).find(Boolean) ||
-    (runs && runs.length && examOverBreak(target.subject_id, runs));
+    (runs && runs.length && examOverBreak(target.subject_id, runs)) ||
+    examClashBreak(target.subject_id, runs);
   if (broke) { logRuleWarn(broke); return false; }
   const rows = parts.map(p => {
     const row = { user_id: UID, subject_id: target.subject_id, area_id: target.area_id,
@@ -4034,7 +4074,8 @@ $("e-save").addEventListener("click", async () => {
       (grows && runs && runs.length > 1 && minutes > Math.round(runsMs(runs) / 6e4) + 2 &&
         `The timer ran for ${Math.round(runsMs(runs) / 6e4)} min, so that's the most this session can be.`) ||
       (grows && runs && overlapBreak(runs, id, true)) ||
-      ((grows || !before || before.subject_id !== t.subject_id) && runs && examOverBreak(t.subject_id, runs));
+      ((grows || !before || before.subject_id !== t.subject_id) && runs && examOverBreak(t.subject_id, runs)) ||
+      ((grows || !before || before.subject_id !== t.subject_id) && runs && examClashBreak(t.subject_id, runs));
     if (broke) { logRuleWarn(broke); return; }
   }
   if (owner && owner !== UID && typeof admLog === "function") {
