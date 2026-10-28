@@ -362,7 +362,8 @@ function liveMsFor(uid) {
   if (!t) return 0;
   const now = Date.now();
   if (now - new Date(t.updated_at || 0).getTime() >= (t.running ? LIVE_FRESH_MS : PAUSED_FRESH_MS)) return 0;
-  return todayShare(t, cap(t.acc_ms + (t.running ? now - new Date(t.started_at).getTime() : 0)));
+  const st = new Date(t.started_at).getTime();
+  return todayShare(t, cap(t.acc_ms + (t.running ? Math.min(now, nightCutoff(st)) - st : 0)));
 }
 /* How much of a timer's total ran after midnight, worked out from its
    stretches and scaled to the total so the six hour cap still holds. */
@@ -2059,9 +2060,28 @@ function goToTimer() {
    --------------------------------------------------------------------------- */
 const TIMER_CAP_MS    = 6 * 60 * 60e3;   /* auto-pause a run this long */
 const PAUSED_FRESH_MS = 30 * 60e3;       /* how long a pause stays on the strip */
+/* And overnight: a stretch still going at 1am stops counting there, whatever
+   its length. Up later than that for real? Press Start again; the cut only
+   ever falls on the stretch under way, and the next one runs to the next 1am. */
+const NIGHT_HOUR = 1;
+function nightCutoff(startMs) {
+  const d = new Date(startMs);
+  d.setHours(NIGHT_HOUR, 0, 0, 0);
+  if (d.getTime() <= startMs) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
 
 function autoPauseIfStale() {
   if (!localTimer || !localTimer.running) return false;
+  const st = new Date(localTimer.started_at).getTime(), cut = nightCutoff(st);
+  if (Date.now() >= cut && localTimer.acc_ms + (cut - st) < TIMER_CAP_MS) {
+    localTimer.acc_ms += cut - st;       /* only up to 1am counted */
+    localTimer.running = false;
+    paintTimer();
+    pushTimer();
+    toast("Timer paused itself at 1am. Adjust the minutes when you save it, or press Start if you're still going.", 7000);
+    return true;
+  }
   if (elapsedMs() < TIMER_CAP_MS) return false;
   localTimer.acc_ms = TIMER_CAP_MS;      /* clamp: the rest was not studying */
   localTimer.running = false;
