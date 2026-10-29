@@ -327,18 +327,20 @@
          how PostgREST behaves — and the timer heartbeat leans on it to tell a
          row it actually touched from a row that is no longer there. */
       update(patch) {
-        const run = () => {
+        /* filters chain (.eq().eq()), and the write happens when it is
+           awaited or asked to select(), as with PostgREST */
+        const exec = () => {
           const hit = apply();
           hit.forEach(r => Object.assign(r, patch));
-          const rows = hit.map(r => Object.assign({}, r));
-          const pr = Promise.resolve({ data: null, error: null });
-          pr.select = () => Promise.resolve({ data: rows, error: null });
-          return pr;
+          return hit.map(r => Object.assign({}, r));
         };
-        const p = Promise.resolve({ data: null, error: null });
-        p.eq = (c, v) => { filters.push([c, v]); return run(); };
-        p.in = (c, vals) => { filters.push([c, vals, "in"]); return run(); };
-        return p;
+        const q = {
+          eq(c, v) { filters.push([c, v]); return q; },
+          in(c, vals) { filters.push([c, vals, "in"]); return q; },
+          select() { return Promise.resolve({ data: exec(), error: null }); },
+          then(res, rej) { exec(); return Promise.resolve({ data: null, error: null }).then(res, rej); }
+        };
+        return q;
       },
       delete() { const p = Promise.resolve({ data: null, error: null });
         p.in = (c, v) => { filters.push([c, v, "in"]); const gone = apply();

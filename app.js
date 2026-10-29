@@ -2078,7 +2078,7 @@ function autoPauseIfStale() {
     localTimer.acc_ms += cut - st;       /* only up to 1am counted */
     localTimer.running = false;
     paintTimer();
-    pushTimer();
+    pushTimer("auto");
     toast("Timer paused itself at 1am. Adjust the minutes when you save it, or press Start if you're still going.", 7000);
     return true;
   }
@@ -2086,7 +2086,7 @@ function autoPauseIfStale() {
   localTimer.acc_ms = TIMER_CAP_MS;      /* clamp: the rest was not studying */
   localTimer.running = false;
   paintTimer();
-  pushTimer();
+  pushTimer("auto");
   toast("Timer paused itself at six hours. Adjust the minutes when you save it.", 6000);
   return true;
 }
@@ -2178,7 +2178,7 @@ async function pushTimer(beat) {
      authority, and creating a row again means a tab left open on a phone can
      resurrect a timer somebody has already stopped — so an older timer falls
      through to the update below, which lets it find out it is gone. */
-  if (!beat || (!timerLive && elapsedMs() <= 10 * 60000)) {
+  if (!beat || (beat === true && !timerLive && elapsedMs() <= 10 * 60000)) {
     if (!beat) timerWriteStart();
     const { error } = await sb.from("live_timers").upsert(row);
     if (!beat) timerWriteEnd();
@@ -2187,8 +2187,13 @@ async function pushTimer(beat) {
     return;
   }
 
+  /* Only onto the same run of the timer. A tab left open elsewhere still
+     holding a session that was saved here, and a new one started, used to
+     write its old timer over the new one every minute, so the board
+     flipped between the two. started_at only moves on a button press,
+     which goes through the upsert above, never through here. */
   const { data, error } = await sb.from("live_timers")
-    .update(row).eq("user_id", UID).select("user_id");
+    .update(row).eq("user_id", UID).eq("started_at", localTimer.started_at).select("user_id");
   /* An error is the network talking, not a verdict — keep the timer and try
      again on the next beat. */
   if (error || !Array.isArray(data) || data.length) return;
@@ -2199,9 +2204,19 @@ async function pushTimer(beat) {
      card cleared, the row stayed, and every button that could have removed it
      went grey. So ask whether it is really gone before believing it. */
   const { data: still, error: checkErr } = await sb.from("live_timers")
-    .select("user_id").eq("user_id", UID);
+    .select("*").eq("user_id", UID);
   if (checkErr) return;                         /* ask again on the next beat */
-  if (still && still.length) return;            /* still there — the write was refused */
+  if (still && still.length) {
+    /* a different run is on the table: that one is the timer now */
+    if (+new Date(still[0].started_at) !== +new Date(localTimer.started_at)) {
+      localTimer = still[0];
+      timerLive = true;
+      paintTimer();
+      announceTimer();
+      toast("Your timer was changed on another device, so this one now shows that.");
+    }
+    return;                                     /* same run: the write was refused */
+  }
 
   localTimer = null;
   timerLive = false;
