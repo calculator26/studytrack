@@ -2681,9 +2681,10 @@ function examOverBreak(subjectId, runs) {
    and rounding. Only sessions that know when they happened are compared; an
    old one typed in with no times has nothing to overlap. `exceptId` is the
    session being edited; `timerToo` also holds a block typed in by hand
-   against the timer that is running now. */
+   against the timer that is running now. `inFile` holds the stretches of
+   rows already taken from an import file. */
 const OVERLAP_SLACK = 60000;
-function overlapBreak(runs, exceptId, timerToo) {
+function overlapBreak(runs, exceptId, timerToo, inFile) {
   const span = r => [new Date(r[0]).getTime(), new Date(r[1]).getTime()];
   const hits = (q) => runs.some(r => {
     const [a, b] = span(r), [c, d] = span(q);
@@ -2695,6 +2696,8 @@ function overlapBreak(runs, exceptId, timerToo) {
     const q = timerRunsNow(localTimer).find(hits);
     if (q) return `Your timer was running then (${when(q)}). Two sessions can't cover the same time.`;
   }
+  const f = (inFile || []).find(hits);
+  if (f) return `That overlaps another row in this file (${when(f)}). Two sessions can't cover the same time.`;
   for (const s of DB.sessions || []) {
     if (s.user_id !== UID || s.id === exceptId || !Array.isArray(s.runs)) continue;
     const q = s.runs.find(hits);
@@ -6031,13 +6034,41 @@ $("imp-file").addEventListener("change", e => {
   r.onload = () => runImport(f.name.toLowerCase().endsWith(".csv") ? parseCSV(r.result) : parseJSON(r.result));
   r.readAsText(f);
 });
+/* A clock as minutes past midnight: "9:05", "21:05", "9:05 pm", "9:05am".
+   Timemator exports put a narrow no-break space before am/pm, which trim()
+   and \s both count as a space. */
+const clockToMins = t => {
+  const m = /^(\d{1,2}):(\d\d)\s*([ap]m)?$/i.exec(String(t || "").trim());
+  if (!m || +m[2] > 59) return null;
+  let h = +m[1];
+  if (m[3]) { if (h < 1 || h > 12) return null; h = h % 12 + (/p/i.test(m[3]) ? 12 : 0); }
+  if (h > 23) return null;
+  return hhmmMins(pad(h) + ":" + m[2]);
+};
+/* The times of an imported row. From and To on its date are read the way the
+   manual form reads them: a To earlier than From runs past midnight, and the
+   span is the minutes, whatever Minutes says. Otherwise the runs a JSON backup
+   carries are passed through. Null when there are no usable times. */
+function importTimes(day, from, to, runs, minutes) {
+  if (!/^\d{4}-\d\d-\d\d$/.test(day)) return null;
+  const st = clockToMins(from), et = clockToMins(to);
+  if (st !== null && et !== null) {
+    const m = (et - st + 1440) % 1440, [y, mo, d] = day.split("-").map(Number);
+    const a = new Date(y, mo - 1, d, 0, st);
+    if (m < 1) return null;
+    return { minutes: m, runs: [[a.toISOString(), new Date(a.getTime() + m * 60000).toISOString()]] };
+  }
+  const ok = Array.isArray(runs) && runs.length && runs.every(r => Array.isArray(r) && r.length === 2 && new Date(r[1]) - new Date(r[0]) > 0);
+  return ok ? { minutes: minutes > 0 ? minutes : Math.round(runsMs(runs) / 60000), runs } : null;
+}
 function parseJSON(text) {
   const j = JSON.parse(text);
   const out = [];
-  (j.entries || []).forEach(e => {
-    out.push({ day: (e.d || e.date || "").slice(0, 10),
-      subject: e.subject || guessSubject(e.area || e.unit || ""),
-      area: e.area || e.unit || null, minutes: Number(e.mins || e.minutes || 0),
+  (j.sessions || j.entries || []).forEach(e => {
+    const day = (e.d || e.date || "").slice(0, 10), minutes = Number(e.mins || e.minutes || 0);
+    const t = importTimes(day, e.from, e.to, e.runs, minutes);
+    out.push({ day, subject: e.subject || guessSubject(e.area || e.unit || ""),
+      area: e.area || e.unit || null, minutes: t ? t.minutes : minutes, runs: t ? t.runs : null,
       mode: e.mode || null, note: e.note || null });
   });
   const goals = j.goals || {};
@@ -6068,32 +6099,41 @@ function parseCSV(text) {
     const c = split(lines[i]);
     const day = (c[idx("date")] || "").trim().slice(0, 10);
     const minutes = Number(c[idx("minutes")] || 0);
-    if (!day || !minutes) continue;
+    const t = importTimes(day, c[idx("from")], c[idx("to")], null, minutes);
     rows.push({ day, subject: (c[idx("subject")] || "Imported").trim(),
-      area: (c[idx("area")] || "").trim() || null, minutes,
+      area: (c[idx("area")] || "").trim() || null, minutes: t ? t.minutes : minutes, runs: t ? t.runs : null,
       mode: (c[idx("mode")] || "").trim() || null, note: (c[idx("note")] || "").trim() || null });
   }
   return { rows, goals: {} };
 }
 async function runImport(parsed) {
   const rep = $("imp-report");
-  /* The logging rules apply to imports too: anything older than a week, over
+  /* The logging rules apply to imports too, except that they reach back past
+     the 7-day window (import_sessions.sql): anything before 1 Jan 2024, over
      8 hours, or past 16 hours on its day is left out, and the report says so. */
   const dayMins = {};
   (DB.sessions || []).forEach(x => { if (x.user_id === UID) dayMins[x.day] = (dayMins[x.day] || 0) + (x.minutes || 0); });
-  const t0 = todayISO(), oldest = addDays(t0, -LOG_BACK_DAYS);
-  const skipped = { old: 0, long: 0, full: 0 };
-  const rows = parsed.rows.filter(r => r.day && r.minutes > 0).filter(r => {
-    const m = Math.round(r.minutes);
-    if (r.day < oldest || r.day > addDays(t0, 1)) { skipped.old++; return false; }
-    if (m > LOG_MAX_SESSION) { skipped.long++; return false; }
-    if ((dayMins[r.day] || 0) + m > LOG_MAX_DAY) { skipped.full++; return false; }
-    dayMins[r.day] = (dayMins[r.day] || 0) + m;
-    return true;
+  const t0 = todayISO(), oldest = "2024-01-01";
+  const skipped = { notime: 0, old: 0, ahead: 0, long: 0, full: 0, clash: 0 }, taken = [], rows = [];
+  parsed.rows.forEach(r => {
+    const m = Math.round(r.minutes), parts = r.runs && m >= 1 ? splitByDay(r.runs, m, r.day) : [];
+    if (!parts.length || parts.some(p => !p.runs)) { skipped.notime++; return; }
+    const clash = parts.map(p => overlapBreak(p.runs, null, true, taken)).find(Boolean);
+    const why = parts.some(p => p.day < oldest || p.day > addDays(t0, 1)) ? "old"
+      : r.runs.some(q => new Date(q[1]) - Date.now() > 300000) ? "ahead"
+      : m > LOG_MAX_SESSION ? "long"
+      : parts.some(p => (dayMins[p.day] || 0) + p.minutes > LOG_MAX_DAY) ? "full"
+      : clash ? "clash" : null;
+    if (why) { skipped[why]++; return; }
+    parts.forEach(p => { dayMins[p.day] = (dayMins[p.day] || 0) + p.minutes; taken.push(...p.runs); });
+    rows.push(Object.assign({}, r, { parts }));
   });
-  const skipNote = skipped.old + skipped.long + skipped.full
-    ? ` Left out: ${[skipped.old && `${skipped.old} from more than ${LOG_BACK_DAYS} days ago`,
-        skipped.long && `${skipped.long} over 8 hours`, skipped.full && `${skipped.full} that would take a day past 16 hours`]
+  const skipNote = Object.values(skipped).some(Boolean)
+    ? ` Left out: ${[skipped.notime && `${skipped.notime} with no usable date, start and end time`,
+        skipped.old && `${skipped.old} from before 1 Jan 2024`,
+        skipped.ahead && `${skipped.ahead} that end in the future`,
+        skipped.long && `${skipped.long} over 8 hours`, skipped.full && `${skipped.full} that would take a day past 16 hours`,
+        skipped.clash && `${skipped.clash} overlapping another session`]
         .filter(Boolean).join(", ")}.` : "";
   if (!rows.length) { rep.innerHTML = `<div class="note bad">Nothing importable found in that file.${esc(skipNote)}</div>`; return; }
   rep.innerHTML = `<div class="note">Importing ${rows.length} sessions…</div>`;
@@ -6117,24 +6157,23 @@ async function runImport(parsed) {
         if (data) { areaMap[sid + "|" + r.area.toLowerCase()] = data.id; newAreas++; }
       }
     }
-    const payload = rows.map(r => {
+    const payload = rows.flatMap(r => {
       const sid = subMap[(r.subject || "Imported").toLowerCase()];
-      return { user_id: UID, subject_id: sid || null,
+      return r.parts.map(p => ({ user_id: UID, subject_id: sid || null,
         area_id: r.area ? (areaMap[sid + "|" + r.area.toLowerCase()] || null) : null,
-        day: r.day, minutes: Math.min(LOG_MAX_SESSION, Math.max(1, Math.round(r.minutes))),
-        mode: r.mode, note: r.note };
+        day: p.day, minutes: Math.min(LOG_MAX_SESSION, Math.max(1, Math.round(p.minutes))),
+        mode: r.mode, note: r.note, runs: p.runs }));
     });
-    /* The database refuses impossible rows (a future day, over 8 h, a day
-       over 16 h, older than a week, more than 60 sessions in an hour, and
-       since 17 Oct 2026 any session with no start and end time, which is
-       every imported one: sessions_guard.sql), so a batch can
-       fail. Stop there and say how far it got rather than claim success. */
+    /* The database refuses rows that break the logging rules (sessions_guard.sql),
+       and the rows that would are left out above. The 60-an-hour insert limit is
+       not checked up front, so a batch can still stop partway. Say how far it got
+       rather than claim success. */
     let saved = 0;
     for (let i = 0; i < payload.length; i += 50) {
-      const { error } = await sb.from("sessions").insert(payload.slice(i, i + 50));
+      const { error } = await sb.rpc("import_sessions", { rows: payload.slice(i, i + 50) });
       if (error) {
         await refresh();
-        rep.innerHTML = `<div class="note bad">Imported ${saved} of ${payload.length} sessions, then stopped: ${esc(error.message)}. The ${saved} already in are kept, so importing the same file again would double them.</div>`;
+        rep.innerHTML = `<div class="note bad">Imported ${saved} of ${payload.length} sessions, then stopped: ${esc(error.message)}. The ${saved} already in are kept, and importing the same file again skips them.</div>`;
         return;
       }
       saved += Math.min(50, payload.length - i);
@@ -6160,7 +6199,7 @@ $("exp-btn").addEventListener("click", () => {
       target_hours: a.target_hours, current_pct: a.current_pct })),
     sessions: DB.sessions.filter(s => s.user_id === UID).map(s => ({ date: s.day,
       subject: (subjById(s.subject_id) || {}).name || null, area: (areaById(s.area_id) || {}).name || null,
-      minutes: s.minutes, mode: s.mode, note: s.note })),
+      minutes: s.minutes, mode: s.mode, note: s.note, runs: s.runs || null })),
     goals: DB.goals.filter(g => g.user_id === UID).reduce((o, g) => (o[g.day] = Number(g.hours), o), {})
   };
   const b = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
