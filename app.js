@@ -2527,7 +2527,7 @@ $("tm-start").addEventListener("click", async () => {
   else {
     const t = readPair("tm-subj", "tm-area");
     if (!t.subject_id) { toast("Add a subject in Setup first"); return; }
-    const over = examOverBreak(t.subject_id, null);
+    const over = hscOverBreak(null) || examOverBreak(t.subject_id, null);
     if (over) { logRuleWarn(over.replace("Log this under", "Time this for")); return; }
     const sj = subjById(t.subject_id), ar = t.area_id ? areaById(t.area_id) : null;
     localTimer = { label: ar ? (sj ? sj.name + " · " + ar.name : ar.name) : (sj ? sj.name : "Study"),
@@ -2586,6 +2586,19 @@ $("ms-save").addEventListener("click", async () => {
   let runs = timerRunsNow(localTimer);
   /* a stretch shorter than the 30 s timerRunsNow ignores: it ended now */
   if (!runs.length) runs = [[new Date(Date.now() - elapsedMs()).toISOString(), new Date().toISOString()]];
+  /* a timer left going past your last paper: only the time before it counts */
+  const done = myHscDoneAt();
+  if (done && runs.some(r => new Date(r[1]) > done)) {
+    runs = cutExams(runs, [{ at: done, endAt: new Date(8.64e15) }]);
+    if (!runs.length) {
+      savingSession = false; $("ms-save").disabled = false;
+      logRuleWarn("This timer only ran after your last HSC exam finished, so there's nothing to log. Discard it.");
+      return;
+    }
+    const left = Math.max(1, Math.round(runsMs(runs) / 6e4));
+    if (+$("ms-min").value > left) $("ms-min").value = left;
+    toast(`Took out the time after your last exam finished (${clockOf(done, true)}, ${fmtD(isoOf(done))})`, 5000);
+  }
   /* a timer left going through one of your exams: the exam comes out */
   const clash = examClashes(t.subject_id, runs);
   if (clash.length) {
@@ -2676,6 +2689,24 @@ function examOverBreak(subjectId, runs) {
     "Log this under a subject you still have to sit.";
 }
 
+/* When your last HSC paper finishes (celebrate.js works it out from the
+   same exam list as the countdown), or null. Nothing can be logged for any
+   time after it, whatever the subject: hsc_done_lock.sql holds the database
+   to profiles.hsc_done_at, which your app keeps equal to this. */
+function myHscDoneAt() {
+  return typeof hscDoneAt === "function" ? hscDoneAt() : null;
+}
+/* Study that runs past your last paper, or null. No runs means a timer about
+   to start, now. */
+function hscOverBreak(runs) {
+  const done = myHscDoneAt();
+  if (!done) return null;
+  const end = runs && runs.length ? Math.max(...runs.map(r => new Date(r[1]).getTime())) : Date.now();
+  if (end <= done.getTime()) return null;
+  return `Your last HSC exam finished on ${fmtD(isoOf(done))} at ${clockOf(done, true)}, ` +
+    "so nothing after that can be logged. Congratulations, you're done! 🎓";
+}
+
 /* No two of your sessions can claim the same time: the same rule as
    sessions_guard.sql, with the same minute of slack at the edges for clocks
    and rounding. Only sessions that know when they happened are compared; an
@@ -2746,7 +2777,7 @@ async function addSession(day, target, minutes, note, runs, fromTimer) {
   const broke = (minutes > LOG_MAX_SESSION && logRuleBreak(day, minutes)) ||
     parts.map(p => logRuleBreak(p.day, p.minutes)).find(Boolean) ||
     parts.map(p => p.runs && overlapBreak(p.runs, null, !fromTimer)).find(Boolean) ||
-    (runs && runs.length && examOverBreak(target.subject_id, runs)) ||
+    (runs && runs.length && (hscOverBreak(runs) || examOverBreak(target.subject_id, runs))) ||
     examClashBreak(target.subject_id, runs);
   if (broke) { logRuleWarn(broke); return false; }
   const rows = parts.map(p => {
@@ -4118,6 +4149,7 @@ $("e-save").addEventListener("click", async () => {
       (grows && runs && runs.length > 1 && minutes > Math.round(runsMs(runs) / 6e4) + 2 &&
         `The timer ran for ${Math.round(runsMs(runs) / 6e4)} min, so that's the most this session can be.`) ||
       (grows && runs && overlapBreak(runs, id, true)) ||
+      (grows && runs && hscOverBreak(runs)) ||
       ((grows || !before || before.subject_id !== t.subject_id) && runs && examOverBreak(t.subject_id, runs)) ||
       ((grows || !before || before.subject_id !== t.subject_id) && runs && examClashBreak(t.subject_id, runs));
     if (broke) { logRuleWarn(broke); return; }
