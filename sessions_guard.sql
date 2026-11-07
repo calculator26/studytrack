@@ -36,6 +36,12 @@
 --  Both only bite on writes that add time or move a session, like the rest:
 --  37 older sessions already overlap one another, and trimming or re-noting
 --  them still works.
+--
+--  30 Oct 2026, a file import can go back past 7 days (import_sessions.sql):
+--    * the 7-day rule is skipped for rows that import_sessions() saves, and
+--      only for those. Every other rule still applies to them, and a day
+--      before 1 Jan 2024 is refused;
+--    * every other write from more than 7 days back is still refused.
 --  Safe to re-run.
 -- =========================================================================
 create index if not exists sessions_user_created_idx on public.sessions (user_id, created_at);
@@ -50,6 +56,7 @@ declare
   today date := (now() at time zone 'Australia/Sydney')::date;
   day_total int;
   grows boolean;
+  importing boolean;
   hit_a timestamptz;
   hit_b timestamptz;
 begin
@@ -58,16 +65,22 @@ begin
            or new.user_id is distinct from old.user_id or new.minutes > old.minutes;
   /* the database owner putting things back (SQL editor): no signed-in user */
   if auth.uid() is null then return new; end if;
+  /* import_sessions() (import_sessions.sql) sets this for its own rows */
+  importing := coalesce(current_setting('studytrack.importing', true), '') = 'on';
 
   if new.day > today + 1 then
     raise exception 'You can''t log study on a day that hasn''t happened yet' using errcode = 'check_violation';
+  end if;
+
+  if importing and grows and new.day < date '2024-01-01' then
+    raise exception 'That date is too far back' using errcode = 'check_violation';
   end if;
 
   if grows and new.minutes > 480 then
     raise exception 'One session can be 8 hours at most' using errcode = 'check_violation';
   end if;
 
-  if grows and new.day < today - 7 and not coalesce(public.is_admin(), false) then
+  if grows and new.day < today - 7 and not importing and not coalesce(public.is_admin(), false) then
     raise exception 'Study can only be logged for the last 7 days (back to %)', to_char(today - 7, 'Dy DD Mon')
       using errcode = 'check_violation';
   end if;

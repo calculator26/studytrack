@@ -713,8 +713,10 @@ activity feed.
 
 ### Importing
 The Setup tab takes the JSON backup from the solo study tracker, or a CSV with the columns
-`date, subject, area, minutes, mode, note`. Missing subjects and areas are created
-automatically. There is an export button too.
+`date, subject, area, from, to, minutes, mode, note`. From and To are required, as 9:05 or
+9:05 pm, and minutes is worked out from them, so it can be left blank. Missing subjects and
+areas are created automatically. There is an export button too.
+Imports can go back past the 7-day logging limit, to 1 January 2024; anything older is left out.
 
 ---
 
@@ -759,7 +761,8 @@ have reminders on, and the nudge itself is generated and sent without any human 
 | `limits.sql` | How long anything people type can be (names 48, subjects 80, areas 120, notes 1,000, …) and that colours are real colours; sign-up trims a long name instead of failing. Safe to re-run |
 | `planner.js`, `planner.css` | The day planner under the lead-up chart: from your plan, Top 3, schedule, to-dos |
 | `planner.sql` | `study_todos` and `todo_save` / `todo_delete` / `todo_carry`. Safe to re-run |
-| `sessions_guard.sql` | What the database won't take in `sessions`: future days, a session over 8 h, a day over 16 h, anything more than 7 days back (admins can still fix old ones), a session with no start and end time, two sessions covering the same time, over 60 sessions an hour. app.js warns about the same rules before saving. Safe to re-run |
+| `sessions_guard.sql` | What the database won't take in `sessions`: future days, a session over 8 h, a day over 16 h, anything more than 7 days back (admins can still fix old ones; file imports are exempt, see `import_sessions.sql`), a session with no start and end time, two sessions covering the same time, over 60 sessions an hour. app.js warns about the same rules before saving. Re-run after `import_sessions.sql` was added (30 Oct 2026). Safe to re-run |
+| `import_sessions.sql` | Run after sessions_guard.sql. `import_sessions()`, the function the Setup-tab import saves through, so an import can go back past 7 days (nothing before 1 Jan 2024). It runs as the member, and every other rule still applies. Safe to re-run |
 | `session_cap.sql` | Run after sessions_guard.sql. A session can't claim more minutes than its own times cover (the timer can be saved shorter, never longer). Also the one-off trim of 27 Oct 2026: padded sessions drawn on top of another were cut back, with what they were kept in `session_trims`. Safe to re-run |
 | `exam_clash.sql` | Run after exams_over.sql. `hsc_papers` (every paper's times, from catalogue.js) and the rule that a session can't cover one of your own papers unless it's for that course. The app cuts the exam out of a timer on save. Also the one-off cut of 28 Oct 2026 (4 sessions), originals in `session_exam_trims`. Change catalogue.js and this together. Safe to re-run |
 | `exams_over.sql` | No session for a course that starts after its last HSC paper has finished (times from the NESA timetable in `catalogue.js`; change both together). app.js warns first, and also when you start a timer. Safe to re-run |
